@@ -10,6 +10,9 @@ type Load =
   | { status: "ready"; text: string }
   | { status: "error"; message: string };
 
+/** Module-level so the pipeline is not rebuilt on every render. */
+const REMARK_PLUGINS = [remarkGfm];
+
 /**
  * Markdown keeps the rail's type scale — everything is `text-xs`, so structure
  * comes from weight, rules and indentation rather than from heading sizes.
@@ -105,7 +108,7 @@ export function MediaText({
   if (markdown) {
     return (
       <div className={cn("border p-2", className)}>
-        <Markdown components={MARKDOWN} remarkPlugins={[remarkGfm]}>
+        <Markdown components={MARKDOWN} remarkPlugins={REMARK_PLUGINS}>
           {load.text}
         </Markdown>
       </div>
