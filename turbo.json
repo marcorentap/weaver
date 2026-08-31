@@ -1,6 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "tui",
+  "globalEnv": ["WEAVER_STORE"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
