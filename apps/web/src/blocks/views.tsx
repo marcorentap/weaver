@@ -81,7 +81,7 @@ function FileRow({ state }: { state: FileState }) {
  * full-size preview.
  */
 function MediaRow({ state }: { state: MediaState }) {
-  const { type } = mediaInfo(state.uri);
+  const { type, mime } = mediaInfo(state.uri);
   const src = mediaSrc(state.uri);
 
   return (
@@ -110,14 +110,20 @@ function MediaRow({ state }: { state: MediaState }) {
         <audio src={src} controls className="h-8 w-72 shrink-0" />
       ) : null}
       {type === "pdf" ? (
+        // Chrome's viewer scrolls and shows its own chrome; the row wants a
+        // still first page, so the fragment strips both and clicks pass by.
         <iframe
-          src={src}
+          src={`${src}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
           title={mediaName(state.uri)}
-          className="h-48 w-40 shrink-0 border"
+          className="pointer-events-none h-48 w-40 shrink-0 overflow-hidden border"
         />
       ) : null}
       {type === "text" ? (
-        <MediaText src={src} className="h-48 w-96 shrink-0" />
+        <MediaText
+          src={src}
+          markdown={mime === "text/markdown"}
+          className="pointer-events-none h-48 w-96 shrink-0 overflow-hidden"
+        />
       ) : null}
 
       <span className="truncate">{mediaName(state.uri)}</span>
@@ -128,7 +134,7 @@ function MediaRow({ state }: { state: MediaState }) {
 
 /** Full-size presentation, one element per detected type. */
 function MediaPreview({ state }: { state: MediaState }) {
-  const { type } = mediaInfo(state.uri);
+  const { type, mime } = mediaInfo(state.uri);
   const src = mediaSrc(state.uri);
 
   if (type === "image") {
@@ -148,7 +154,13 @@ function MediaPreview({ state }: { state: MediaState }) {
     return <iframe src={src} title="pdf" className="h-[70vh] w-full" />;
   }
   if (type === "text") {
-    return <MediaText src={src} className="h-[70vh] w-full" />;
+    return (
+      <MediaText
+        src={src}
+        markdown={mime === "text/markdown"}
+        className="h-[70vh] w-full overflow-auto"
+      />
+    );
   }
   return (
     <p className="text-muted-foreground">
