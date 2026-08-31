@@ -122,7 +122,9 @@ function BlockRow({
             )}
           </button>
         ) : (
-          <span className="size-6 shrink-0" />
+          // Same box as the button, negative margin included, or childless
+          // rows sit 8px taller than the rest.
+          <span className="-my-1 size-6 shrink-0" />
         )}
         <span className="min-w-0 truncate font-medium">{row.block.label}</span>
       </span>
