@@ -110,12 +110,12 @@ function MediaRow({ state }: { state: MediaState }) {
         <audio src={src} controls className="h-8 w-72 shrink-0" />
       ) : null}
       {type === "pdf" ? (
-        // Chrome's viewer scrolls and shows its own chrome; the row wants a
-        // still first page, so the fragment strips both and clicks pass by.
+        // Unlike text, a pdf keeps its own viewer inline: paging through it in
+        // the row is the point, so the fragment only drops Chrome's chrome.
         <iframe
-          src={`${src}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+          src={`${src}#toolbar=0&navpanes=0&view=FitH`}
           title={mediaName(state.uri)}
-          className="pointer-events-none h-48 w-40 shrink-0 overflow-hidden border"
+          className="h-48 w-40 shrink-0 border"
         />
       ) : null}
       {type === "text" ? (
