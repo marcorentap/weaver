@@ -123,9 +123,13 @@ function MediaRow({ state }: { state: MediaState }) {
           className="pointer-events-none h-48 w-96 shrink-0 overflow-hidden"
         />
       ) : null}
-
-      {/* The full URI lives in the actions menu, where it is editable. */}
-      <span className="truncate">{mediaName(state.uri)}</span>
+      {type === "unknown" ? (
+        // Nothing here can render this extension. The label already names the
+        // block, so the row says why it is empty rather than repeating it.
+        <span className="truncate text-muted-foreground">
+          no inline preview for this file
+        </span>
+      ) : null}
     </span>
   );
 }
