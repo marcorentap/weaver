@@ -86,10 +86,6 @@ function MediaRow({ state }: { state: MediaState }) {
 
   return (
     <span className="flex min-w-0 items-center gap-2">
-      <span className="shrink-0 rounded border px-1 text-muted-foreground">
-        {type}
-      </span>
-
       {type === "image" ? (
         // A media block's URI is arbitrary — any host, or a local file behind
         // the media route — so next/image, which validates src against a fixed
@@ -128,8 +124,8 @@ function MediaRow({ state }: { state: MediaState }) {
         />
       ) : null}
 
+      {/* The full URI lives in the actions menu, where it is editable. */}
       <span className="truncate">{mediaName(state.uri)}</span>
-      <span className="truncate text-muted-foreground">{state.uri}</span>
     </span>
   );
 }

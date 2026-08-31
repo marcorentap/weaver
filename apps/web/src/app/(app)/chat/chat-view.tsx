@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Block, BlockId } from "@repo/core";
 import type { BlockField } from "@/blocks/views";
 import { viewFor } from "@/blocks/views";
@@ -94,13 +95,10 @@ function BlockRow({
           : "border-transparent hover:bg-muted/40",
       )}
     >
-      <span className="w-[5.5rem] shrink-0 tabular-nums text-muted-foreground">
-        {new Date(row.block.createdAt).toISOString().slice(11, 23)}
-      </span>
       <span
         // Indent eats into this column, so it is wide enough for a couple of
         // nesting levels before labels start truncating.
-        className="flex w-44 shrink-0 items-center gap-1"
+        className="flex w-52 shrink-0 items-center gap-1"
         style={{ paddingLeft: `${row.depth * INDENT_REM}rem` }}
       >
         {row.hasChildren ? (
@@ -108,19 +106,27 @@ function BlockRow({
             type="button"
             aria-label={row.expanded ? "collapse" : "expand"}
             // The row itself is the actions target, so the chevron has to keep
-            // its click to itself.
+            // its click to itself. It is padded well past the glyph, since a
+            // 12px arrow is a miserable click target.
             onClick={(event) => {
               event.stopPropagation();
               onToggle();
             }}
-            className="w-3 shrink-0 text-muted-foreground hover:text-foreground"
+            className="-my-1 shrink-0 p-1 text-muted-foreground hover:text-foreground"
           >
-            {row.expanded ? "▾" : "▸"}
+            {row.expanded ? (
+              <ChevronDown className="size-4" />
+            ) : (
+              <ChevronRight className="size-4" />
+            )}
           </button>
         ) : (
-          <span className="w-3 shrink-0" />
+          <span className="size-6 shrink-0" />
         )}
         <span className="min-w-0 truncate font-medium">{row.block.label}</span>
+      </span>
+      <span className="w-16 shrink-0 text-muted-foreground">
+        {row.block.kind}
       </span>
       <view.Row block={row.block} />
     </div>
