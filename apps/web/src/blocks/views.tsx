@@ -160,7 +160,7 @@ function MediaPreview({ state }: { state: MediaState }) {
       <MediaText
         src={src}
         markdown={mime === "text/markdown"}
-        className="h-[70vh] w-full overflow-auto"
+        className="h-[70vh] w-full overflow-auto overscroll-contain"
       />
     );
   }
@@ -241,17 +241,30 @@ function invalidView(message: string): BlockView {
 }
 
 /**
+ * Blocks are immutable objects handed down from the server, so a block that
+ * parsed once parses the same way forever. Without this every keystroke in
+ * chat re-validates every visible block's state.
+ */
+const resolved = new WeakMap<Block, BlockView>();
+
+/**
  * The view a block renders through: its kind's, unless its state fails that
  * kind's schema.
  */
 export function viewFor(block: Block): BlockView {
+  const cached = resolved.get(block);
+  if (cached) return cached;
+
   const kind = kinds[block.kind];
+  let view = blockViews[block.kind] ?? fallbackView;
   if (kind) {
     try {
       kind.parse(block.data);
     } catch (error) {
-      return invalidView(schemaMessage(error));
+      view = invalidView(schemaMessage(error));
     }
   }
-  return blockViews[block.kind] ?? fallbackView;
+
+  resolved.set(block, view);
+  return view;
 }

@@ -29,7 +29,7 @@ export function KeyHelp({
       footer={`${HELP_KEY} or esc close`}
       onClose={onClose}
     >
-      <div className="max-h-96 overflow-y-auto pb-1">
+      <div className="max-h-96 overflow-y-auto overscroll-contain pb-1">
         <h2 className="border-b px-3 py-0.5 font-medium">keybindings</h2>
         {layers
           .slice()

@@ -34,7 +34,9 @@ export function ModalFrame({
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 p-4"
+      // `overscroll-contain` on a scroll container of its own: without it a
+      // wheel past the end of the popup keeps going into the page behind.
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden overscroll-contain bg-background/70 p-4"
     >
       <div
         role="dialog"
