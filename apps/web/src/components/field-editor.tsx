@@ -1,0 +1,76 @@
+"use client";
+
+import { useState } from "react";
+import type { BlockField } from "@/blocks/views";
+import { ModalFrame } from "@/components/modal-frame";
+import { useKeyLayer } from "@/lib/keymap";
+
+/**
+ * Edits one field a kind declared. The input owns its keys — the keymap
+ * ignores events from text entry — so enter and escape are handled here and
+ * only documented in help.
+ */
+export function FieldEditor({
+  id,
+  title,
+  field,
+  error,
+  saving,
+  onSubmit,
+  onCancel,
+}: {
+  id: string;
+  title: string;
+  field: BlockField;
+  error: string | null;
+  saving: boolean;
+  onSubmit: (value: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(field.value);
+
+  useKeyLayer({
+    id,
+    modal: true,
+    bindings: [
+      // Live only while focus is outside the input, which handles its own keys.
+      {
+        keys: ["Escape"],
+        help: { keys: "esc", label: "cancel" },
+        run: onCancel,
+      },
+    ],
+    docs: [{ keys: "enter", label: `save ${field.label}` }],
+  });
+
+  return (
+    <ModalFrame
+      label={title}
+      title={title}
+      meta={field.label}
+      onClose={onCancel}
+    >
+      <div className="space-y-1 px-3 py-2">
+        <input
+          // The only place in the app where typing beats modal keys.
+          autoFocus
+          value={value}
+          disabled={saving}
+          spellCheck={false}
+          onChange={(event) => setValue(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmit(value);
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              onCancel();
+            }
+          }}
+          className="w-full border bg-background px-2 py-1 outline-none focus:border-foreground/40 disabled:opacity-50"
+        />
+        {error ? <p className="text-destructive">{error}</p> : null}
+      </div>
+    </ModalFrame>
+  );
+}
