@@ -209,13 +209,33 @@ const entries: SeedEntry[] = [
     },
   },
   {
-    key: "media-unknown",
+    key: "media-text",
     kind: MEDIA_KIND,
     label: "rfc2119.txt",
     createdAt: at(21),
-    // No viewer for .txt, so this is the fallback row and preview.
     parents: ["media-pdf"],
     data: { uri: "https://www.rfc-editor.org/rfc/rfc2119.txt" },
+  },
+  {
+    key: "media-markdown",
+    kind: MEDIA_KIND,
+    label: "readme.md",
+    createdAt: at(22),
+    parents: ["media-text"],
+    data: {
+      uri: "https://raw.githubusercontent.com/nodejs/node/main/README.md",
+    },
+  },
+  {
+    key: "media-unknown",
+    kind: MEDIA_KIND,
+    label: "bunny.ogv",
+    createdAt: at(23),
+    // Unlisted extension, so this is the fallback row and preview.
+    parents: ["media-markdown"],
+    data: {
+      uri: "https://upload.wikimedia.org/wikipedia/commons/7/79/Big_Buck_Bunny_small.ogv",
+    },
   },
 ];
 

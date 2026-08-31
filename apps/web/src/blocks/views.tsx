@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Block } from "@repo/core";
 import { COMPOSITE_KIND, TEXT_KIND, textState } from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
+import { MediaText } from "@/components/media-text";
 import type { FileState, MetricState } from "./kinds";
 import {
   FILE_KIND,
@@ -115,6 +116,9 @@ function MediaRow({ state }: { state: MediaState }) {
           className="h-48 w-40 shrink-0 border"
         />
       ) : null}
+      {type === "text" ? (
+        <MediaText src={src} className="h-48 w-96 shrink-0" />
+      ) : null}
 
       <span className="truncate">{mediaName(state.uri)}</span>
       <span className="truncate text-muted-foreground">{state.uri}</span>
@@ -142,6 +146,9 @@ function MediaPreview({ state }: { state: MediaState }) {
   }
   if (type === "pdf") {
     return <iframe src={src} title="pdf" className="h-[70vh] w-full" />;
+  }
+  if (type === "text") {
+    return <MediaText src={src} className="h-[70vh] w-full" />;
   }
   return (
     <p className="text-muted-foreground">
