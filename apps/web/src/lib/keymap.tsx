@@ -54,6 +54,8 @@ type KeymapContext = {
    */
   layers: Map<string, KeyLayer>;
   push: (id: string) => () => void;
+  /** Same toggle the reserved help key runs, for anything clickable. */
+  toggleHelp: () => void;
 };
 
 const context = createContext<KeymapContext | null>(null);
@@ -62,6 +64,11 @@ function useKeymapContext(): KeymapContext {
   const value = useContext(context);
   if (!value) throw new Error("keymap components require <KeymapProvider>");
   return value;
+}
+
+/** Open or close the help popup from outside the keymap. */
+export function useToggleHelp(): () => void {
+  return useKeymapContext().toggleHelp;
 }
 
 /** Typing in a field must never trigger a mode key. */
@@ -120,9 +127,11 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [stack, layers, helpOpen]);
 
+  const toggleHelp = useCallback(() => setHelpOpen((open) => !open), []);
+
   const value = useMemo<KeymapContext>(
-    () => ({ layers, push }),
-    [layers, push],
+    () => ({ layers, push, toggleHelp }),
+    [layers, push, toggleHelp],
   );
 
   // Only the layers a key can actually reach, matching dispatch: everything

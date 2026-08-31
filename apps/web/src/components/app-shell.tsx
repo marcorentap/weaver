@@ -4,7 +4,12 @@ import { createContext, useContext, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { HELP_KEY, KeymapProvider, useKeyLayer } from "@/lib/keymap";
+import {
+  HELP_KEY,
+  KeymapProvider,
+  useKeyLayer,
+  useToggleHelp,
+} from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
 /**
@@ -48,6 +53,7 @@ function NormalMode() {
 
 function TabBar() {
   const pathname = usePathname();
+  const toggleHelp = useToggleHelp();
 
   return (
     <nav className="flex items-center gap-1 border-t px-2 py-1">
@@ -70,7 +76,13 @@ function TabBar() {
         );
       })}
       {/* The one key that has to be discoverable without opening help. */}
-      <span className="pl-2 text-muted-foreground">{HELP_KEY} help</span>
+      <button
+        type="button"
+        onClick={toggleHelp}
+        className="ml-auto px-2 py-0.5 text-muted-foreground hover:text-foreground"
+      >
+        {HELP_KEY} help
+      </button>
     </nav>
   );
 }
