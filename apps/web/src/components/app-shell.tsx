@@ -59,10 +59,10 @@ function TabBar() {
             href={tab.href}
             aria-current={active ? "page" : undefined}
             className={cn(
-              "border px-2 py-0.5",
+              "px-2 py-0.5",
               active
-                ? "border-foreground/40 bg-muted font-medium"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "font-medium text-white"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             [{tab.key} {tab.label}]
