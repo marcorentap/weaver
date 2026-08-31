@@ -148,9 +148,9 @@ const entries: SeedEntry[] = [
     data: { value: 640, limit: 4096, unit: "tok" },
   },
 
-  // Media, addressed by URI: one per detected type, plus one over https.
-  // Local examples live in public/media and are resolved against the app's
-  // cwd, so no absolute path is hard-coded into the repo.
+  // Media, addressed by URI: one per detected type. Everything is fetched over
+  // https, so the repo carries no sample binaries; the one file:// entry points
+  // at an svg the Next template already ships.
   {
     key: "media-local",
     kind: MEDIA_KIND,
@@ -183,34 +183,39 @@ const entries: SeedEntry[] = [
   {
     key: "media-video",
     kind: MEDIA_KIND,
-    label: "clip.mp4",
+    label: "lava.webm",
     createdAt: at(18),
     parents: ["media-gif"],
-    data: { uri: `file://${process.cwd()}/public/media/clip.mp4` },
+    data: {
+      uri: "https://upload.wikimedia.org/wikipedia/commons/transcoded/2/22/Volcano_Lava_Sample.webm/Volcano_Lava_Sample.webm.360p.vp9.webm",
+    },
   },
   {
     key: "media-audio",
     kind: MEDIA_KIND,
-    label: "tone.wav",
+    label: "sample.wav",
     createdAt: at(19),
     parents: ["media-video"],
-    data: { uri: `file://${process.cwd()}/public/media/tone.wav` },
+    data: { uri: "https://download.samplelib.com/wav/sample-3s.wav" },
   },
   {
     key: "media-pdf",
     kind: MEDIA_KIND,
-    label: "note.pdf",
+    label: "example.pdf",
     createdAt: at(20),
     parents: ["media-audio"],
-    data: { uri: `file://${process.cwd()}/public/media/note.pdf` },
+    data: {
+      uri: "https://upload.wikimedia.org/wikipedia/commons/1/13/Example.pdf",
+    },
   },
   {
     key: "media-unknown",
     kind: MEDIA_KIND,
-    label: "notes.log",
+    label: "rfc2119.txt",
     createdAt: at(21),
+    // No viewer for .txt, so this is the fallback row and preview.
     parents: ["media-pdf"],
-    data: { uri: `file://${process.cwd()}/public/media/notes.log` },
+    data: { uri: "https://www.rfc-editor.org/rfc/rfc2119.txt" },
   },
 ];
 
