@@ -240,7 +240,7 @@ const entries: SeedEntry[] = [
 ];
 
 /** Blocks for a fresh graph, with keys resolved to freshly minted ids. */
-export function devSeedBlocks(): BlockInput[] {
+export function seedBlocks(): BlockInput[] {
   const ids = new Map<string, string>();
   for (const entry of entries) ids.set(entry.key, newId());
 
