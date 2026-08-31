@@ -1,9 +1,23 @@
 "use client";
 
+import { createContext, useContext, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { HELP_KEY, KeymapProvider, useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
+
+/**
+ * The shell's own header region. A page fills it through `ShellHeader`, so its
+ * bar is a sibling of the tab bar rather than the first row of the scrolling
+ * content: both stay put, and only what is between them moves.
+ */
+const headerSlot = createContext<HTMLElement | null>(null);
+
+export function ShellHeader({ children }: { children: React.ReactNode }) {
+  const node = useContext(headerSlot);
+  return node ? createPortal(children, node) : null;
+}
 
 /** Bottom tab bar, addressed by number key from any mode. */
 const TABS = [
@@ -62,10 +76,17 @@ function TabBar() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null);
+
   return (
     <KeymapProvider>
       <NormalMode />
-      <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+      {/* Empty until a page portals into it, so pages without a bar lose no
+          vertical space. */}
+      <div ref={setSlot} className="shrink-0 empty:hidden" />
+      <headerSlot.Provider value={slot}>
+        <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+      </headerSlot.Provider>
       <TabBar />
     </KeymapProvider>
   );

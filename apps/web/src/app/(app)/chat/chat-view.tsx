@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Block, BlockId } from "@repo/core";
 import type { BlockField } from "@/blocks/views";
+import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
 import { FieldEditor } from "@/components/field-editor";
 import type { KeyMenuItem } from "@/components/key-menu";
@@ -368,17 +369,17 @@ export function ChatView({
 
   return (
     <div className="flex min-h-full flex-col">
-      {/* Sticky rather than outside the scroller: the page owns its own bar,
-          and it has to stay readable while rows scroll under it. */}
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b bg-background px-3 py-1">
-        <span className="font-semibold">chat</span>
-        <span className="text-muted-foreground">
-          {session ? `session ${session.name}` : "no session"}
-        </span>
-        <span className="text-muted-foreground">
-          {nodes.length} top level · {total} blocks
-        </span>
-      </header>
+      <ShellHeader>
+        <header className="flex items-center gap-3 border-b px-3 py-1">
+          <span className="font-semibold">chat</span>
+          <span className="text-muted-foreground">
+            {session ? `session ${session.name}` : "no session"}
+          </span>
+          <span className="text-muted-foreground">
+            {nodes.length} top level · {total} blocks
+          </span>
+        </header>
+      </ShellHeader>
 
       {rows.length === 0 ? (
         <p className="p-3 text-muted-foreground">
