@@ -110,13 +110,15 @@ function MediaRow({ state }: { state: MediaState }) {
         <audio src={src} controls className="h-8 w-72 shrink-0" />
       ) : null}
       {type === "pdf" ? (
-        // Unlike text, a pdf keeps its own viewer inline: paging through it in
-        // the row is the point, so the fragment only drops Chrome's chrome.
-        <iframe
-          src={`${src}#toolbar=0&navpanes=0&view=FitH`}
-          title={mediaName(state.uri)}
-          className="h-48 w-40 shrink-0 border"
-        />
+        // Chrome's viewer ignores `scrollbar=0`, so the frame is oversized by
+        // a scrollbar's width in both axes and the wrapper clips them off.
+        <span className="block h-48 w-40 shrink-0 overflow-hidden border">
+          <iframe
+            src={`${src}#toolbar=0&navpanes=0&view=FitH`}
+            title={mediaName(state.uri)}
+            className="pointer-events-none h-[calc(12rem+20px)] w-[calc(10rem+20px)]"
+          />
+        </span>
       ) : null}
       {type === "text" ? (
         <MediaText
