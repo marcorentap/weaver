@@ -8,7 +8,13 @@ import { defineKind } from "@repo/core";
  */
 export const MEDIA_KIND = "media";
 
-export type MediaType = "image" | "video" | "audio" | "pdf" | "unknown";
+export type MediaType =
+  | "image"
+  | "video"
+  | "audio"
+  | "pdf"
+  | "text"
+  | "unknown";
 
 /** Schemes worth supporting: the web, and the machine the harness runs on. */
 const SCHEMES = new Set(["http:", "https:", "file:"]);
@@ -42,6 +48,11 @@ const EXTENSIONS: Record<string, { type: MediaType; mime: string }> = {
   flac: { type: "audio", mime: "audio/flac" },
   m4a: { type: "audio", mime: "audio/mp4" },
   pdf: { type: "pdf", mime: "application/pdf" },
+  txt: { type: "text", mime: "text/plain" },
+  log: { type: "text", mime: "text/plain" },
+  csv: { type: "text", mime: "text/csv" },
+  md: { type: "text", mime: "text/markdown" },
+  markdown: { type: "text", mime: "text/markdown" },
 };
 
 const UNKNOWN = { type: "unknown", mime: "application/octet-stream" } as const;
@@ -64,13 +75,14 @@ export function mediaInfo(uri: string): { type: MediaType; mime: string } {
 }
 
 /**
- * What an `<img>`/`<video>` can actually load. A page served over http cannot
- * read `file://`, so local files go through the media route instead.
+ * What an `<img>`/`<video>` can actually load, or what `fetch` can read. A page
+ * served over http cannot read `file://`, and a cross-origin text file is
+ * unreadable without CORS headers, so both go through the media route.
  */
 export function mediaSrc(uri: string): string {
   const url = parseMediaUri(uri);
   if (!url) return uri;
-  return url.protocol === "file:"
+  return url.protocol === "file:" || mediaInfo(uri).type === "text"
     ? `/api/media?uri=${encodeURIComponent(uri)}`
     : uri;
 }

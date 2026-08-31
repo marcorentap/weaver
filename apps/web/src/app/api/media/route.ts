@@ -6,8 +6,9 @@ import { MEDIA_KIND, mediaInfo, parseMediaUri } from "@/blocks/media";
 import { getStore } from "@/lib/store";
 
 /**
- * Serves `file://` media to the browser, which cannot load local files from an
- * http page itself.
+ * Serves media the browser cannot fetch itself: `file://` bytes, which an http
+ * page may not read, and remote text, which `fetch` may not read without CORS
+ * headers on the origin.
  *
  * Only files a media block actually points at are served, so this stays a
  * viewer for the store's own content rather than a read-anything oracle on
@@ -40,23 +41,67 @@ function parseRange(
   return { start, end };
 }
 
+/** A text viewer needs a screenful, not a whole log server. */
+const TEXT_LIMIT = 256 * 1024;
+
+/** Remote text, capped: the upstream length header is not to be trusted. */
+async function proxyText(url: URL, mime: string): Promise<Response> {
+  const upstream = await fetch(url, {
+    headers: { accept: "text/plain, text/*;q=0.9, */*;q=0.1" },
+  }).catch(() => null);
+  if (!upstream?.ok || !upstream.body) {
+    return new Response("upstream fetch failed", { status: 502 });
+  }
+
+  const reader = upstream.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (size < TEXT_LIMIT) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value.subarray(0, TEXT_LIMIT - size));
+    size += value.length;
+  }
+  await reader.cancel().catch(() => {});
+
+  const body = new Uint8Array(Math.min(size, TEXT_LIMIT));
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  return new Response(body, {
+    headers: {
+      "content-type": `${mime}; charset=utf-8`,
+      "content-length": String(body.length),
+      "cache-control": "no-store",
+    },
+  });
+}
+
 export async function GET(request: Request): Promise<Response> {
   const uri = new URL(request.url).searchParams.get("uri");
   if (!uri) return new Response("missing uri", { status: 400 });
 
   const url = parseMediaUri(uri);
-  if (!url || url.protocol !== "file:") {
-    return new Response("uri must be a file:// media uri", { status: 400 });
-  }
+  if (!url) return new Response("not a media uri", { status: 400 });
   if (!isReferenced(uri)) {
     return new Response("no media block references this uri", { status: 403 });
+  }
+
+  const { mime, type } = mediaInfo(uri);
+  if (url.protocol !== "file:") {
+    if (type !== "text") {
+      return new Response("remote media loads directly", { status: 400 });
+    }
+    return proxyText(url, mime);
   }
 
   const path = fileURLToPath(url);
   const info = await stat(path).catch(() => null);
   if (!info?.isFile()) return new Response("not a file", { status: 404 });
 
-  const { mime } = mediaInfo(uri);
   const range = parseRange(request.headers.get("range"), info.size);
   const { start, end } = range ?? { start: 0, end: info.size - 1 };
   const stream = Readable.toWeb(
