@@ -15,7 +15,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
-      <body className="min-h-full font-mono text-xs flex flex-col dark">
+      {/* The shell owns scrolling: the page itself never scrolls, so the tab
+          bar stays pinned and only the content column moves. */}
+      <body className="flex h-full flex-col overflow-hidden font-mono text-xs dark">
         {children}
       </body>
     </html>

@@ -368,7 +368,9 @@ export function ChatView({
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="flex items-center gap-3 border-b px-3 py-1">
+      {/* Sticky rather than outside the scroller: the page owns its own bar,
+          and it has to stay readable while rows scroll under it. */}
+      <header className="sticky top-0 z-10 flex items-center gap-3 border-b bg-background px-3 py-1">
         <span className="font-semibold">chat</span>
         <span className="text-muted-foreground">
           {session ? `session ${session.name}` : "no session"}

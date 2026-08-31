@@ -124,10 +124,11 @@ function MediaRow({ state }: { state: MediaState }) {
         />
       ) : null}
       {type === "unknown" ? (
-        // Nothing here can render this extension. The label already names the
-        // block, so the row says why it is empty rather than repeating it.
+        // Nothing renders this extension. In a row `enter` opens the actions
+        // menu, so the row stops at the reason; the preview is where `enter`
+        // hands the file to the browser.
         <span className="truncate text-muted-foreground">
-          no inline preview for this file
+          No viewer for this extension.
         </span>
       ) : null}
     </span>
@@ -166,7 +167,7 @@ function MediaPreview({ state }: { state: MediaState }) {
   }
   return (
     <p className="text-muted-foreground">
-      no viewer for this extension — enter opens it in a new tab
+      No viewer for this extension. Press enter to open in new tab
     </p>
   );
 }
