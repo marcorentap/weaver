@@ -85,7 +85,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           vertical space. */}
       <div ref={setSlot} className="shrink-0 empty:hidden" />
       <headerSlot.Provider value={slot}>
-        <main className="min-h-0 flex-1 overflow-y-auto">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
+          {children}
+        </main>
       </headerSlot.Provider>
       <TabBar />
     </KeymapProvider>

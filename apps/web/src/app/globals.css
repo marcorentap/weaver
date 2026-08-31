@@ -129,3 +129,12 @@
     @apply font-sans;
   }
 }
+
+/* Scrolls, but shows nothing: the shell is a fixed frame, and a gutter that
+   appears and disappears with content reflows the columns beside it. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
