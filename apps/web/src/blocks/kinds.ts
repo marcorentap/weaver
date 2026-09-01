@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { coreKinds, defineKind, kindRegistry } from "@repo/core";
+import { issLocationKind } from "./iss";
 import { mediaKind } from "./media";
+import { timerKind } from "./timer";
 
 /**
  * Custom block kinds. A kind is defined by the schema of its state: the unique
@@ -42,4 +44,6 @@ export const kinds = kindRegistry([
   metricKind,
   fileKind,
   mediaKind,
+  timerKind,
+  issLocationKind,
 ]);

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { BlockInput } from "@repo/store";
 import { getStore } from "@/lib/store";
 import { schemaMessage } from "@/lib/schema-error";
 
@@ -38,6 +39,27 @@ export async function updateBlockField(
         data: { ...block.data, [name]: value },
       },
     ]);
+  } catch (error) {
+    return { error: schemaMessage(error) };
+  }
+
+  revalidatePath("/chat");
+  return { error: null };
+}
+
+/**
+ * Persists the client's whole live graph in one write — autosave and the
+ * manual `s` → `s` shortcut both call this. The client is the source of
+ * truth once a session is loaded (hook ticks land there first, at whatever
+ * cadence a timer names), so this is a plain "flush what I already have",
+ * not a merge.
+ */
+export async function saveGraph(
+  graphId: string,
+  blocks: BlockInput[],
+): Promise<{ error: string | null }> {
+  try {
+    getStore().putBlocks(graphId, blocks);
   } catch (error) {
     return { error: schemaMessage(error) };
   }

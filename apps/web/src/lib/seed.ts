@@ -1,8 +1,10 @@
 import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { COMPOSITE_KIND, TEXT_KIND } from "@repo/core";
+import { ISS_LOCATION_KIND } from "@/blocks/iss";
 import { FILE_KIND, METRIC_KIND } from "@/blocks/kinds";
 import { MEDIA_KIND } from "@/blocks/media";
+import { TIMER_KIND } from "@/blocks/timer";
 
 const t0 = Date.parse("2026-08-31T09:00:00.000Z");
 const at = (seconds: number) => t0 + seconds * 1000;
@@ -237,6 +239,39 @@ const entries: SeedEntry[] = [
       uri: "https://upload.wikimedia.org/wikipedia/commons/7/79/Big_Buck_Bunny_small.ogv",
     },
   },
+
+  // A timer calling another block's hook on an interval — one block driving
+  // another, without any graph edge between them. `iss-timer`'s `targetId`
+  // is the seed key "iss", resolved to a real id below like every other
+  // reference here.
+  {
+    key: "iss",
+    kind: ISS_LOCATION_KIND,
+    label: "ISS location",
+    createdAt: at(24),
+    parents: ["media-unknown"],
+    data: {
+      latitude: null,
+      longitude: null,
+      timestamp: null,
+      fetchedAt: null,
+      error: null,
+    },
+  },
+  {
+    key: "iss-timer",
+    kind: TIMER_KIND,
+    label: "ISS poll",
+    createdAt: at(25),
+    parents: ["iss"],
+    data: {
+      intervalMs: 2000,
+      targetId: "iss",
+      hook: "update",
+      ticks: 0,
+      lastTickAt: null,
+    },
+  },
 ];
 
 /** Blocks for a fresh graph, with keys resolved to freshly minted ids. */
@@ -257,6 +292,11 @@ export function seedBlocks(): BlockInput[] {
     createdAt: entry.createdAt,
     parents: entry.parents?.map(resolve),
     children: entry.children?.map(resolve),
-    data: entry.data,
+    // A timer's `targetId` is authored above as the target's seed key, not
+    // a real id — resolved here the same way parents/children are.
+    data:
+      entry.kind === TIMER_KIND && typeof entry.data?.targetId === "string"
+        ? { ...entry.data, targetId: resolve(entry.data.targetId) }
+        : entry.data,
   }));
 }

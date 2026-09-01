@@ -1,24 +1,12 @@
-import type { BlockGraph, BlockId } from "@repo/core";
-import { getBlock, topLevelBlockIds, topoSort } from "@repo/core";
+import type { BlockGraph } from "@repo/core";
 import { getStore } from "@/lib/store";
-import type { ChatNode } from "./chat-view";
+import { chatNodes } from "@/lib/graph-view";
 import { ChatView } from "./chat-view";
 
 // Reads a live database, so it must never be prerendered.
 export const dynamic = "force-dynamic";
 
 const EMPTY: BlockGraph = { blocks: {} };
-
-/**
- * Containment tree in render order. Ordering stays on the server, where the
- * whole graph lives, so the client only decides what is currently unfolded.
- */
-function chatNodes(graph: BlockGraph, ids: BlockId[]): ChatNode[] {
-  return topoSort(graph, ids).map((id) => {
-    const block = getBlock(graph, id);
-    return { block, children: chatNodes(graph, block.children) };
-  });
-}
 
 export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const { session } = await searchParams;
@@ -35,11 +23,15 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const graph = active ? store.loadGraph(active.id) : EMPTY;
 
   return (
+    // Keyed by session id: switching sessions is a different graph entirely,
+    // so the client's own live state (blocks, cursor, expanded rows) should
+    // reset rather than carry over — remounting is the simplest way to do
+    // that reliably.
     <ChatView
+      key={active?.id ?? "none"}
       sessions={sessions}
       session={active ? { id: active.id, name: active.name } : null}
-      nodes={chatNodes(graph, topLevelBlockIds(graph))}
-      total={Object.keys(graph.blocks).length}
+      nodes={chatNodes(graph)}
     />
   );
 }

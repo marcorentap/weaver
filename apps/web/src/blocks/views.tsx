@@ -19,6 +19,10 @@ import {
   mediaSrc,
   mediaState,
 } from "./media";
+import type { IssLocationState } from "./iss";
+import { ISS_LOCATION_KIND, issLocationState } from "./iss";
+import type { TimerState } from "./timer";
+import { TIMER_KIND, timerState } from "./timer";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -71,6 +75,35 @@ function FileRow({ state }: { state: FileState }) {
         {state.language}
       </span>
       <span className="truncate text-muted-foreground">{state.summary}</span>
+    </span>
+  );
+}
+
+function TimerRow({ state }: { state: TimerState }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
+      <span>
+        every {state.intervalMs}ms → {state.hook}
+      </span>
+      <span className="shrink-0 text-muted-foreground/60">
+        {state.ticks} ticks
+      </span>
+    </span>
+  );
+}
+
+function IssLocationRow({ state }: { state: IssLocationState }) {
+  if (state.error !== null) {
+    return <span className="truncate text-destructive">{state.error}</span>;
+  }
+  if (state.latitude === null || state.longitude === null) {
+    return (
+      <span className="truncate text-muted-foreground">not fetched yet</span>
+    );
+  }
+  return (
+    <span className="truncate text-muted-foreground">
+      {state.latitude.toFixed(2)}, {state.longitude.toFixed(2)}
     </span>
   );
 }
@@ -213,6 +246,16 @@ export const blockViews: Record<string, BlockView> = {
       <MediaPreview state={mediaState.parse(block.data)} />
     ),
     raw: (block) => mediaSrc(mediaState.parse(block.data).uri),
+  },
+
+  [TIMER_KIND]: {
+    Row: ({ block }) => <TimerRow state={timerState.parse(block.data)} />,
+  },
+
+  [ISS_LOCATION_KIND]: {
+    Row: ({ block }) => (
+      <IssLocationRow state={issLocationState.parse(block.data)} />
+    ),
   },
 };
 

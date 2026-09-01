@@ -1,7 +1,14 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Block, BlockId } from "@repo/core";
@@ -16,12 +23,12 @@ import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
-import { deleteChatBlock, updateBlockField } from "./actions";
+import type { ChatNode } from "@/lib/graph-view";
+import { chatNodes, collectBlocks } from "@/lib/graph-view";
+import { createLiveGraph, scheduledHooks } from "@/lib/live-graph";
+import { deleteChatBlock, saveGraph, updateBlockField } from "./actions";
 
 export type SessionSummary = { id: string; name: string; modifiedAt: number };
-
-/** A block plus its nested contexts, already in render order. */
-export type ChatNode = { block: Block; children: ChatNode[] };
 
 /** Which modal popup, if any, sits above chat's normal mode. */
 type Popup =
@@ -224,12 +231,10 @@ export function ChatView({
   sessions,
   session,
   nodes,
-  total,
 }: {
   sessions: SessionSummary[];
   session: { id: string; name: string } | null;
   nodes: ChatNode[];
-  total: number;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -242,7 +247,75 @@ export function ChatView({
   const [error, setError] = useState<string | null>(null);
   const { settings, hydrated } = useSettings();
 
-  const rows = flatten(nodes, expanded);
+  // ---- Live graph state --------------------------------------------------
+  // The client owns the graph from here on: a hook (a timer's tick, an ISS
+  // fetch — this file has no idea which) mutates it and notifies
+  // subscribers immediately, so it lands on screen the instant it resolves,
+  // not on whatever cadence a poll happened to run at. `nodes` seeds it once
+  // per mount — page keys `<ChatView>` by session id, so switching sessions
+  // remounts rather than needing this to reconcile a changed prop mid-life.
+  const [engine] = useState(() => createLiveGraph(collectBlocks(nodes)));
+  const { graph, dirty, savedAt } = useSyncExternalStore(
+    engine.subscribe,
+    engine.getSnapshot,
+    engine.getSnapshot,
+  );
+  const liveNodes = chatNodes(graph);
+
+  // One real `setInterval` per block asking for one, at its own configured
+  // interval — this is what makes an update land within a millisecond of
+  // when it fires, instead of at the next poll. Entirely kind-agnostic:
+  // `scheduledHooks` just asks every block's kind whether it wants this,
+  // the same way for all of them. Restarts (all of them, cheap for a
+  // handful) whenever any schedule actually changes.
+  const scheduleSignature = scheduledHooks(graph)
+    .map((entry) => `${entry.id}:${entry.intervalMs}:${entry.hook}`)
+    .sort()
+    .join("|");
+
+  useEffect(() => {
+    const timers = scheduledHooks(engine.getSnapshot().graph).map((entry) =>
+      setInterval(() => {
+        engine.runHook(entry.id, entry.hook).catch((error) =>
+          console.error(
+            `scheduled hook "${entry.hook}" on ${entry.id} failed:`,
+            error,
+          ),
+        );
+      }, entry.intervalMs),
+    );
+    return () => timers.forEach(clearInterval);
+  }, [scheduleSignature, engine]);
+
+  // ---- Persistence: autosave + manual save -------------------------------
+  // A fixed 3s cadence, not a debounce: a timer ticking every 2s would keep
+  // resetting a debounce and never actually save. `performSaveRef` lets that
+  // interval stay mounted for the component's life while always calling the
+  // latest closure (current `session`, current engine).
+  const performSave = useCallback(async (): Promise<void> => {
+    if (!session) return;
+    const result = await saveGraph(session.id, engine.toBlockInputs());
+    if (result.error) {
+      engine.markSaveFailed();
+      console.error("save failed:", result.error);
+      return;
+    }
+    engine.markSaved();
+  }, [session, engine]);
+
+  const performSaveRef = useRef(performSave);
+  useEffect(() => {
+    performSaveRef.current = performSave;
+  }, [performSave]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (engine.getSnapshot().dirty) void performSaveRef.current();
+    }, 3000);
+    return () => clearInterval(id);
+  }, [engine]);
+
+  const rows = flatten(liveNodes, expanded);
   const index = Math.min(cursor, Math.max(rows.length - 1, 0));
   const row = rows[index];
   const view = row ? viewFor(row.block) : null;
@@ -353,8 +426,14 @@ export function ChatView({
       value,
     );
     setSaving(false);
-    if (result.error) setError(result.error);
-    else setPopup(null);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    // The server already validated this against the kind's schema, so it is
+    // safe to reflect locally without waiting on a round trip back down.
+    engine.updateField(row.block.id, field.name, value);
+    setPopup(null);
   };
 
   /**
@@ -384,25 +463,44 @@ export function ChatView({
             destructive: true,
             run: () => {
               setPopup(null);
-              startTransition(() => deleteChatBlock(row.block.id));
+              const id = row.block.id;
+              // Optimistic: drops the row immediately, then persists the
+              // delete — the store also drops any edges pointing at it.
+              engine.deleteBlock(id);
+              startTransition(() => deleteChatBlock(id));
             },
           },
         ]
       : [];
 
-  const sessionItems: KeyMenuItem[] = sessions.map((entry) => ({
-    label: entry.name,
-    detail: new Date(entry.modifiedAt)
-      .toISOString()
-      .slice(0, 16)
-      .replace("T", " "),
-    run: () => {
-      setPopup(null);
-      setCursor(0);
-      setExpanded(new Set());
-      router.push(`/chat?session=${encodeURIComponent(entry.name)}`);
+  const sessionItems: KeyMenuItem[] = [
+    {
+      label: "save now",
+      key: "s",
+      detail: dirty
+        ? "unsaved changes"
+        : savedAt
+          ? `saved ${new Date(savedAt).toLocaleTimeString()}`
+          : "nothing to save yet",
+      run: () => {
+        setPopup(null);
+        void performSave();
+      },
     },
-  }));
+    ...sessions.map((entry) => ({
+      label: entry.name,
+      detail: new Date(entry.modifiedAt)
+        .toISOString()
+        .slice(0, 16)
+        .replace("T", " "),
+      run: () => {
+        setPopup(null);
+        setCursor(0);
+        setExpanded(new Set());
+        router.push(`/chat?session=${encodeURIComponent(entry.name)}`);
+      },
+    })),
+  ];
 
   return (
     <div className="flex min-h-full flex-col">
@@ -413,7 +511,15 @@ export function ChatView({
             {session ? `session ${session.name}` : "no session"}
           </span>
           <span className="text-muted-foreground">
-            {nodes.length} top level · {total} blocks
+            {liveNodes.length} top level · {Object.keys(graph.blocks).length}{" "}
+            blocks
+          </span>
+          <span className="ml-auto text-muted-foreground">
+            {dirty
+              ? "unsaved"
+              : savedAt
+                ? `saved ${new Date(savedAt).toLocaleTimeString()}`
+                : null}
           </span>
         </header>
       </ShellHeader>
