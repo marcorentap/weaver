@@ -514,13 +514,6 @@ export function ChatView({
             {liveNodes.length} top level · {Object.keys(graph.blocks).length}{" "}
             blocks
           </span>
-          <span className="ml-auto text-muted-foreground">
-            {dirty
-              ? "unsaved"
-              : savedAt
-                ? `saved ${new Date(savedAt).toLocaleTimeString()}`
-                : null}
-          </span>
         </header>
       </ShellHeader>
 
