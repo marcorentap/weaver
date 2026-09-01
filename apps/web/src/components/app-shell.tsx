@@ -4,6 +4,7 @@ import { createContext, useContext, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { SettingsProvider } from "@/lib/settings";
 import {
   HELP_KEY,
   KeymapProvider,
@@ -92,16 +93,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <KeymapProvider>
-      <NormalMode />
-      {/* Empty until a page portals into it, so pages without a bar lose no
-          vertical space. */}
-      <div ref={setSlot} className="shrink-0 empty:hidden" />
-      <headerSlot.Provider value={slot}>
-        <main className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
-          {children}
-        </main>
-      </headerSlot.Provider>
-      <TabBar />
+      <SettingsProvider>
+        <NormalMode />
+        {/* Empty until a page portals into it, so pages without a bar lose no
+            vertical space. */}
+        <div ref={setSlot} className="shrink-0 empty:hidden" />
+        <headerSlot.Provider value={slot}>
+          <main className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
+            {children}
+          </main>
+        </headerSlot.Provider>
+        <TabBar />
+      </SettingsProvider>
     </KeymapProvider>
   );
 }

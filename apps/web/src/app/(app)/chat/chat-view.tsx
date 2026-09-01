@@ -9,10 +9,12 @@ import type { BlockField } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
 import { FieldEditor } from "@/components/field-editor";
+import { Gutter } from "@/components/gutter";
 import type { KeyMenuItem } from "@/components/key-menu";
 import { KeyMenu } from "@/components/key-menu";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
+import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import { deleteChatBlock, updateBlockField } from "./actions";
 
@@ -66,11 +68,17 @@ function flatten(
 function BlockRow({
   row,
   selected,
+  line,
+  gutter,
   onSelect,
   onToggle,
 }: {
   row: Row;
   selected: boolean;
+  /** Number to show in the gutter, or null when line numbers are off. */
+  line: number | null;
+  /** Whether the gutter column is enabled at all (hidden pre-hydration). */
+  gutter: boolean;
   /** Click anywhere on the row: select it and open its actions, like `enter`. */
   onSelect: () => void;
   /** Click the chevron: fold or unfold, without opening actions. */
@@ -90,12 +98,13 @@ function BlockRow({
       aria-expanded={row.hasChildren ? row.expanded : undefined}
       onClick={onSelect}
       className={cn(
-        "flex cursor-pointer items-center gap-3 border-l-2 px-3 py-1",
+        "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
         selected
           ? "border-foreground/60 bg-muted"
           : "border-transparent hover:bg-muted/40",
       )}
     >
+      <Gutter line={line} show={gutter} />
       <span
         // Indent eats into this column, so it is wide enough for a couple of
         // nesting levels before labels start truncating.
@@ -231,11 +240,24 @@ export function ChatView({
   const [popup, setPopup] = useState<Popup>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { settings, hydrated } = useSettings();
 
   const rows = flatten(nodes, expanded);
   const index = Math.min(cursor, Math.max(rows.length - 1, 0));
   const row = rows[index];
   const view = row ? viewFor(row.block) : null;
+
+  /** Whether the gutter column is live at all (hidden before hydration so the
+   *  stored preference never flashes in with the wrong mode). */
+  const gutter = hydrated && settings.lineNumber !== "off";
+  /** Number for a row: absolute is its 1-based position; relative is its
+   *  distance from the cursor, so the selected row reads 0. */
+  const lineNumber = (i: number): number | null =>
+    gutter
+      ? settings.lineNumber === "relative"
+        ? Math.abs(i - index)
+        : i + 1
+      : null;
 
   const move = (delta: number) => {
     if (rows.length === 0) return;
@@ -394,6 +416,8 @@ export function ChatView({
               key={entry.block.id}
               row={entry}
               selected={i === index}
+              line={lineNumber(i)}
+              gutter={gutter}
               onSelect={() => {
                 setCursor(i);
                 setPopup({ kind: "actions" });
