@@ -25,6 +25,11 @@ export type HookContext = {
   call: (id: BlockId, hook: string) => Promise<void>;
 };
 
+/** A request from a kind's own state to have one of its hooks invoked on a
+ *  timer — the "timer" primitive, generalized so no runtime needs to know
+ *  which kind, if any, is the one calling itself "a timer". */
+export type Schedule = { intervalMs: number; hook: string };
+
 /**
  * A block kind, erased of its state type so kinds can share one registry.
  * Build these with `defineKind`, never by hand.
@@ -46,6 +51,14 @@ export type BlockKind = {
    * not persisting.
    */
   call: (data: BlockData, hook: string, ctx: HookContext) => Promise<BlockData>;
+  /**
+   * Whether this block currently wants one of its own hooks invoked on a
+   * timer, and how often — a timer block reads `intervalMs` off its own
+   * state, say. A runtime scheduling this needs to know nothing about which
+   * kind (if any) is "the" timer kind: every kind gets asked the same way,
+   * and most simply never answer.
+   */
+  schedule: (data: BlockData) => Schedule | null;
 };
 
 export type KindRegistry = Record<string, BlockKind>;
@@ -68,6 +81,9 @@ export function defineKind<S>(def: {
    * transforms, async for anything that does IO first (an HTTP fetch, say).
    */
   hooks?: Record<string, (state: S, ctx: HookContext) => Promise<S> | S>;
+  /** Whether this kind wants one of its own hooks invoked on a timer, given
+   *  its current state. Omit for a kind that is never self-driving. */
+  schedule?: (state: S) => Schedule | null;
 }): BlockKind {
   const hooks = def.hooks ?? {};
   return {
@@ -85,6 +101,7 @@ export function defineKind<S>(def: {
       const next = await fn(def.schema.parse(data), ctx);
       return def.schema.parse(next) as BlockData;
     },
+    schedule: (data) => def.schedule?.(def.schema.parse(data)) ?? null,
   };
 }
 
