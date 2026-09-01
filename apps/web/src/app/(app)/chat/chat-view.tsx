@@ -104,7 +104,7 @@ function BlockRow({
           : "border-transparent hover:bg-muted/40",
       )}
     >
-      <Gutter line={line} show={gutter} />
+      <Gutter line={line} show={gutter} current={selected} />
       <span
         // Indent eats into this column, so it is wide enough for a couple of
         // nesting levels before labels start truncating.
@@ -251,10 +251,11 @@ export function ChatView({
    *  stored preference never flashes in with the wrong mode). */
   const gutter = hydrated && settings.lineNumber !== "off";
   /** Number for a row: absolute is its 1-based position; relative is its
-   *  distance from the cursor, so the selected row reads 0. */
+   *  distance from the cursor, except the selected row, which reads its own
+   *  1-based position instead of the useless anchor `0`. */
   const lineNumber = (i: number): number | null =>
     gutter
-      ? settings.lineNumber === "relative"
+      ? settings.lineNumber === "relative" && i !== index
         ? Math.abs(i - index)
         : i + 1
       : null;
