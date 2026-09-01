@@ -25,7 +25,7 @@ export function ShellHeader({ children }: { children: React.ReactNode }) {
   return node ? createPortal(children, node) : null;
 }
 
-/** Bottom tab bar, addressed by number key from any mode. */
+/** Bottom tab bar, addressed by `Tab` + number from any mode. */
 const TABS = [
   { key: "1", label: "chat", href: "/chat" },
   { key: "2", label: "resources", href: "/resources" },
@@ -39,14 +39,36 @@ const TABS = [
  */
 function NormalMode() {
   const router = useRouter();
+  const pathname = usePathname();
+
+  const switchTab = (delta: number) => {
+    const current = Math.max(
+      TABS.findIndex((tab) => tab.href === pathname),
+      0,
+    );
+    const next = TABS[(current + delta + TABS.length) % TABS.length];
+    if (next) router.push(next.href);
+  };
 
   useKeyLayer({
     id: "normal",
-    bindings: TABS.map((tab) => ({
-      keys: [tab.key],
-      help: { keys: tab.key, label: `go to ${tab.label}` },
-      run: () => router.push(tab.href),
-    })),
+    bindings: [
+      ...TABS.map((tab) => ({
+        chord: ["Tab", tab.key] as const,
+        help: { keys: `tab ${tab.key}`, label: `go to ${tab.label}` },
+        run: () => router.push(tab.href),
+      })),
+      {
+        keys: ["["],
+        help: { keys: "[", label: "previous tab" },
+        run: () => switchTab(-1),
+      },
+      {
+        keys: ["]"],
+        help: { keys: "]", label: "next tab" },
+        run: () => switchTab(1),
+      },
+    ],
   });
 
   return null;

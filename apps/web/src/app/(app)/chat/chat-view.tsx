@@ -264,6 +264,13 @@ export function ChatView({
     setCursor(Math.min(Math.max(index + delta, 0), rows.length - 1));
   };
 
+  /** Jumps to the 1-based line number shown in the gutter — vim's `G`,
+   *  clamped to the row range instead of no-oping past either end. */
+  const jump = (line: number) => {
+    if (rows.length === 0) return;
+    setCursor(Math.min(Math.max(line - 1, 0), rows.length - 1));
+  };
+
   const setOpen = (id: BlockId, open: boolean) => {
     setExpanded((current) => {
       const next = new Set(current);
@@ -292,13 +299,13 @@ export function ChatView({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "next block" },
-        run: () => move(1),
+        help: { keys: "↓ / j / <n>j", label: "next block, <n> at a time" },
+        run: (count = 1) => move(count),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "previous block" },
-        run: () => move(-1),
+        help: { keys: "↑ / k / <n>k", label: "previous block, <n> at a time" },
+        run: (count = 1) => move(-count),
       },
       {
         keys: ["ArrowRight", "l"],
@@ -321,6 +328,11 @@ export function ChatView({
         keys: ["s"],
         help: { keys: "s", label: "recent sessions" },
         run: () => setPopup({ kind: "sessions" }),
+      },
+      {
+        keys: ["G"],
+        help: { keys: "G / <n>G", label: "jump to last block / line <n>" },
+        run: (count) => jump(count ?? rows.length),
       },
     ],
   });
