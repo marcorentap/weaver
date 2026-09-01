@@ -22,7 +22,23 @@ export type LiveGraph = {
   runHook: (id: BlockId, hook: string) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
-  updateField: (id: BlockId, name: string, value: string) => void;
+  updateField: (id: BlockId, name: string, value: string | number) => void;
+  /** Insert an already-persisted new block locally. `parentId` null means
+   *  top-level; otherwise the block is appended to that block's children. */
+  addBlock: (block: Block, parentId: BlockId | null) => void;
+  /** Reorder one block among its siblings by giving it a new `createdAt` —
+   *  siblings are ordered by topological tiebreak on `createdAt`, so this is
+   *  the whole of "moving" a block without touching containment. */
+  setCreatedAt: (id: BlockId, createdAt: number) => void;
+  /** Move a block from one container to another (either may be null for
+   *  top-level) and give it a new `createdAt` in its new position, in one
+   *  commit — used by nest/unnest. */
+  moveBlock: (
+    id: BlockId,
+    fromParentId: BlockId | null,
+    toParentId: BlockId | null,
+    createdAt: number,
+  ) => void;
   /** Drop a block and every reference to it, optimistically. */
   deleteBlock: (id: BlockId) => void;
   toBlockInputs: () => BlockInput[];
@@ -147,6 +163,50 @@ export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
         },
         snapshot.dirty,
       );
+    },
+    addBlock(block, parentId) {
+      const blocks: Record<BlockId, Block> = {
+        ...snapshot.graph.blocks,
+        [block.id]: block,
+      };
+      const parent = parentId ? blocks[parentId] : undefined;
+      if (parent) {
+        blocks[parentId as BlockId] = {
+          ...parent,
+          children: [...parent.children, block.id],
+        };
+      }
+      commit(blocks, true);
+    },
+    setCreatedAt(id, createdAt) {
+      const current = snapshot.graph.blocks[id];
+      if (!current) return;
+      commit(
+        { ...snapshot.graph.blocks, [id]: { ...current, createdAt, modifiedAt: Date.now() } },
+        true,
+      );
+    },
+    moveBlock(id, fromParentId, toParentId, createdAt) {
+      const current = snapshot.graph.blocks[id];
+      if (!current) return;
+      const blocks: Record<BlockId, Block> = { ...snapshot.graph.blocks };
+      if (fromParentId) {
+        const from = blocks[fromParentId];
+        if (from) {
+          blocks[fromParentId] = {
+            ...from,
+            children: from.children.filter((childId) => childId !== id),
+          };
+        }
+      }
+      if (toParentId) {
+        const to = blocks[toParentId];
+        if (to && !to.children.includes(id)) {
+          blocks[toParentId] = { ...to, children: [...to.children, id] };
+        }
+      }
+      blocks[id] = { ...current, createdAt, modifiedAt: Date.now() };
+      commit(blocks, true);
     },
     deleteBlock(id) {
       commit(withoutBlock(snapshot.graph.blocks, id), true);

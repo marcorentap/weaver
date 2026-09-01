@@ -24,6 +24,7 @@ export const metricKind = defineKind({
   schema: metricState,
   snapshot: (state, ctx) =>
     `${ctx.block.label}: ${state.value}/${state.limit} ${state.unit}`,
+  defaults: { value: 0, limit: 100, unit: "" },
 });
 
 export const fileState = z.object({
@@ -37,6 +38,7 @@ export const fileKind = defineKind({
   kind: FILE_KIND,
   schema: fileState,
   snapshot: (state) => `${state.path} — ${state.summary}`,
+  defaults: { path: "", language: "", summary: "" },
 });
 
 export const kinds = kindRegistry([

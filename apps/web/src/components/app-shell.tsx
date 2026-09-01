@@ -27,9 +27,9 @@ export function ShellHeader({ children }: { children: React.ReactNode }) {
 
 /** Bottom tab bar, addressed by `Tab` + number from any mode. */
 const TABS = [
-  { key: "1", label: "chat", href: "/chat" },
-  { key: "2", label: "resources", href: "/resources" },
-  { key: "3", label: "settings", href: "/settings" },
+  { key: "1", label: "Chat", href: "/chat" },
+  { key: "2", label: "Resources", href: "/resources" },
+  { key: "3", label: "Settings", href: "/settings" },
 ] as const;
 
 /**
@@ -55,17 +55,17 @@ function NormalMode() {
     bindings: [
       ...TABS.map((tab) => ({
         chord: ["Tab", tab.key] as const,
-        help: { keys: `tab ${tab.key}`, label: `go to ${tab.label}` },
+        help: { keys: `tab ${tab.key}`, label: `Go to ${tab.label}` },
         run: () => router.push(tab.href),
       })),
       {
         keys: ["["],
-        help: { keys: "[", label: "previous tab" },
+        help: { keys: "[", label: "Previous tab" },
         run: () => switchTab(-1),
       },
       {
         keys: ["]"],
-        help: { keys: "]", label: "next tab" },
+        help: { keys: "]", label: "Next tab" },
         run: () => switchTab(1),
       },
     ],
@@ -104,7 +104,7 @@ function TabBar() {
         onClick={toggleHelp}
         className="ml-auto px-2 py-0.5 text-muted-foreground hover:text-foreground"
       >
-        {HELP_KEY} help
+        {HELP_KEY} Help
       </button>
     </nav>
   );

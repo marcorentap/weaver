@@ -36,11 +36,11 @@ export function FieldEditor({
       // Live only while focus is outside the input, which handles its own keys.
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "cancel" },
+        help: { keys: "esc", label: "Cancel" },
         run: onCancel,
       },
     ],
-    docs: [{ keys: "enter", label: `save ${field.label}` }],
+    docs: [{ keys: "enter", label: `Save ${field.label}` }],
   });
 
   return (
@@ -56,6 +56,7 @@ export function FieldEditor({
           autoFocus
           value={value}
           disabled={saving}
+          inputMode={field.type === "number" ? "decimal" : "text"}
           spellCheck={false}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {

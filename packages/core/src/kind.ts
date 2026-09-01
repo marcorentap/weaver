@@ -31,6 +31,22 @@ export type HookContext = {
 export type Schedule = { intervalMs: number; hook: string };
 
 /**
+ * Declares that two of a kind's own state fields together name a "callback"
+ * — a reference to another block's hook, the same shape as a timer's
+ * `targetId`/`hook` pair. Purely descriptive: nothing here calls anything,
+ * it just lets a generic UI find and edit the reference without the kind
+ * writing its own wiring screen.
+ */
+export type CallbackSpec = {
+  /** Shown in the configure UI, e.g. "on tick". */
+  label: string;
+  /** State field holding the id of the block whose hook this calls. */
+  targetField: string;
+  /** State field holding the name of the hook on that block. */
+  hookField: string;
+};
+
+/**
  * A block kind, erased of its state type so kinds can share one registry.
  * Build these with `defineKind`, never by hand.
  */
@@ -43,6 +59,9 @@ export type BlockKind = {
   /** Names of hooks this kind exposes — callable by id from other blocks
    *  (a timer's target) or by the harness itself (a scheduler's tick). */
   hooks: readonly string[];
+  /** State field pairs that reference another block's hook, for a generic
+   *  configure UI to surface — see `CallbackSpec`. */
+  callbacks: readonly CallbackSpec[];
   /**
    * Run one named hook against this block's current state and return its
    * next state. Throws if `data` fails the schema, if `hook` isn't one of
@@ -59,6 +78,11 @@ export type BlockKind = {
    * and most simply never answer.
    */
   schedule: (data: BlockData) => Schedule | null;
+  /** A fresh, schema-valid state for a brand-new block of this kind, or
+   *  `null` if this kind cannot be created blank (nothing currently opts
+   *  out, but the door stays open). Backs the "new block" picker: only
+   *  kinds with a default show up there. */
+  defaults: BlockData | null;
 };
 
 export type KindRegistry = Record<string, BlockKind>;
@@ -81,9 +105,16 @@ export function defineKind<S>(def: {
    * transforms, async for anything that does IO first (an HTTP fetch, say).
    */
   hooks?: Record<string, (state: S, ctx: HookContext) => Promise<S> | S>;
+  /** State field pairs that reference another block's hook — see
+   *  `CallbackSpec`. Omit for a kind with no such reference. */
+  callbacks?: readonly CallbackSpec[];
   /** Whether this kind wants one of its own hooks invoked on a timer, given
    *  its current state. Omit for a kind that is never self-driving. */
   schedule?: (state: S) => Schedule | null;
+  /** A fresh state new blocks of this kind start from. Parsed through the
+   *  same schema as everything else, so a bad default fails at kind
+   *  definition time instead of at first use. */
+  defaults?: S;
 }): BlockKind {
   const hooks = def.hooks ?? {};
   return {
@@ -93,6 +124,10 @@ export function defineKind<S>(def: {
     // and no cast is needed to recover the state type.
     snapshot: (data, ctx) => def.snapshot(def.schema.parse(data), ctx),
     hooks: Object.keys(hooks),
+    callbacks: def.callbacks ?? [],
+    defaults: def.defaults !== undefined
+      ? (def.schema.parse(def.defaults) as BlockData)
+      : null,
     call: async (data, hook, ctx) => {
       const fn = hooks[hook];
       if (!fn) {

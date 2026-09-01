@@ -99,4 +99,5 @@ export const mediaKind = defineKind({
   schema: mediaState,
   snapshot: (state, ctx) =>
     `${ctx.block.label}: ${mediaInfo(state.uri).type} at ${state.uri}`,
+  defaults: { uri: "file:///" },
 });

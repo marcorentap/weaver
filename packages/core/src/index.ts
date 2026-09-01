@@ -10,17 +10,18 @@ import {
 } from "./block";
 import type {
   BlockKind,
+  CallbackSpec,
   HookContext,
   KindRegistry,
   Schedule,
   SnapshotContext,
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
-import type { CompositeState, TextState } from "./kinds/text";
+import type { GroupState, TextState } from "./kinds/text";
 import {
-  COMPOSITE_KIND,
-  compositeKind,
-  compositeState,
+  GROUP_KIND,
+  groupKind,
+  groupState,
   coreKinds,
   TEXT_KIND,
   textKind,
@@ -35,7 +36,8 @@ export type {
   BlockGraph,
   BlockId,
   BlockKind,
-  CompositeState,
+  CallbackSpec,
+  GroupState,
   GraphLayout,
   GraphRow,
   HookContext,
@@ -47,9 +49,9 @@ export type {
 export {
   assertAcyclic,
   assertValidData,
-  COMPOSITE_KIND,
-  compositeKind,
-  compositeState,
+  GROUP_KIND,
+  groupKind,
+  groupState,
   coreKinds,
   defineKind,
   getBlock,

@@ -18,9 +18,9 @@ import {
 export type LineNumberMode = "off" | "absolute" | "relative";
 
 export const LINE_NUMBER_OPTIONS = [
-  { value: "off", label: "off" },
-  { value: "absolute", label: "absolute" },
-  { value: "relative", label: "relative" },
+  { value: "off", label: "Off" },
+  { value: "absolute", label: "Absolute" },
+  { value: "relative", label: "Relative" },
 ] as const satisfies readonly { value: LineNumberMode; label: string }[];
 
 type Settings = {

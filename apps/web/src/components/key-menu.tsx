@@ -48,22 +48,22 @@ export function KeyMenu({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "next item" },
+        help: { keys: "↓ / j", label: "Next item" },
         run: () => move(1),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "previous item" },
+        help: { keys: "↑ / k", label: "Previous item" },
         run: () => move(-1),
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "run selected item" },
+        help: { keys: "enter", label: "Run selected item" },
         run: () => items[index]?.run(),
       },
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "close" },
+        help: { keys: "esc", label: "Close" },
         run: onClose,
       },
       ...items.flatMap((item) =>
@@ -84,7 +84,7 @@ export function KeyMenu({
     <ModalFrame label={title} title={title} onClose={onClose}>
       <ul className="max-h-72 overflow-y-auto overscroll-contain py-1">
           {items.length === 0 ? (
-            <li className="px-3 py-1 text-muted-foreground">nothing here</li>
+            <li className="px-3 py-1 text-muted-foreground">Nothing here</li>
           ) : (
             items.map((item, i) => (
               <li key={item.label} aria-current={i === index}>

@@ -99,7 +99,7 @@ export function MediaText({
   if (load.status !== "ready") {
     return (
       <span className="shrink-0 text-muted-foreground">
-        {load.status === "loading" ? "loading…" : load.message}
+        {load.status === "loading" ? "Loading…" : load.message}
       </span>
     );
   }

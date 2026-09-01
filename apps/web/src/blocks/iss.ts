@@ -59,4 +59,11 @@ export const issLocationKind = defineKind({
       }
     },
   },
+  defaults: {
+    latitude: null,
+    longitude: null,
+    timestamp: null,
+    fetchedAt: null,
+    error: null,
+  },
 });

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { Block } from "@repo/core";
-import { COMPOSITE_KIND, TEXT_KIND, textState } from "@repo/core";
+import { GROUP_KIND, TEXT_KIND, textState } from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
 import { MediaText } from "@/components/media-text";
 import type { FileState, MetricState } from "./kinds";
@@ -30,6 +30,10 @@ export type BlockField = {
   name: string;
   label: string;
   value: string;
+  /** `value`'s real type once parsed — a `"number"` field round-trips
+   *  through `Number()` before it's written; everything else stays a
+   *  string as-is. */
+  type?: "number";
 };
 
 /**
@@ -83,7 +87,7 @@ function TimerRow({ state }: { state: TimerState }) {
   return (
     <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
       <span>
-        every {state.intervalMs}ms → {state.hook}
+        Every {state.intervalMs}ms → {state.hook}
       </span>
       <span className="shrink-0 text-muted-foreground/60">
         {state.ticks} ticks
@@ -98,7 +102,7 @@ function IssLocationRow({ state }: { state: IssLocationState }) {
   }
   if (state.latitude === null || state.longitude === null) {
     return (
-      <span className="truncate text-muted-foreground">not fetched yet</span>
+      <span className="truncate text-muted-foreground">Not fetched yet</span>
     );
   }
   return (
@@ -219,9 +223,12 @@ export const blockViews: Record<string, BlockView> = {
         {textState.parse(block.data).text}
       </span>
     ),
+    fields: (block) => [
+      { name: "text", label: "text", value: textState.parse(block.data).text },
+    ],
   },
 
-  [COMPOSITE_KIND]: {
+  [GROUP_KIND]: {
     Row: ({ block }) => (
       <span className="truncate text-muted-foreground italic">
         {block.children.length} nested
@@ -231,16 +238,32 @@ export const blockViews: Record<string, BlockView> = {
 
   [METRIC_KIND]: {
     Row: ({ block }) => <MetricRow state={metricState.parse(block.data)} />,
+    fields: (block) => {
+      const state = metricState.parse(block.data);
+      return [
+        { name: "value", label: "value", value: String(state.value), type: "number" },
+        { name: "limit", label: "limit", value: String(state.limit), type: "number" },
+        { name: "unit", label: "unit", value: state.unit },
+      ];
+    },
   },
 
   [FILE_KIND]: {
     Row: ({ block }) => <FileRow state={fileState.parse(block.data)} />,
+    fields: (block) => {
+      const state = fileState.parse(block.data);
+      return [
+        { name: "path", label: "path", value: state.path },
+        { name: "language", label: "language", value: state.language },
+        { name: "summary", label: "summary", value: state.summary },
+      ];
+    },
   },
 
   [MEDIA_KIND]: {
     Row: ({ block }) => <MediaRow state={mediaState.parse(block.data)} />,
     fields: (block) => [
-      { name: "uri", label: "uri", value: mediaState.parse(block.data).uri },
+      { name: "uri", label: "URI", value: mediaState.parse(block.data).uri },
     ],
     Preview: ({ block }) => (
       <MediaPreview state={mediaState.parse(block.data)} />
@@ -250,6 +273,14 @@ export const blockViews: Record<string, BlockView> = {
 
   [TIMER_KIND]: {
     Row: ({ block }) => <TimerRow state={timerState.parse(block.data)} />,
+    fields: (block) => [
+      {
+        name: "intervalMs",
+        label: "interval (ms)",
+        value: String(timerState.parse(block.data).intervalMs),
+        type: "number",
+      },
+    ],
   },
 
   [ISS_LOCATION_KIND]: {

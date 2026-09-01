@@ -1,6 +1,6 @@
 import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
-import { COMPOSITE_KIND, TEXT_KIND } from "@repo/core";
+import { GROUP_KIND, TEXT_KIND } from "@repo/core";
 import { ISS_LOCATION_KIND } from "@/blocks/iss";
 import { FILE_KIND, METRIC_KIND } from "@/blocks/kinds";
 import { MEDIA_KIND } from "@/blocks/media";
@@ -44,10 +44,10 @@ const entries: SeedEntry[] = [
     data: { value: 4820, limit: 8192, unit: "tok" },
   },
 
-  // Composite nesting text blocks.
+  // Group nesting text blocks.
   {
     key: "tools",
-    kind: COMPOSITE_KIND,
+    kind: GROUP_KIND,
     label: "tools",
     createdAt: at(3),
     parents: ["budget"],
@@ -80,7 +80,7 @@ const entries: SeedEntry[] = [
   // Nesting two levels deep, with a custom kind at the leaves.
   {
     key: "repo",
-    kind: COMPOSITE_KIND,
+    kind: GROUP_KIND,
     label: "repo",
     createdAt: at(7),
     parents: ["env"],
@@ -95,7 +95,7 @@ const entries: SeedEntry[] = [
   },
   {
     key: "repo-files",
-    kind: COMPOSITE_KIND,
+    kind: GROUP_KIND,
     label: "files",
     createdAt: at(9),
     parents: ["repo-map"],
@@ -128,7 +128,7 @@ const entries: SeedEntry[] = [
   // A merge of two parents, nesting metric blocks with their own state schema.
   {
     key: "usage",
-    kind: COMPOSITE_KIND,
+    kind: GROUP_KIND,
     label: "usage",
     createdAt: at(12),
     parents: ["tools", "repo"],

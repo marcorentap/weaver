@@ -23,14 +23,14 @@ export function KeyHelp({
 }) {
   return (
     <ModalFrame
-      label="help"
-      title="help"
+      label="Help"
+      title="Help"
       meta={layers.map((layer) => layer.id).join(" › ")}
-      footer={`${HELP_KEY} or esc close`}
+      footer={`${HELP_KEY} or esc Close`}
       onClose={onClose}
     >
       <div className="max-h-96 overflow-y-auto overscroll-contain pb-1">
-        <h2 className="border-b px-3 py-0.5 font-medium">keybindings</h2>
+        <h2 className="border-b px-3 py-0.5 font-medium">Keybindings</h2>
         {layers
           .slice()
           .reverse()

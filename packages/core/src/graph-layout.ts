@@ -8,7 +8,7 @@ import { getBlock, topLevelBlockIds, topoSort } from "./block";
  */
 export type GraphRow = {
   block: Block;
-  /** Nesting level. 0 is top level; composite children are deeper. */
+  /** Nesting level. 0 is top level; group children are deeper. */
   depth: number;
   /** Column this block's node sits in. */
   lane: number;

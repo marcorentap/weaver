@@ -30,6 +30,9 @@ export const timerKind = defineKind({
   snapshot: (state) =>
     `every ${state.intervalMs}ms, calls ${state.hook} on ${state.targetId} (${state.ticks} ticks)`,
   schedule: (state) => ({ intervalMs: state.intervalMs, hook: "tick" }),
+  callbacks: [
+    { label: "On tick", targetField: "targetId", hookField: "hook" },
+  ],
   hooks: {
     /** The runtime's own tick, per `schedule` above. Nothing stops another
      *  block from calling it directly too — that just calls its target
@@ -38,5 +41,12 @@ export const timerKind = defineKind({
       await ctx.call(state.targetId, state.hook);
       return { ...state, ticks: state.ticks + 1, lastTickAt: Date.now() };
     },
+  },
+  defaults: {
+    intervalMs: 1000,
+    targetId: "",
+    hook: "",
+    ticks: 0,
+    lastTickAt: null,
   },
 });

@@ -111,7 +111,7 @@ export default function SettingsPage() {
     {
       kind: "option",
       key: "lineNumber",
-      label: "line number",
+      label: "Line number",
       description: "Show each block's position in the left gutter of chat.",
       options: LINE_NUMBER_OPTIONS,
       value: settings.lineNumber,
@@ -147,27 +147,27 @@ export default function SettingsPage() {
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "next setting" },
+        help: { keys: "↓ / j", label: "Next setting" },
         run: () => move(1),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "previous setting" },
+        help: { keys: "↑ / k", label: "Previous setting" },
         run: () => move(-1),
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: { keys: "← / h", label: "previous value" },
+        help: { keys: "← / h", label: "Previous value" },
         run: () => def && cycle(def, -1),
       },
       {
         keys: ["ArrowRight", "l"],
-        help: { keys: "→ / l", label: "next value" },
+        help: { keys: "→ / l", label: "Next value" },
         run: () => def && cycle(def, 1),
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "type a value" },
+        help: { keys: "enter", label: "Type a value" },
         run: () => def && startEdit(def),
       },
     ],
@@ -181,8 +181,8 @@ export default function SettingsPage() {
     bindings: [],
     docs: editing
       ? [
-          { keys: "enter", label: "save value" },
-          { keys: "esc", label: "cancel" },
+          { keys: "enter", label: "Save value" },
+          { keys: "esc", label: "Cancel" },
         ]
       : [],
   });
@@ -190,7 +190,7 @@ export default function SettingsPage() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="border-b px-3 py-1">
-        <span className="font-semibold">settings</span>
+        <span className="font-semibold">Settings</span>
       </header>
 
       <div className="py-1">
@@ -219,7 +219,7 @@ export default function SettingsPage() {
                 {entry.kind === "string" ? null : (
                   <button
                     type="button"
-                    aria-label="previous value"
+                    aria-label="Previous value"
                     disabled={!hydrated}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -270,7 +270,7 @@ export default function SettingsPage() {
                 {entry.kind === "string" ? null : (
                   <button
                     type="button"
-                    aria-label="next value"
+                    aria-label="Next value"
                     disabled={!hydrated}
                     onClick={(event) => {
                       event.stopPropagation();
