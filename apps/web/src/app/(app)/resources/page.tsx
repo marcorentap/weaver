@@ -1,8 +1,11 @@
 export default function ResourcesPage() {
   return (
-    <div className="p-4 space-y-1">
-      <h1 className="font-semibold">resources</h1>
-      <p className="text-muted-foreground">Nothing here yet.</p>
+    <div className="flex min-h-full flex-col">
+      <header className="border-b px-3 py-1">
+        <span className="font-semibold">resources</span>
+      </header>
+
+      <p className="p-3 text-muted-foreground">Nothing here yet.</p>
     </div>
   );
 }
