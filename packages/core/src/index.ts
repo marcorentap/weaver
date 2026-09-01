@@ -8,7 +8,7 @@ import {
   topLevelBlockIds,
   topoSort,
 } from "./block";
-import type { BlockKind, KindRegistry, SnapshotContext } from "./kind";
+import type { BlockKind, HookContext, KindRegistry, SnapshotContext } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
 import type { CompositeState, TextState } from "./kinds/text";
 import {
@@ -32,6 +32,7 @@ export type {
   CompositeState,
   GraphLayout,
   GraphRow,
+  HookContext,
   KindRegistry,
   SnapshotContext,
   TextState,
