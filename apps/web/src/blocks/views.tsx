@@ -90,8 +90,15 @@ function MediaRow({ state }: { state: MediaState }) {
         // A media block's URI is arbitrary — any host, or a local file behind
         // the media route — so next/image, which validates src against a fixed
         // remotePatterns list, cannot serve it.
+        // `max-height` alone leaves an intrinsically small image (an icon-size
+        // svg, say) at its natural size instead of filling the row; a fixed
+        // `h-48` plus `object-contain` scales every image up or down to it.
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={src} alt="" className="max-h-48 w-auto shrink-0 border" />
+        <img
+          src={src}
+          alt=""
+          className="h-48 w-48 shrink-0 border object-contain"
+        />
       ) : null}
       {type === "video" ? (
         <video
