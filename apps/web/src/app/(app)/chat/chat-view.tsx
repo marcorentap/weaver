@@ -35,6 +35,7 @@ import {
   createChatSession,
   deleteChatBlock,
   moveChatBlock,
+  renameChatSession,
   saveGraph,
   updateBlockField,
 } from "./actions";
@@ -52,6 +53,7 @@ type Popup =
   | { kind: "createKind" }
   | { kind: "createLabel" }
   | { kind: "createSession" }
+  | { kind: "renameSession" }
   | null;
 
 /** One rendered row of the unfolded tree; media rows are taller than a line. */
@@ -701,6 +703,30 @@ export function ChatView({
     router.push(`/chat?session=${encodeURIComponent(trimmed)}`);
   };
 
+  /** Renames the open session, then follows it to its new address — the URL
+   *  addresses sessions by name, so the rename has to navigate. */
+  const renameSession = async (name: string) => {
+    if (!session) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError("name is required");
+      return;
+    }
+    if (trimmed === session.name) {
+      setPopup(null);
+      return;
+    }
+    setSaving(true);
+    const result = await renameChatSession(session.id, trimmed);
+    setSaving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setPopup(null);
+    router.push(`/chat?session=${encodeURIComponent(trimmed)}`);
+  };
+
   /**
    * The enter menu: whatever the kind declares (full-size preview, editable
    * fields), then the actions every block has.
@@ -862,6 +888,19 @@ export function ChatView({
         setPopup({ kind: "createSession" });
       },
     },
+    ...(session
+      ? [
+          {
+            label: "Rename session",
+            key: "r",
+            detail: session.name,
+            run: () => {
+              setError(null);
+              setPopup({ kind: "renameSession" });
+            },
+          },
+        ]
+      : []),
     {
       label: "Save now",
       key: "s",
@@ -1034,6 +1073,18 @@ export function ChatView({
           error={error}
           saving={saving}
           onSubmit={(value) => void createSession(value)}
+          onCancel={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "renameSession" && session ? (
+        <FieldEditor
+          id="rename-session"
+          title={`Rename ${session.name}`}
+          field={{ name: "name", label: "name", value: session.name }}
+          error={error}
+          saving={saving}
+          onSubmit={(value) => void renameSession(value)}
           onCancel={() => setPopup(null)}
         />
       ) : null}

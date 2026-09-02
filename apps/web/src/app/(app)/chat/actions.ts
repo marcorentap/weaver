@@ -115,6 +115,27 @@ export async function createChatSession(
   return { error: null };
 }
 
+/** Renames a session in place — same graph, same blocks, new address. */
+export async function renameChatSession(
+  graphId: string,
+  name: string,
+): Promise<{ error: string | null }> {
+  const store = getStore();
+  const taken = store.findGraph(name);
+  if (taken && taken.id !== graphId) {
+    return { error: `a session named "${name}" already exists` };
+  }
+
+  try {
+    store.renameGraph(graphId, name);
+  } catch (error) {
+    return { error: schemaMessage(error) };
+  }
+
+  revalidatePath("/chat");
+  return { error: null };
+}
+
 /**
  * Persists the client's whole live graph in one write — autosave and the
  * manual `s` → `s` shortcut both call this. The client is the source of

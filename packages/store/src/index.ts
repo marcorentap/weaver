@@ -76,6 +76,9 @@ export type Store = {
   listGraphs: () => GraphRecord[];
   findGraph: (name: string) => GraphRecord | undefined;
   createGraph: (name: string) => GraphRecord;
+  /** Renames a graph in place, keeping its id and its blocks. Throws if the
+   *  name is already taken — `graph.name` is unique. */
+  renameGraph: (id: string, name: string) => void;
   deleteGraph: (id: string) => void;
   loadGraph: (graphId: string) => BlockGraph;
   /**
@@ -131,6 +134,9 @@ export function openStore(options: StoreOptions = {}): Store {
     "INSERT INTO graph (id, name, created_at, modified_at) VALUES (?, ?, ?, ?)",
   );
   const touchGraph = db.prepare("UPDATE graph SET modified_at = ? WHERE id = ?");
+  const renameGraphStmt = db.prepare(
+    "UPDATE graph SET name = ?, modified_at = ? WHERE id = ?",
+  );
   const deleteGraphStmt = db.prepare("DELETE FROM graph WHERE id = ?");
 
   const selectBlocks = db.prepare(`
@@ -214,6 +220,8 @@ export function openStore(options: StoreOptions = {}): Store {
       insertGraph.run(id, name, now, now);
       return { id, name, createdAt: now, modifiedAt: now };
     },
+
+    renameGraph: (id, name) => void renameGraphStmt.run(name, Date.now(), id),
 
     deleteGraph: (id) => void deleteGraphStmt.run(id),
 
