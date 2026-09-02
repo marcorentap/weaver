@@ -656,6 +656,11 @@ export function ChatView({
         run: (count) => jump(count ?? rows.length),
       },
       {
+        chord: ["g", "g"],
+        help: { keys: "gg", label: "Jump to first block" },
+        run: () => jump(1),
+      },
+      {
         keys: ["ctrl+o"],
         help: { keys: "ctrl+o", label: "Show or hide clipped content" },
         run: () => {
