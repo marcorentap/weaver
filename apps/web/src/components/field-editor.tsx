@@ -56,6 +56,7 @@ export function FieldEditor({
           autoFocus
           value={value}
           disabled={saving}
+          placeholder={field.placeholder}
           inputMode={field.type === "number" ? "decimal" : "text"}
           spellCheck={false}
           onChange={(event) => setValue(event.target.value)}
@@ -68,7 +69,7 @@ export function FieldEditor({
               onCancel();
             }
           }}
-          className="w-full border bg-background px-2 py-1 outline-none focus:border-foreground/40 disabled:opacity-50"
+          className="w-full border bg-background px-2 py-1 outline-none placeholder:text-muted-foreground/50 focus:border-foreground/40 disabled:opacity-50"
         />
         {error ? <p className="text-destructive">{error}</p> : null}
       </div>

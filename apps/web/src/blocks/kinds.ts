@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { coreKinds, defineKind, kindRegistry } from "@repo/core";
+import { agentKind } from "./agent";
 import { issLocationKind } from "./iss";
 import { mediaKind } from "./media";
 import { timerKind } from "./timer";
@@ -48,4 +49,5 @@ export const kinds = kindRegistry([
   mediaKind,
   timerKind,
   issLocationKind,
+  agentKind,
 ]);

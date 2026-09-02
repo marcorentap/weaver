@@ -1,14 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { z } from "zod";
 import {
   LINE_NUMBER_OPTIONS,
   useSettings,
   type LineNumberMode,
 } from "@/lib/settings";
 import { useKeyLayer } from "@/lib/keymap";
+import { providerUrl } from "@/lib/provider";
 import { cn } from "@/lib/utils";
+
+/** Verdict from `/api/agent/check` — a failed probe still answers 200. */
+const checkVerdict = z.object({ ok: z.boolean(), message: z.string() });
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -23,6 +28,9 @@ type SettingDef =
       key: string;
       label: string;
       description: string;
+      /** A section heading rendered above this entry — only the first
+       *  entry of a group sets it. */
+      section?: string;
       options: readonly { value: string; label: string }[];
       value: string;
       onChange: (value: string) => void;
@@ -32,6 +40,7 @@ type SettingDef =
       key: string;
       label: string;
       description: string;
+      section?: string;
       value: number;
       step: number;
       min?: number;
@@ -43,8 +52,21 @@ type SettingDef =
       key: string;
       label: string;
       description: string;
+      section?: string;
       value: string;
       onChange: (value: string) => void;
+      /** Rejects a typed value on `enter`, returning why. A rejected edit
+       *  stays open with the draft intact, so nothing is silently dropped
+       *  and nothing invalid is ever stored. */
+      validate?: (value: string) => string | null;
+      /** Part of the provider credentials: committing it re-runs the live
+       *  reachability check. */
+      provider?: boolean;
+      /** Masked when not focused for editing — an API key. */
+      secret?: boolean;
+      /** Shown, in gray, in place of an empty value — an example rather
+       *  than a default. */
+      placeholder?: string;
     };
 
 function displayValue(def: SettingDef): string {
@@ -57,7 +79,7 @@ function displayValue(def: SettingDef): string {
     case "number":
       return String(def.value);
     case "string":
-      return def.value || "—";
+      return def.value ? (def.secret ? "•".repeat(8) : def.value) : "";
   }
 }
 
@@ -101,10 +123,24 @@ function commitEdit(def: Extract<SettingDef, { kind: "number" | "string" }>, raw
 }
 
 export default function SettingsPage() {
-  const { settings, hydrated, setLineNumber } = useSettings();
+  const {
+    settings,
+    hydrated,
+    setLineNumber,
+    setAiEndpoint,
+    setAiApiKey,
+    setAiDefaultModel,
+  } = useSettings();
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  /** Why the open edit was rejected, if it was. */
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  /** Result of the last provider check; `ok: null` while it is in flight. */
+  const [probe, setProbe] = useState<{
+    ok: boolean | null;
+    message: string;
+  } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const defs: SettingDef[] = [
@@ -116,6 +152,43 @@ export default function SettingsPage() {
       options: LINE_NUMBER_OPTIONS,
       value: settings.lineNumber,
       onChange: (value) => setLineNumber(value as LineNumberMode),
+    },
+    {
+      kind: "string",
+      key: "aiEndpoint",
+      label: "Endpoint",
+      description: "OpenAI-completions base URL an agent block calls.",
+      section: "AI provider",
+      value: settings.aiEndpoint,
+      onChange: setAiEndpoint,
+      placeholder: "https://api.openai.com/v1",
+      provider: true,
+      // Same check the proxy route runs, so a URL accepted here is one an
+      // agent block can actually call.
+      validate: (value) =>
+        !value.trim() || providerUrl(value, "models")
+          ? null
+          : "needs a scheme and host, e.g. https://api.openai.com/v1",
+    },
+    {
+      kind: "string",
+      key: "aiApiKey",
+      label: "API key",
+      description: "Bearer token sent to the endpoint above.",
+      value: settings.aiApiKey,
+      onChange: setAiApiKey,
+      secret: true,
+      placeholder: "sk-...",
+      provider: true,
+    },
+    {
+      kind: "string",
+      key: "aiDefaultModel",
+      label: "Default model",
+      description: "Used when an agent block's own model field is blank.",
+      value: settings.aiDefaultModel,
+      onChange: setAiDefaultModel,
+      placeholder: "anthropic/claude-haiku-4-5",
     },
   ];
 
@@ -131,15 +204,53 @@ export default function SettingsPage() {
     if (!isEditable(target)) return;
     setDraft(String(target.value));
     setEditing(target.key);
+    setFieldError(null);
     // The input mounts this render; focus it once it exists.
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  const finishEdit = () => {
-    if (editing && def && def.key === editing && isEditable(def)) {
-      commitEdit(def, draft);
+  /** Asks the server whether the current pair actually works. Runs on every
+   *  committed endpoint or key, since either one alone proves nothing. */
+  const checkProvider = async (endpoint: string, apiKey: string) => {
+    if (!endpoint.trim() && !apiKey) {
+      setProbe(null);
+      return;
     }
+    setProbe({ ok: null, message: "checking…" });
+    try {
+      const res = await fetch("/api/agent/check", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ endpoint, apiKey }),
+      });
+      const verdict = checkVerdict.parse(await res.json());
+      setProbe({ ok: verdict.ok, message: verdict.message });
+    } catch {
+      setProbe({ ok: false, message: "check request failed" });
+    }
+  };
+
+  const finishEdit = () => {
+    if (!editing || !def || def.key !== editing || !isEditable(def)) {
+      setEditing(null);
+      return;
+    }
+    const invalid = def.kind === "string" ? (def.validate?.(draft) ?? null) : null;
+    if (invalid) {
+      // Stays open with the draft intact: the value is the user's, and
+      // discarding what they typed to tell them it was wrong is hostile.
+      setFieldError(invalid);
+      return;
+    }
+    commitEdit(def, draft);
+    setFieldError(null);
     setEditing(null);
+    if (def.kind === "string" && def.provider) {
+      void checkProvider(
+        def.key === "aiEndpoint" ? draft : settings.aiEndpoint,
+        def.key === "aiApiKey" ? draft : settings.aiApiKey,
+      );
+    }
   };
 
   useKeyLayer({
@@ -197,93 +308,148 @@ export default function SettingsPage() {
         {defs.map((entry, i) => {
           const selected = i === index;
           const isEditing = editing === entry.key;
+          const showPlaceholder =
+            entry.kind === "string" &&
+            !entry.value &&
+            !isEditing &&
+            entry.placeholder;
           return (
-            <div
-              key={entry.key}
-              aria-selected={selected}
-              onClick={() => setCursor(i)}
-              className={cn(
-                "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
-                selected
-                  ? "border-foreground/60 bg-muted"
-                  : "border-transparent hover:bg-muted/40",
-              )}
-            >
-              <span className="min-w-0 flex-1">
-                <span className="block font-medium">{entry.label}</span>
-                <span className="block text-muted-foreground">
-                  {entry.description}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-1">
-                {entry.kind === "string" ? null : (
-                  <button
-                    type="button"
-                    aria-label="Previous value"
-                    disabled={!hydrated}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCursor(i);
-                      cycle(entry, -1);
-                    }}
-                    className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                  >
-                    <ChevronLeft className="size-4" />
-                  </button>
+            <Fragment key={entry.key}>
+              {entry.section ? (
+                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
+                  {entry.section}
+                </div>
+              ) : null}
+              <div
+                aria-selected={selected}
+                onClick={() => setCursor(i)}
+                className={cn(
+                  "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
+                  selected
+                    ? "border-foreground/60 bg-muted"
+                    : "border-transparent hover:bg-muted/40",
                 )}
-                {isEditing ? (
-                  <input
-                    ref={inputRef}
-                    value={draft}
-                    inputMode={entry.kind === "number" ? "decimal" : "text"}
-                    spellCheck={false}
-                    onClick={(event) => event.stopPropagation()}
-                    onChange={(event) => setDraft(event.target.value)}
-                    onBlur={finishEdit}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        finishEdit();
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        setEditing(null);
-                      }
-                    }}
-                    className="w-20 border-b border-foreground/40 bg-transparent text-center outline-none"
-                  />
-                ) : (
-                  <span
-                    onClick={(event) => {
-                      if (!isEditable(entry)) return;
-                      event.stopPropagation();
-                      setCursor(i);
-                      startEdit(entry);
-                    }}
-                    className={cn(
-                      "w-20 text-center tabular-nums",
-                      isEditable(entry) ? "cursor-text hover:text-foreground" : "",
-                    )}
-                  >
-                    {hydrated ? displayValue(entry) : ""}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{entry.label}</span>
+                  <span className="block text-muted-foreground">
+                    {entry.description}
                   </span>
-                )}
-                {entry.kind === "string" ? null : (
-                  <button
-                    type="button"
-                    aria-label="Next value"
-                    disabled={!hydrated}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCursor(i);
-                      cycle(entry, 1);
-                    }}
-                    className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                  >
-                    <ChevronRight className="size-4" />
-                  </button>
-                )}
-              </span>
-            </div>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {entry.kind === "string" ? null : (
+                      <button
+                        type="button"
+                        aria-label="Previous value"
+                        disabled={!hydrated}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setCursor(i);
+                          cycle(entry, -1);
+                        }}
+                        className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        <ChevronLeft className="size-4" />
+                      </button>
+                    )}
+                  </span>
+                  {isEditing ? (
+                    <input
+                      ref={inputRef}
+                      value={draft}
+                      type={
+                        entry.kind === "string" && entry.secret
+                          ? "password"
+                          : "text"
+                      }
+                      placeholder={
+                        entry.kind === "string" ? entry.placeholder : undefined
+                      }
+                      inputMode={entry.kind === "number" ? "decimal" : "text"}
+                      spellCheck={false}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(event) => setDraft(event.target.value)}
+                      onBlur={finishEdit}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          finishEdit();
+                        } else if (event.key === "Escape") {
+                          event.preventDefault();
+                          setFieldError(null);
+                          setEditing(null);
+                        }
+                      }}
+                      className={cn(
+                        "w-56 border-b border-foreground/40 bg-transparent outline-none placeholder:text-muted-foreground/50",
+                        entry.kind === "string" ? "text-left" : "text-center",
+                      )}
+                    />
+                  ) : (
+                    <span
+                      onClick={(event) => {
+                        if (!isEditable(entry)) return;
+                        event.stopPropagation();
+                        setCursor(i);
+                        startEdit(entry);
+                      }}
+                      className={cn(
+                        "w-56 truncate tabular-nums",
+                        entry.kind === "string" ? "text-left" : "text-center",
+                        isEditable(entry)
+                          ? "cursor-text hover:text-foreground"
+                          : "",
+                      )}
+                    >
+                      {hydrated
+                        ? showPlaceholder
+                          ? (
+                              <span className="text-muted-foreground/50">
+                                {entry.placeholder}
+                              </span>
+                            )
+                          : displayValue(entry)
+                        : ""}
+                    </span>
+                  )}
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {entry.kind === "string" ? null : (
+                      <button
+                        type="button"
+                        aria-label="Next value"
+                        disabled={!hydrated}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setCursor(i);
+                          cycle(entry, 1);
+                        }}
+                        className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                      >
+                        <ChevronRight className="size-4" />
+                      </button>
+                    )}
+                  </span>
+                </span>
+              </div>
+              {isEditing && fieldError ? (
+                <div className="px-1 pb-1 pl-1 text-destructive">
+                  {entry.label}: {fieldError}
+                </div>
+              ) : null}
+              {entry.kind === "string" && entry.key === "aiApiKey" && probe ? (
+                <div
+                  className={cn(
+                    "px-1 pb-1 pl-1",
+                    probe.ok === false
+                      ? "text-destructive"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  Provider: {probe.message}
+                </div>
+              ) : null}
+            </Fragment>
           );
         })}
       </div>

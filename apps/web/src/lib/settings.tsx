@@ -26,11 +26,23 @@ export const LINE_NUMBER_OPTIONS = [
 type Settings = {
   /** Left-hand gutter beside each chat block. */
   lineNumber: LineNumberMode;
+  /** Base URL of an OpenAI-completions provider, e.g. "http://seer:4000/v1"
+   *  — an agent block appends "/chat/completions" itself. */
+  aiEndpoint: string;
+  /** Bearer token sent to `aiEndpoint`. */
+  aiApiKey: string;
+  /** Model id an agent block uses when its own `model` field is blank. */
+  aiDefaultModel: string;
 };
 
 const STORAGE_KEY = "weaver.settings";
 
-const DEFAULTS: Settings = { lineNumber: "absolute" };
+const DEFAULTS: Settings = {
+  lineNumber: "absolute",
+  aiEndpoint: "",
+  aiApiKey: "",
+  aiDefaultModel: "",
+};
 
 /** Snapshot of everything the provider exposes; `hydrated` flips once the
  *  stored value has been read, so consumers never flash the wrong gutter. */
@@ -57,6 +69,16 @@ function getServerSnapshot(): Snapshot {
   return SERVER_SNAPSHOT;
 }
 
+/**
+ * The current settings outside a component — for plain functions called
+ * during the render of something that already subscribes (a kind's `fields`,
+ * called from chat's own render). Not reactive on its own: a caller that
+ * needs to re-render on a change must use `useSettings`.
+ */
+export function readSettings(): Settings {
+  return current.settings;
+}
+
 function commit(next: Snapshot) {
   current = next;
   emit();
@@ -66,6 +88,9 @@ type SettingsContextValue = {
   settings: Settings;
   hydrated: boolean;
   setLineNumber: (mode: LineNumberMode) => void;
+  setAiEndpoint: (value: string) => void;
+  setAiApiKey: (value: string) => void;
+  setAiDefaultModel: (value: string) => void;
 };
 
 const context = createContext<SettingsContextValue | null>(null);
@@ -83,9 +108,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       const stored = raw ? (JSON.parse(raw) as Partial<Settings>) : null;
       commit({
-        settings: stored?.lineNumber
-          ? { ...DEFAULTS, lineNumber: stored.lineNumber }
-          : DEFAULTS,
+        settings: {
+          lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
+          aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
+          aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
+          aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
+        },
         hydrated: true,
       });
     } catch {
@@ -94,8 +122,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const setLineNumber = useCallback((lineNumber: LineNumberMode) => {
-    const next = { ...current.settings, lineNumber };
+  /** Every setter writes one field the same way: merge, persist, commit. */
+  const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
+    const next = { ...current.settings, [key]: value };
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     } catch {
@@ -104,9 +133,33 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     commit({ settings: next, hydrated: current.hydrated });
   }, []);
 
+  const setLineNumber = useCallback(
+    (lineNumber: LineNumberMode) => set("lineNumber", lineNumber),
+    [set],
+  );
+  const setAiEndpoint = useCallback(
+    (value: string) => set("aiEndpoint", value),
+    [set],
+  );
+  const setAiApiKey = useCallback(
+    (value: string) => set("aiApiKey", value),
+    [set],
+  );
+  const setAiDefaultModel = useCallback(
+    (value: string) => set("aiDefaultModel", value),
+    [set],
+  );
+
   const value = useMemo(
-    () => ({ settings, hydrated, setLineNumber }),
-    [settings, hydrated, setLineNumber],
+    () => ({
+      settings,
+      hydrated,
+      setLineNumber,
+      setAiEndpoint,
+      setAiApiKey,
+      setAiDefaultModel,
+    }),
+    [settings, hydrated, setLineNumber, setAiEndpoint, setAiApiKey, setAiDefaultModel],
   );
 
   return <context.Provider value={value}>{children}</context.Provider>;
