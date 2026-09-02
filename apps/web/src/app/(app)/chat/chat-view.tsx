@@ -302,6 +302,14 @@ function PreviewModal({
     setPlayer(true);
   }, []);
 
+  /** One line of vim-style scroll, in pixels — a reasonable step at the
+   * rail's text-xs scale rather than a measured line height, since the
+   * scrollable element varies (a `<pre>` for code, a markdown `<div>`). */
+  const scrollBy = (lines: number) => {
+    const scroller = body.current?.querySelector<HTMLElement>(".overflow-auto");
+    scroller?.scrollBy({ top: lines * 20 });
+  };
+
   useKeyLayer({
     id: "preview",
     modal: true,
@@ -315,6 +323,17 @@ function PreviewModal({
             },
           ]
         : []),
+      // No-ops when nothing in the preview scrolls (an image, a player) —
+      // player already owns arrow keys, so j/k stay clear for that case too.
+      {
+        keys: ["j"],
+        help: { keys: "j / k", label: "Scroll" },
+        run: (count) => scrollBy(count ?? 1),
+      },
+      {
+        keys: ["k"],
+        run: (count) => scrollBy(-(count ?? 1)),
+      },
       {
         keys: ["Escape", "q"],
         help: { keys: "esc / q", label: "Close" },
