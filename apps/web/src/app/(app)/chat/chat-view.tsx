@@ -133,13 +133,20 @@ function InsertGap({ onClick }: { onClick: () => void }) {
   );
 }
 
+/** Tall content is clipped to this many lines until it is unhidden. Rows are
+ *  `text-xs`, whose line height is exactly `1rem`, so this is also its
+ *  height in rem. */
+const CLIP_LINES = 25;
+
 function BlockRow({
   row,
   selected,
   line,
   gutter,
+  shown,
   onSelect,
   onToggle,
+  onShow,
 }: {
   row: Row;
   selected: boolean;
@@ -147,17 +154,45 @@ function BlockRow({
   line: number | null;
   /** Whether the gutter column is enabled at all (hidden pre-hydration). */
   gutter: boolean;
+  /** Whether this row's content is shown in full rather than clipped. */
+  shown: boolean;
   /** Click anywhere on the row: select it and open its actions, like `enter`. */
   onSelect: () => void;
   /** Click the chevron: fold or unfold, without opening actions. */
   onToggle: () => void;
+  /** Click the "more lines" marker: unhide the rest of this row. */
+  onShow: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  /** Lines the clip is currently hiding, measured rather than guessed —
+   *  markdown, images and fetched text all settle after the first render. */
+  const [clipped, setClipped] = useState(0);
   const view = viewFor(row.block);
 
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
   }, [selected]);
+
+  useEffect(() => {
+    const box = content.current;
+    // Nothing to measure once the row is shown in full; the stale count is
+    // simply not rendered, and a re-hide measures again.
+    if (!box || shown) return;
+    const inner = box.firstElementChild;
+    const measure = () => {
+      const height = parseFloat(getComputedStyle(box).lineHeight) || 16;
+      const over = box.scrollHeight - box.clientHeight;
+      setClipped(over > 1 ? Math.max(1, Math.round(over / height)) : 0);
+    };
+    measure();
+    // The clip's own box never changes size, so the content inside it is what
+    // has to be watched: a media block's text arrives long after mount.
+    if (!inner) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [shown]);
 
   return (
     <div
@@ -208,7 +243,27 @@ function BlockRow({
       <span className="w-16 shrink-0 text-muted-foreground">
         {row.block.kind}
       </span>
-      <view.Row block={row.block} nested={row.nested} />
+      <span className="flex min-w-0 flex-1 flex-col items-start">
+        <div
+          ref={content}
+          className={cn("flex w-full", shown ? "" : "overflow-hidden")}
+          style={shown ? undefined : { maxHeight: `${CLIP_LINES}rem` }}
+        >
+          <view.Row block={row.block} nested={row.nested} />
+        </div>
+        {!shown && clipped > 0 ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onShow();
+            }}
+            className="text-muted-foreground/60 hover:text-foreground"
+          >
+            {clipped} more {clipped === 1 ? "line" : "lines"} — click or ctrl+o
+          </button>
+        ) : null}
+      </span>
     </div>
   );
 }
@@ -303,6 +358,10 @@ export function ChatView({
   const [expanded, setExpanded] = useState<ReadonlySet<BlockId>>(
     () => new Set(),
   );
+  /** Rows whose clipped content has been unhidden, and the override that
+   *  unhides every row at once — `ctrl+o`. */
+  const [shown, setShown] = useState<ReadonlySet<BlockId>>(() => new Set());
+  const [showEverything, setShowEverything] = useState(false);
   const [popup, setPopup] = useState<Popup>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -592,6 +651,17 @@ export function ChatView({
         keys: ["G"],
         help: { keys: "G / <n>G", label: "Jump to last block / line <n>" },
         run: (count) => jump(count ?? rows.length),
+      },
+      {
+        keys: ["ctrl+o"],
+        help: { keys: "ctrl+o", label: "Show or hide clipped content" },
+        run: () => {
+          const next = !showEverything;
+          setShowEverything(next);
+          // Hiding again drops the rows unhidden one at a time too, so the
+          // key is a real toggle rather than a one-way door.
+          if (!next) setShown(new Set());
+        },
       },
     ],
   });
@@ -956,6 +1026,12 @@ export function ChatView({
                 row={entry}
                 selected={i === index}
                 line={lineNumber(i)}
+                shown={showEverything || shown.has(entry.block.id)}
+                onShow={() =>
+                  setShown((current) =>
+                    new Set(current).add(entry.block.id),
+                  )
+                }
                 gutter={gutter}
                 onSelect={() => {
                   setCursor(i);

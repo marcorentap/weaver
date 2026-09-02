@@ -20,7 +20,11 @@ import { KeyHelp } from "@/components/key-help";
  * dangling by a route change or an unmounted dialog.
  */
 export type KeyBinding = {
-  /** Matched against `KeyboardEvent.key`, so "Enter" and "s" both work. */
+  /**
+   * Matched against `KeyboardEvent.key`, so "Enter" and "s" both work. A
+   * `ctrl+`-prefixed lowercase name ("ctrl+o") matches that key held with
+   * ctrl or cmd; unprefixed names never match a modified press.
+   */
   keys?: string[];
   /**
    * A two-key sequence — `["Tab", "1"]` waits for `Tab` then `1` — instead of
@@ -132,8 +136,26 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.ctrlKey || event.metaKey || event.altKey) return;
       if (isTextEntry(event.target)) return;
+
+      // A modified key reaches only bindings that asked for it by name, and
+      // skips counts, chords and help entirely: `3ctrl+o` is not a thing,
+      // and an unclaimed browser shortcut must keep working.
+      if (event.ctrlKey || event.metaKey) {
+        if (event.altKey) return;
+        const combo = `ctrl+${event.key.toLowerCase()}`;
+        forEachReachableLayer((layer) => {
+          const binding = layer.bindings.find((entry) =>
+            entry.keys?.includes(combo),
+          );
+          if (!binding) return false;
+          event.preventDefault();
+          binding.run();
+          return true;
+        });
+        return;
+      }
+      if (event.altKey) return;
 
       // Help is reserved: a modal layer must not be able to hide the only way
       // of finding out which keys it binds.
