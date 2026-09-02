@@ -1,12 +1,11 @@
 import type { BlockGraph } from "@repo/core";
 import { getStore } from "@/lib/store";
-import { chatNodes } from "@/lib/graph-view";
 import { ChatView } from "./chat-view";
 
 // Reads a live database, so it must never be prerendered.
 export const dynamic = "force-dynamic";
 
-const EMPTY: BlockGraph = { blocks: {} };
+const EMPTY: BlockGraph = { blocks: {}, root: null };
 
 export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
   const { session } = await searchParams;
@@ -31,7 +30,7 @@ export default async function ChatPage({ searchParams }: PageProps<"/chat">) {
       key={active?.id ?? "none"}
       sessions={sessions}
       session={active ? { id: active.id, name: active.name } : null}
-      nodes={chatNodes(graph)}
+      initialGraph={graph}
     />
   );
 }

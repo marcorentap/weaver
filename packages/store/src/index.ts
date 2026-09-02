@@ -11,7 +11,7 @@ import type {
   BlockId,
   KindRegistry,
 } from "@repo/core";
-import { assertAcyclic, assertValidData } from "@repo/core";
+import { assertTree, assertValidData, rootOf } from "@repo/core";
 import { SCHEMA_SQL, SCHEMA_VERSION } from "./schema";
 
 /** Rows come off disk, so they are validated rather than trusted. */
@@ -21,13 +21,9 @@ const blockRowSchema = z.object({
   label: z.string(),
   created_at: z.number().int(),
   modified_at: z.number().int(),
+  next_id: z.string().nullable(),
+  children_id: z.string().nullable(),
   data: z.string(),
-});
-
-const edgeRowSchema = z.object({
-  parent_id: z.string(),
-  child_id: z.string(),
-  relation: z.enum(["depends", "contains"]),
 });
 
 const graphRowSchema = z.object({
@@ -37,8 +33,8 @@ const graphRowSchema = z.object({
   modified_at: z.number().int(),
 });
 
+const idRowSchema = z.object({ id: z.string() });
 const blockDataSchema = z.record(z.string(), z.unknown());
-const countSchema = z.object({ n: z.number().int() });
 
 export function defaultStorePath(): string {
   return process.env.WEAVER_STORE ?? join(homedir(), ".weaver", "store.db");
@@ -46,13 +42,13 @@ export function defaultStorePath(): string {
 
 /**
  * Node exposes no UUIDv7, so ids are v4 and carry no time information.
- * Ordering comes from `createdAt` / `modifiedAt` instead.
+ * Ordering comes from the blocks' own links instead.
  */
 export function newId(): string {
   return randomUUID();
 }
 
-/** One graph: an independent block DAG, addressed by name. */
+/** One graph: an independent block tree, addressed by name. */
 export type GraphRecord = {
   id: string;
   name: string;
@@ -60,14 +56,19 @@ export type GraphRecord = {
   modifiedAt: number;
 };
 
-/** A block as callers supply it; `modifiedAt` and `revision` belong to the store. */
+/**
+ * A block as callers supply it; `modifiedAt` and `revision` belong to the
+ * store. Both links default to null — a lone block links to nothing. A
+ * `Block` already satisfies this, so a caller holding a graph writes
+ * `Object.values(graph.blocks)` rather than re-mapping every field.
+ */
 export type BlockInput = {
   id: BlockId;
   kind: string;
   label: string;
   createdAt: number;
-  parents?: BlockId[];
-  children?: BlockId[];
+  next?: BlockId | null;
+  children?: BlockId | null;
   data?: BlockData;
 };
 
@@ -77,9 +78,14 @@ export type Store = {
   createGraph: (name: string) => GraphRecord;
   deleteGraph: (id: string) => void;
   loadGraph: (graphId: string) => BlockGraph;
-  countBlocks: (graphId: string) => number;
-  putBlocks: (graphId: string, inputs: BlockInput[]) => void;
-  deleteBlock: (id: BlockId) => void;
+  /**
+   * Replace a graph's blocks with exactly `inputs`: rows absent from it are
+   * deleted. A tree is only ever valid as a whole — an insert rewrites its
+   * new neighbor's link, a delete rewrites its predecessor's — so callers
+   * apply core's tree operations to a loaded graph and write the result back,
+   * rather than trying to express structural edits row by row.
+   */
+  writeGraph: (graphId: string, inputs: BlockInput[]) => void;
   close: () => void;
 };
 
@@ -127,47 +133,26 @@ export function openStore(options: StoreOptions = {}): Store {
   const touchGraph = db.prepare("UPDATE graph SET modified_at = ? WHERE id = ?");
   const deleteGraphStmt = db.prepare("DELETE FROM graph WHERE id = ?");
 
-  const selectBlocks = db.prepare(
-    "SELECT id, kind, label, created_at, modified_at, data FROM block WHERE graph_id = ?",
-  );
-  const selectEdges = db.prepare(`
-    SELECT e.parent_id, e.child_id, e.relation
-    FROM block_edge e
-    JOIN block p ON p.id = e.parent_id
-    WHERE p.graph_id = ?
+  const selectBlocks = db.prepare(`
+    SELECT id, kind, label, created_at, modified_at, next_id, children_id, data
+    FROM block WHERE graph_id = ?
   `);
+  const selectBlockIds = db.prepare("SELECT id FROM block WHERE graph_id = ?");
   const upsertBlock = db.prepare(`
-    INSERT INTO block (id, graph_id, kind, label, created_at, modified_at, data)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO block
+      (id, graph_id, kind, label, created_at, modified_at, next_id, children_id, data)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       kind = excluded.kind,
       label = excluded.label,
       created_at = excluded.created_at,
       modified_at = excluded.modified_at,
+      next_id = excluded.next_id,
+      children_id = excluded.children_id,
       data = excluded.data,
       revision = block.revision + 1
   `);
-  const clearParents = db.prepare(
-    "DELETE FROM block_edge WHERE child_id = ? AND relation = 'depends'",
-  );
-  const clearChildren = db.prepare(
-    "DELETE FROM block_edge WHERE parent_id = ? AND relation = 'contains'",
-  );
-  const insertEdge = db.prepare(
-    "INSERT OR IGNORE INTO block_edge (parent_id, child_id, relation) VALUES (?, ?, ?)",
-  );
   const deleteBlockStmt = db.prepare("DELETE FROM block WHERE id = ?");
-  const countBlocksStmt = db.prepare(
-    "SELECT count(*) AS n FROM block WHERE graph_id = ?",
-  );
-  // Edges are meaningless across graphs; nothing in SQL forbids them.
-  const countCrossGraphEdges = db.prepare(`
-    SELECT count(*) AS n
-    FROM block_edge e
-    JOIN block p ON p.id = e.parent_id
-    JOIN block c ON c.id = e.child_id
-    WHERE p.graph_id <> c.graph_id
-  `);
 
   const loadGraph = (graphId: string): BlockGraph => {
     const blocks: Record<BlockId, Block> = {};
@@ -179,37 +164,25 @@ export function openStore(options: StoreOptions = {}): Store {
         label: row.label,
         createdAt: row.created_at,
         modifiedAt: row.modified_at,
-        parents: [],
-        children: [],
+        next: row.next_id,
+        children: row.children_id,
         data: blockDataSchema.parse(JSON.parse(row.data)),
       };
     }
-    for (const raw of selectEdges.all(graphId)) {
-      const edge = edgeRowSchema.parse(raw);
-      const parent = blocks[edge.parent_id];
-      const child = blocks[edge.child_id];
-      if (!parent || !child) continue;
-      if (edge.relation === "depends") child.parents.push(edge.parent_id);
-      else parent.children.push(edge.child_id);
-    }
-    return { blocks };
+    return { blocks, root: rootOf(blocks) };
   };
 
   /**
-   * Writes run inside one transaction, validated before commit against core's
-   * cycle check, each kind's state schema, and graph containment. SQLite can
-   * express none of the three.
+   * Writes run inside one transaction, validated before commit against the
+   * tree invariants and each kind's state schema. SQLite can express neither.
    */
   const transact = (graphId: string, write: () => void) => {
     db.exec("BEGIN IMMEDIATE");
     try {
       write();
       const graph = loadGraph(graphId);
-      assertAcyclic(graph);
+      assertTree(graph);
       if (options.kinds) assertValidData(graph, options.kinds);
-      if (countSchema.parse(countCrossGraphEdges.get()).n > 0) {
-        throw new Error("block edge spans two graphs");
-      }
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
@@ -246,12 +219,16 @@ export function openStore(options: StoreOptions = {}): Store {
 
     loadGraph,
 
-    countBlocks: (graphId) =>
-      countSchema.parse(countBlocksStmt.get(graphId)).n,
-
-    putBlocks: (graphId, inputs) =>
+    writeGraph: (graphId, inputs) =>
       transact(graphId, () => {
         const now = Date.now();
+        const kept = new Set(inputs.map((input) => input.id));
+        // Stale rows go first: a block removed from the tree must not still
+        // be sitting there, unreachable, when the write is validated.
+        for (const raw of selectBlockIds.all(graphId)) {
+          const { id } = idRowSchema.parse(raw);
+          if (!kept.has(id)) deleteBlockStmt.run(id);
+        }
         for (const input of inputs) {
           upsertBlock.run(
             input.id,
@@ -260,24 +237,13 @@ export function openStore(options: StoreOptions = {}): Store {
             input.label,
             input.createdAt,
             now,
+            input.next ?? null,
+            input.children ?? null,
             JSON.stringify(input.data ?? {}),
           );
         }
-        // Edges are replaced wholesale so each row mirrors its input exactly.
-        for (const input of inputs) {
-          clearParents.run(input.id);
-          clearChildren.run(input.id);
-          for (const parent of input.parents ?? []) {
-            insertEdge.run(parent, input.id, "depends");
-          }
-          for (const child of input.children ?? []) {
-            insertEdge.run(input.id, child, "contains");
-          }
-        }
         touchGraph.run(now, graphId);
       }),
-
-    deleteBlock: (id) => void deleteBlockStmt.run(id),
 
     close: () => db.close(),
   };

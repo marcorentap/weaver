@@ -1,35 +1,46 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import type { Block, BlockId } from "@repo/core";
+import type { Block, BlockGraph, Position } from "@repo/core";
+import { insertBlock, moveBlock, removeBlock } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import { getStore } from "@/lib/store";
 import { schemaMessage } from "@/lib/schema-error";
 
-/** A block, as-is, in the shape `putBlocks` wants — the common case of
- *  rewriting one block's edges or data without touching the rest of it. */
-function blockToInput(block: Block, overrides: Partial<BlockInput> = {}): BlockInput {
-  return {
-    id: block.id,
-    kind: block.kind,
-    label: block.label,
-    createdAt: block.createdAt,
-    parents: block.parents,
-    children: block.children,
-    data: block.data,
-    ...overrides,
-  };
+/**
+ * Structural edits are load → apply a core tree operation → write the result
+ * back, because moving one block rewrites its neighbors' links too: the tree
+ * is only ever valid as a whole, so a write of anything less than the whole
+ * graph would have to reproduce that surgery by hand.
+ */
+function rewrite(
+  graphId: string,
+  apply: (graph: BlockGraph) => BlockGraph,
+): { error: string | null } {
+  const store = getStore();
+  try {
+    store.writeGraph(
+      graphId,
+      Object.values(apply(store.loadGraph(graphId)).blocks),
+    );
+  } catch (error) {
+    return { error: schemaMessage(error) };
+  }
+  revalidatePath("/chat");
+  return { error: null };
 }
 
-/** Actions offered by the chat block popup. */
-export async function deleteChatBlock(id: string): Promise<void> {
-  getStore().deleteBlock(id);
-  revalidatePath("/chat");
+/** Deletes a block and everything nested under it — a container's contents
+ *  exist only inside it, so they go with it rather than being cut loose. */
+export async function deleteChatBlock(
+  graphId: string,
+  id: string,
+): Promise<{ error: string | null }> {
+  return rewrite(graphId, (graph) => removeBlock(graph, id));
 }
 
 /**
- * Writes one field of a block's state. Edges are re-sent unchanged because
- * `putBlocks` replaces them wholesale, and the write is validated against the
+ * Writes one field of a block's state. The write is validated against the
  * kind's schema inside the store, so a bad value is rejected rather than
  * persisted — its message is returned for the editor to show.
  */
@@ -39,122 +50,50 @@ export async function updateBlockField(
   name: string,
   value: string | number,
 ): Promise<{ error: string | null }> {
-  const store = getStore();
-  const block = store.loadGraph(graphId).blocks[blockId];
-  if (!block) return { error: "block no longer exists" };
-
-  try {
-    store.putBlocks(graphId, [
-      blockToInput(block, { data: { ...block.data, [name]: value } }),
-    ]);
-  } catch (error) {
-    return { error: schemaMessage(error) };
-  }
-
-  revalidatePath("/chat");
-  return { error: null };
+  return rewrite(graphId, (graph) => {
+    const block = graph.blocks[blockId];
+    if (!block) throw new Error("block no longer exists");
+    return {
+      ...graph,
+      blocks: {
+        ...graph.blocks,
+        [blockId]: { ...block, data: { ...block.data, [name]: value } },
+      },
+    };
+  });
 }
 
 /**
- * Creates one block from an already-built `BlockInput` — the client picks
- * the kind, id and `createdAt` (interpolated between its future neighbors),
- * this just persists it. When `parentId` is given the new block is also
- * appended to that block's `children`, which is what makes it render at
- * all: a block absent from every container's children is top-level, but one
- * meant to nest has to be added somewhere.
+ * Creates one block from an already-built `BlockInput` — the client picks the
+ * kind, id and label, this places it at `at` and persists the resulting tree.
  */
 export async function createChatBlock(
   graphId: string,
   input: BlockInput,
-  parentId: BlockId | null,
+  at: Position,
 ): Promise<{ error: string | null }> {
-  const store = getStore();
-
-  try {
-    store.putBlocks(graphId, [input]);
-    if (parentId) {
-      const parent = store.loadGraph(graphId).blocks[parentId];
-      if (parent && !parent.children.includes(input.id)) {
-        store.putBlocks(graphId, [
-          blockToInput(parent, { children: [...parent.children, input.id] }),
-        ]);
-      }
-    }
-  } catch (error) {
-    return { error: schemaMessage(error) };
-  }
-
-  revalidatePath("/chat");
-  return { error: null };
+  const now = Date.now();
+  const block: Block = {
+    id: input.id,
+    kind: input.kind,
+    label: input.label,
+    createdAt: input.createdAt,
+    modifiedAt: now,
+    next: null,
+    children: null,
+    data: input.data ?? {},
+  };
+  return rewrite(graphId, (graph) => insertBlock(graph, block, at));
 }
 
-/** Reorders one block among its siblings by rewriting its `createdAt` —
- *  see `LiveGraph.setCreatedAt`. Used by the `J`/`K` move keys, and to place
- *  a block moved by `moveChatBlock` within its new container. */
-export async function setBlockCreatedAt(
-  graphId: string,
-  blockId: string,
-  createdAt: number,
-): Promise<{ error: string | null }> {
-  const store = getStore();
-  const block = store.loadGraph(graphId).blocks[blockId];
-  if (!block) return { error: "block no longer exists" };
-
-  try {
-    store.putBlocks(graphId, [blockToInput(block, { createdAt })]);
-  } catch (error) {
-    return { error: schemaMessage(error) };
-  }
-
-  revalidatePath("/chat");
-  return { error: null };
-}
-
-/**
- * Moves a block between containers — either may be null for top-level — and
- * gives it a new `createdAt` in its new position, for the `>`/`<`
- * nest/unnest keys. Rewrites the old container's `children` to drop it and
- * the new one's to add it; either write is skipped when that side is
- * top-level or unchanged.
- */
+/** Relinks a block at `at`, taking whatever is nested under it along — the
+ *  whole of the `J`/`K` reorder and `>`/`<` nest keys. */
 export async function moveChatBlock(
   graphId: string,
   blockId: string,
-  createdAt: number,
-  fromParentId: BlockId | null,
-  toParentId: BlockId | null,
+  at: Position,
 ): Promise<{ error: string | null }> {
-  const store = getStore();
-
-  try {
-    const block = store.loadGraph(graphId).blocks[blockId];
-    if (!block) return { error: "block no longer exists" };
-    store.putBlocks(graphId, [blockToInput(block, { createdAt })]);
-
-    if (fromParentId && fromParentId !== toParentId) {
-      const from = store.loadGraph(graphId).blocks[fromParentId];
-      if (from) {
-        store.putBlocks(graphId, [
-          blockToInput(from, {
-            children: from.children.filter((id) => id !== blockId),
-          }),
-        ]);
-      }
-    }
-    if (toParentId && toParentId !== fromParentId) {
-      const to = store.loadGraph(graphId).blocks[toParentId];
-      if (to && !to.children.includes(blockId)) {
-        store.putBlocks(graphId, [
-          blockToInput(to, { children: [...to.children, blockId] }),
-        ]);
-      }
-    }
-  } catch (error) {
-    return { error: schemaMessage(error) };
-  }
-
-  revalidatePath("/chat");
-  return { error: null };
+  return rewrite(graphId, (graph) => moveBlock(graph, blockId, at));
 }
 
 /** Creates a new, empty session (graph), addressed by name like every other. */
@@ -188,7 +127,7 @@ export async function saveGraph(
   blocks: BlockInput[],
 ): Promise<{ error: string | null }> {
   try {
-    getStore().putBlocks(graphId, blocks);
+    getStore().writeGraph(graphId, blocks);
   } catch (error) {
     return { error: schemaMessage(error) };
   }

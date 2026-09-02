@@ -1,12 +1,29 @@
-import type { Block, BlockData, BlockGraph, BlockId } from "./block";
+import type {
+  Block,
+  BlockData,
+  BlockGraph,
+  BlockId,
+  Position,
+} from "./block";
 import {
-  assertAcyclic,
+  assertTree,
   assertValidData,
+  chainIds,
+  childIds,
+  findParent,
+  findPrevSibling,
   getBlock,
+  insertBlock,
+  lastChildId,
+  moveBlock,
+  positionOf,
+  removeBlock,
+  rootOf,
+  snapshotAbove,
   snapshotBlock,
   snapshotGraph,
+  subtreeIds,
   topLevelBlockIds,
-  topoSort,
 } from "./block";
 import type {
   BlockKind,
@@ -27,8 +44,6 @@ import {
   textKind,
   textState,
 } from "./kinds/text";
-import type { GraphLayout, GraphRow } from "./graph-layout";
-import { layoutGraph } from "./graph-layout";
 
 export type {
   Block,
@@ -38,30 +53,39 @@ export type {
   BlockKind,
   CallbackSpec,
   GroupState,
-  GraphLayout,
-  GraphRow,
   HookContext,
   KindRegistry,
+  Position,
   Schedule,
   SnapshotContext,
   TextState,
 };
 export {
-  assertAcyclic,
+  assertTree,
   assertValidData,
+  chainIds,
+  childIds,
+  findParent,
+  findPrevSibling,
   GROUP_KIND,
   groupKind,
   groupState,
   coreKinds,
   defineKind,
   getBlock,
+  insertBlock,
   kindRegistry,
-  layoutGraph,
+  lastChildId,
+  moveBlock,
+  positionOf,
+  removeBlock,
+  rootOf,
+  snapshotAbove,
   snapshotBlock,
   snapshotGraph,
+  subtreeIds,
   TEXT_KIND,
   textKind,
   textState,
   topLevelBlockIds,
-  topoSort,
 };

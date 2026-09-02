@@ -30,7 +30,7 @@ const SEED_GRAPH = "dev";
 function seeded(store: Store): Store {
   if (store.listGraphs().length === 0) {
     const record = store.createGraph(SEED_GRAPH);
-    store.putBlocks(record.id, seedBlocks());
+    store.writeGraph(record.id, seedBlocks());
   }
   return store;
 }

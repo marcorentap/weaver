@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Block } from "@repo/core";
 import { GROUP_KIND, TEXT_KIND, textState } from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
+import { readSettings } from "@/lib/settings";
 import { MediaText } from "@/components/media-text";
 import type { FileState, MetricState } from "./kinds";
 import {
@@ -23,6 +24,8 @@ import type { IssLocationState } from "./iss";
 import { ISS_LOCATION_KIND, issLocationState } from "./iss";
 import type { TimerState } from "./timer";
 import { TIMER_KIND, timerState } from "./timer";
+import type { AgentState } from "./agent";
+import { AGENT_KIND, agentState } from "./agent";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -30,6 +33,10 @@ export type BlockField = {
   name: string;
   label: string;
   value: string;
+  /** What an empty `value` actually resolves to at run time — shown in the
+   *  actions menu in place of a blank, and as the editor's placeholder, so
+   *  an inherited default is visible instead of looking unset. */
+  placeholder?: string;
   /** `value`'s real type once parsed — a `"number"` field round-trips
    *  through `Number()` before it's written; everything else stays a
    *  string as-is. */
@@ -41,14 +48,16 @@ export type BlockField = {
  * solid node — so a kind only decides what its state looks like as content.
  *
  * Each view parses `block.data` through its kind's schema, so components
- * receive complete state and never guess at missing fields.
+ * receive complete state and never guess at missing fields. `nested` is the
+ * number of blocks nested directly inside this one: a block only links to
+ * the first of them, so counting is the caller's job, not a view's.
  *
  * Rows are not limited to one line: this is a GUI, so a kind renders its
  * content inline. Beyond that a kind may add editable `fields`, a full-size
  * `Preview`, and a `raw` URL the underlying file can be opened at.
  */
 export type BlockView = {
-  Row: (props: { block: Block }) => ReactNode;
+  Row: (props: { block: Block; nested: number }) => ReactNode;
   fields?: (block: Block) => BlockField[];
   Preview?: (props: { block: Block }) => ReactNode;
   raw?: (block: Block) => string;
@@ -108,6 +117,22 @@ function IssLocationRow({ state }: { state: IssLocationState }) {
   return (
     <span className="truncate text-muted-foreground">
       {state.latitude.toFixed(2)}, {state.longitude.toFixed(2)}
+    </span>
+  );
+}
+
+function AgentRow({ state }: { state: AgentState }) {
+  if (state.error !== null) {
+    return <span className="truncate text-destructive">{state.error}</span>;
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
+      <span className="truncate">{state.prompt || "(no prompt)"}</span>
+      <span className="shrink-0 text-muted-foreground/60">
+        {state.ranAt
+          ? `ran ${new Date(state.ranAt).toLocaleTimeString()}`
+          : "not run yet"}
+      </span>
     </span>
   );
 }
@@ -229,9 +254,9 @@ export const blockViews: Record<string, BlockView> = {
   },
 
   [GROUP_KIND]: {
-    Row: ({ block }) => (
+    Row: ({ nested }) => (
       <span className="truncate text-muted-foreground italic">
-        {block.children.length} nested
+        {nested} nested
       </span>
     ),
   },
@@ -287,6 +312,25 @@ export const blockViews: Record<string, BlockView> = {
     Row: ({ block }) => (
       <IssLocationRow state={issLocationState.parse(block.data)} />
     ),
+  },
+
+  [AGENT_KIND]: {
+    Row: ({ block }) => <AgentRow state={agentState.parse(block.data)} />,
+    fields: (block) => {
+      const state = agentState.parse(block.data);
+      const fallback = readSettings().aiDefaultModel;
+      return [
+        { name: "prompt", label: "prompt", value: state.prompt },
+        {
+          name: "model",
+          label: "model",
+          value: state.model,
+          // A blank field means "use the settings default", so show which
+          // model that actually is rather than nothing at all.
+          placeholder: fallback || "no default model — see settings",
+        },
+      ];
+    },
   },
 };
 

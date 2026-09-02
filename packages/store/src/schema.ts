@@ -8,12 +8,18 @@
  * - Ids are `crypto.randomUUID()` (v4). Node has no UUIDv7, so ordering
  *   information lives in `created_at` / `modified_at` rather than in the id.
  * - `block.kind` has no CHECK constraint. Kinds are open by design, so the
- *   database must accept a kind it has never seen. `block_edge.relation` does
- *   get a CHECK, because that set is structural and closed.
- * - No ordering column anywhere. Sibling order is derived from topological
- *   order with `created_at` as the tiebreaker, so there is nothing to drift.
+ *   database must accept a kind it has never seen.
+ * - Structure is two nullable self-references per block: `next_id` is the
+ *   following block at the same level, `children_id` the first block nested
+ *   inside it. Order is therefore stored, not derived, and one row change
+ *   moves a block — but the tree invariants (one root, no loops, nothing
+ *   orphaned) are not expressible in SQL, so writes are validated in JS
+ *   against `assertTree` before commit.
+ * - Neither link is a foreign key: a write arrives as a set of rows whose
+ *   links point at each other, and immediate FK checks would reject whichever
+ *   row happened to land first.
  */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export const SCHEMA_SQL = `
 CREATE TABLE graph (
@@ -30,17 +36,11 @@ CREATE TABLE block (
   label       TEXT NOT NULL,
   created_at  INTEGER NOT NULL,
   modified_at INTEGER NOT NULL,
+  next_id     TEXT,
+  children_id TEXT,
   data        TEXT NOT NULL DEFAULT '{}',
   revision    INTEGER NOT NULL DEFAULT 1
 ) STRICT;
 
-CREATE TABLE block_edge (
-  parent_id TEXT NOT NULL REFERENCES block(id) ON DELETE CASCADE,
-  child_id  TEXT NOT NULL REFERENCES block(id) ON DELETE CASCADE,
-  relation  TEXT NOT NULL CHECK (relation IN ('depends','contains')),
-  PRIMARY KEY (parent_id, child_id, relation)
-) STRICT;
-
-CREATE INDEX block_edge_child ON block_edge(child_id, relation);
 CREATE INDEX block_graph ON block(graph_id, created_at);
 `;

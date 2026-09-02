@@ -11,7 +11,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
-import type { Block, BlockId } from "@repo/core";
+import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
+import { childIds, lastChildId, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { BlockField } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -25,16 +26,16 @@ import { useKeyLayer } from "@/lib/keymap";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
-import { chatNodes, collectBlocks } from "@/lib/graph-view";
+import { chatNodes } from "@/lib/graph-view";
 import { createLiveGraph, scheduledHooks } from "@/lib/live-graph";
 import { kinds } from "@/blocks/kinds";
+import { AGENT_KIND } from "@/blocks/agent";
 import {
   createChatBlock,
   createChatSession,
   deleteChatBlock,
   moveChatBlock,
   saveGraph,
-  setBlockCreatedAt,
   updateBlockField,
 } from "./actions";
 
@@ -47,16 +48,11 @@ type Popup =
   | { kind: "preview" }
   | { kind: "field"; field: BlockField }
   | { kind: "configure" }
+  | { kind: "callHook"; hook: string }
   | { kind: "createKind" }
   | { kind: "createLabel" }
   | { kind: "createSession" }
   | null;
-
-/** Where a new block lands: `parentId` null means top-level, otherwise it is
- *  appended to that block's children; `createdAt` is interpolated between
- *  its future neighbors so topological order (tiebroken by `createdAt`)
- *  places it exactly at the chosen gap. */
-type Insertion = { parentId: BlockId | null; createdAt: number };
 
 /** One rendered row of the unfolded tree; media rows are taller than a line. */
 type Row = {
@@ -64,7 +60,8 @@ type Row = {
   depth: number;
   /** Row index of the enclosing block, so `←` can climb out of a group. */
   parent: number | null;
-  hasChildren: boolean;
+  /** How many blocks are nested directly inside this one. */
+  nested: number;
   expanded: boolean;
 };
 
@@ -84,7 +81,7 @@ function flatten(
       block: node.block,
       depth,
       parent,
-      hasChildren: node.children.length > 0,
+      nested: node.children.length,
       expanded: open,
     });
     if (open) flatten(node.children, expanded, depth + 1, index, rows);
@@ -100,47 +97,19 @@ function containerOf(rows: Row[], row: Row | undefined): BlockId | null {
 
 /**
  * Where a new block goes for the gap before `rows[gap]` (`gap === rows.length`
- * means after the last row). Prefers the container the two neighboring rows
- * share; when they differ — the gap sits right where a nested group ends —
- * it favors the row before the gap, so inserting right after a group's last
- * child nests the new block there too rather than popping back out to
- * top-level.
+ * means after the last row): right after the row above the gap, in that
+ * row's own chain. So inserting right after a group's last child nests the
+ * new block there too rather than popping back out to top-level, and
+ * inserting after an unfolded group appends after the whole group rather
+ * than into it. With no row above — the gap at the very top — it becomes the
+ * first block of whatever chain the row below belongs to.
  */
-function computeInsertion(rows: Row[], gap: number): Insertion {
+function computeInsertion(rows: Row[], gap: number): Position {
   const before = rows[gap - 1];
-  const after = rows[gap];
-  const beforeContainer = containerOf(rows, before);
-  const afterContainer = containerOf(rows, after);
-  const sameContainer = before && after && beforeContainer === afterContainer;
-  const parentId = before ? beforeContainer : afterContainer;
-  const prevAt = before?.block.createdAt;
-  const nextAt = sameContainer || !before ? after?.block.createdAt : undefined;
-  const createdAt =
-    prevAt !== undefined && nextAt !== undefined
-      ? prevAt + (nextAt - prevAt) / 2
-      : prevAt !== undefined
-        ? prevAt + 1
-        : nextAt !== undefined
-          ? nextAt - 1
-          : Date.now();
-  return { parentId, createdAt };
-}
-
-/** A `createdAt` after everything `containerId` currently shows, for
- *  appending a moved block as its container's last child (or last
- *  top-level block, for `containerId === null`). */
-function appendCreatedAt(
-  rows: Row[],
-  containerId: BlockId | null,
-  excludeId: BlockId,
-): number {
-  const siblingsAt = rows
-    .filter(
-      (entry) =>
-        entry.block.id !== excludeId && containerOf(rows, entry) === containerId,
-    )
-    .map((entry) => entry.block.createdAt);
-  return siblingsAt.length > 0 ? Math.max(...siblingsAt) + 1 : Date.now();
+  if (before) {
+    return { parentId: containerOf(rows, before), afterId: before.block.id };
+  }
+  return { parentId: containerOf(rows, rows[gap]), afterId: null };
 }
 
 /** A hover-revealed icon between rows (and at the very top/bottom of the
@@ -192,7 +161,7 @@ function BlockRow({
     <div
       ref={ref}
       aria-selected={selected}
-      aria-expanded={row.hasChildren ? row.expanded : undefined}
+      aria-expanded={row.nested > 0 ? row.expanded : undefined}
       onClick={onSelect}
       className={cn(
         "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
@@ -208,7 +177,7 @@ function BlockRow({
         className="flex w-52 shrink-0 items-center gap-1"
         style={{ paddingLeft: `${row.depth * INDENT_REM}rem` }}
       >
-        {row.hasChildren ? (
+        {row.nested > 0 ? (
           <button
             type="button"
             aria-label={row.expanded ? "Collapse" : "Expand"}
@@ -237,7 +206,7 @@ function BlockRow({
       <span className="w-16 shrink-0 text-muted-foreground">
         {row.block.kind}
       </span>
-      <view.Row block={row.block} />
+      <view.Row block={row.block} nested={row.nested} />
     </div>
   );
 }
@@ -320,11 +289,11 @@ function PreviewModal({
 export function ChatView({
   sessions,
   session,
-  nodes,
+  initialGraph,
 }: {
   sessions: SessionSummary[];
   session: { id: string; name: string } | null;
-  nodes: ChatNode[];
+  initialGraph: BlockGraph;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -337,7 +306,7 @@ export function ChatView({
   const [error, setError] = useState<string | null>(null);
   /** Where a pending "new block" flow will land, chosen before the kind and
    *  label are; `pendingKind` is the kind picked in the step after. */
-  const [creating, setCreating] = useState<Insertion | null>(null);
+  const [creating, setCreating] = useState<Position | null>(null);
   const [pendingKind, setPendingKind] = useState<string | null>(null);
   /** A block to select once it appears in `rows` — it may not exist there
    *  the same render it lands, if its container was not already expanded.
@@ -352,10 +321,11 @@ export function ChatView({
   // The client owns the graph from here on: a hook (a timer's tick, an ISS
   // fetch — this file has no idea which) mutates it and notifies
   // subscribers immediately, so it lands on screen the instant it resolves,
-  // not on whatever cadence a poll happened to run at. `nodes` seeds it once
-  // per mount — page keys `<ChatView>` by session id, so switching sessions
-  // remounts rather than needing this to reconcile a changed prop mid-life.
-  const [engine] = useState(() => createLiveGraph(collectBlocks(nodes)));
+  // not on whatever cadence a poll happened to run at. `initialGraph` seeds
+  // it once per mount — page keys `<ChatView>` by session id, so switching
+  // sessions remounts rather than needing this to reconcile a changed prop
+  // mid-life.
+  const [engine] = useState(() => createLiveGraph(initialGraph));
   const { graph, dirty, savedAt } = useSyncExternalStore(
     engine.subscribe,
     engine.getSnapshot,
@@ -471,7 +441,7 @@ export function ChatView({
   /** Unfold, or step into the group once it is already unfolded. */
   const expand = () => {
     if (!row) return;
-    if (row.hasChildren && !row.expanded) setOpen(row.block.id, true);
+    if (row.nested > 0 && !row.expanded) setOpen(row.block.id, true);
     else if (row.expanded) move(1);
   };
 
@@ -489,74 +459,66 @@ export function ChatView({
     setPopup({ kind: "createKind" });
   };
 
-  /** Moves `id` from `fromParentId` to `toParentId` (either may be null for
-   *  top-level), appended after whatever the target container currently
-   *  shows last, then follows it to its new row. Used by `nest`/`unnest`. */
-  const moveBlock = (
-    id: BlockId,
-    fromParentId: BlockId | null,
-    toParentId: BlockId | null,
-  ) => {
+  /** The chain a container holds, in order — the top-level chain for null. */
+  const siblingsOf = (containerId: BlockId | null) =>
+    containerId === null ? topLevelBlockIds(graph) : childIds(graph, containerId);
+
+  /** Relinks `id` at `at` locally and on the server, then follows it to its
+   *  new row. The single path behind `J`/`K` and `>`/`<`: every structural
+   *  edit is the same operation with a different target position. */
+  const relocate = (id: BlockId, at: Position) => {
     if (!session) return;
-    const createdAt = appendCreatedAt(rows, toParentId, id);
-    engine.moveBlock(id, fromParentId, toParentId, createdAt);
-    if (toParentId) setOpen(toParentId, true);
+    engine.moveBlock(id, at);
+    if (at.parentId) setOpen(at.parentId, true);
     setPendingFocus({ id, openActions: false });
     startTransition(() => {
-      void moveChatBlock(session.id, id, createdAt, fromParentId, toParentId);
+      void moveChatBlock(session.id, id, at);
     });
   };
 
-  /** `J`/`K`: reorders the selected block among its siblings by swapping
-   *  `createdAt` with the neighbor in that direction sharing its container.
-   *  No-ops at either end. */
+  /** `J`/`K`: reorders the selected block within its own chain, past the
+   *  neighbor in that direction. No-ops at either end. */
   const moveWithinSiblings = (direction: 1 | -1) => {
-    if (!row || !session) return;
+    if (!row) return;
     const container = containerOf(rows, row);
-    let neighborIndex = -1;
-    for (let i = index + direction; i >= 0 && i < rows.length; i += direction) {
-      if (containerOf(rows, rows[i]) === container) {
-        neighborIndex = i;
-        break;
-      }
-    }
-    if (neighborIndex === -1) return;
-    const a = row.block;
-    const b = rows[neighborIndex]!.block;
-    engine.setCreatedAt(a.id, b.createdAt);
-    engine.setCreatedAt(b.id, a.createdAt);
-    setPendingFocus({ id: a.id, openActions: false });
-    startTransition(() => {
-      void setBlockCreatedAt(session.id, a.id, b.createdAt);
-      void setBlockCreatedAt(session.id, b.id, a.createdAt);
-    });
+    const siblings = siblingsOf(container);
+    const at = siblings.indexOf(row.block.id);
+    const target = at + direction;
+    if (at === -1 || target < 0 || target >= siblings.length) return;
+    // Down means landing after the next sibling; up means landing before the
+    // previous one, which is "after the one before that" — or first in the
+    // chain when there is nothing before it.
+    const afterId =
+      direction === 1 ? (siblings[target] as BlockId) : (siblings[target - 1] ?? null);
+    relocate(row.block.id, { parentId: container, afterId });
   };
 
   /** `>`: nests the selected block one level deeper, as the last child of
-   *  the nearest earlier row sharing its current container. No-op if there
-   *  is no such row (already first among its siblings). */
+   *  the block before it in its own chain. No-op if there is nothing before
+   *  it (already first among its siblings). */
   const nest = () => {
     if (!row) return;
     const container = containerOf(rows, row);
-    let targetIndex = -1;
-    for (let i = index - 1; i >= 0; i -= 1) {
-      if (containerOf(rows, rows[i]) === container) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex === -1) return;
-    moveBlock(row.block.id, container, rows[targetIndex]!.block.id);
+    const siblings = siblingsOf(container);
+    const at = siblings.indexOf(row.block.id);
+    if (at < 1) return;
+    const target = siblings[at - 1] as BlockId;
+    relocate(row.block.id, {
+      parentId: target,
+      afterId: lastChildId(graph, target),
+    });
   };
 
-  /** `<`: unnests the selected block one level, making it a sibling of its
-   *  current container instead of a child of it. No-op if already
-   *  top-level. */
+  /** `<`: unnests the selected block one level, making it the block right
+   *  after its former container instead of the last thing inside it. No-op
+   *  if already top-level. */
   const unnest = () => {
     if (!row || row.parent === null) return;
-    const container = rows[row.parent]!.block.id;
-    const grandparent = containerOf(rows, rows[row.parent]);
-    moveBlock(row.block.id, container, grandparent);
+    const container = rows[row.parent] as Row;
+    relocate(row.block.id, {
+      parentId: containerOf(rows, container),
+      afterId: container.block.id,
+    });
   };
 
   useKeyLayer({
@@ -658,6 +620,26 @@ export function ChatView({
     setPopup(null);
   };
 
+  /** Calls a callable directly from the configure menu — `argText` is
+   *  optional JSON, parsed here so a malformed argument surfaces before the
+   *  hook ever runs instead of failing inside it. */
+  const runCallHook = (hook: string, argText: string) => {
+    if (!row) return;
+    const trimmed = argText.trim();
+    let arg: unknown;
+    if (trimmed) {
+      try {
+        arg = JSON.parse(trimmed);
+      } catch {
+        setError("Argument must be valid JSON");
+        return;
+      }
+    }
+    setError(null);
+    setPopup(null);
+    void engine.runHook(row.block.id, hook, arg);
+  };
+
   /** Persists the block picked in `createKind`/`createLabel`, then selects
    *  it once it is visible (see the `pendingSelect` effect above). */
   const createBlock = async (label: string) => {
@@ -669,12 +651,10 @@ export function ChatView({
       id: crypto.randomUUID(),
       kind: pendingKind,
       label,
-      createdAt: creating.createdAt,
-      parents: [],
-      children: [],
+      createdAt: Date.now(),
       data: kindDef.defaults ?? {},
     };
-    const result = await createChatBlock(session.id, input, creating.parentId);
+    const result = await createChatBlock(session.id, input, creating);
     setSaving(false);
     if (result.error) {
       setError(result.error);
@@ -687,11 +667,11 @@ export function ChatView({
         label: input.label,
         createdAt: input.createdAt,
         modifiedAt: Date.now(),
-        parents: [],
-        children: [],
+        next: null,
+        children: null,
         data: input.data ?? {},
       },
-      creating.parentId,
+      creating,
     );
     if (creating.parentId) setOpen(creating.parentId, true);
     setPendingFocus({ id: input.id, openActions: true });
@@ -739,6 +719,22 @@ export function ChatView({
               setPopup(null);
             },
           },
+          ...(row.block.kind === AGENT_KIND
+            ? [
+                {
+                  label: "Run agent",
+                  key: "r",
+                  run: () => {
+                    setPopup(null);
+                    void engine.runHook(row.block.id, "run", {
+                      endpoint: settings.aiEndpoint,
+                      apiKey: settings.aiApiKey,
+                      model: settings.aiDefaultModel,
+                    });
+                  },
+                },
+              ]
+            : []),
           ...(view.Preview
             ? [
                 {
@@ -750,7 +746,8 @@ export function ChatView({
             : []),
           ...(view.fields?.(row.block) ?? []).map((field) => ({
             label: `Edit ${field.label}`,
-            detail: field.value,
+            // A blank field shows what it falls back to, not an empty column.
+            detail: field.value || field.placeholder,
             run: () => openField(field),
           })),
           ...(kind && (kind.hooks.length > 0 || kind.callbacks.length > 0)
@@ -770,9 +767,14 @@ export function ChatView({
               setPopup(null);
               const id = row.block.id;
               // Optimistic: drops the row immediately, then persists the
-              // delete — the store also drops any edges pointing at it.
+              // delete — everything nested inside it goes too, on both sides.
               engine.deleteBlock(id);
-              startTransition(() => deleteChatBlock(id));
+              if (session) {
+                const graphId = session.id;
+                startTransition(() => {
+                  void deleteChatBlock(graphId, id);
+                });
+              }
             },
           },
         ]
@@ -789,14 +791,15 @@ export function ChatView({
           ...kind.hooks.map((hook) => ({
             label: `Call ${hook}`,
             detail: "Callable",
-            run: () => {
-              setPopup(null);
-              void engine.runHook(row.block.id, hook);
-            },
+            run: () => setPopup({ kind: "callHook", hook }),
           })),
           ...kind.callbacks.flatMap((spec) => {
             const target = String(row.block.data[spec.targetField] ?? "");
             const hookName = String(row.block.data[spec.hookField] ?? "");
+            const argField = spec.argField;
+            const argValue = argField
+              ? String(row.block.data[argField] ?? "")
+              : null;
             return [
               {
                 label: `${spec.label}: target`,
@@ -818,6 +821,20 @@ export function ChatView({
                     value: hookName,
                   }),
               },
+              ...(argField
+                ? [
+                    {
+                      label: `${spec.label}: arg`,
+                      detail: argValue || "(none)",
+                      run: () =>
+                        openField({
+                          name: argField,
+                          label: `${spec.label} argument (JSON)`,
+                          value: argValue ?? "",
+                        }),
+                    },
+                  ]
+                : []),
             ];
           }),
         ]
@@ -961,6 +978,22 @@ export function ChatView({
           error={error}
           saving={saving}
           onSubmit={(value) => void saveField(popup.field, value)}
+          onCancel={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "callHook" ? (
+        <FieldEditor
+          id="call-hook"
+          title={`Call ${popup.hook}`}
+          field={{
+            name: "arg",
+            label: "Argument (JSON, optional)",
+            value: "",
+          }}
+          error={error}
+          saving={saving}
+          onSubmit={(value) => runCallHook(popup.hook, value)}
           onCancel={() => setPopup(null)}
         />
       ) : null}

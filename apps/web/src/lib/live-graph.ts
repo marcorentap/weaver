@@ -1,4 +1,19 @@
-import type { Block, BlockGraph, BlockId, HookContext } from "@repo/core";
+import type {
+  Block,
+  BlockGraph,
+  BlockId,
+  HookContext,
+  Position,
+} from "@repo/core";
+import {
+  childIds,
+  insertBlock,
+  lastChildId,
+  moveBlock,
+  removeBlock,
+} from "@repo/core";
+// Type-only: `@repo/store` reaches for node:sqlite, so a value import here
+// would drag the whole persistence layer into the browser bundle.
 import type { BlockInput } from "@repo/store";
 import { kinds } from "@/blocks/kinds";
 
@@ -19,60 +34,21 @@ export type LiveGraph = {
    * whatever hook was asked for — it has no idea what a "timer" or an
    * "ISS location" is, and never needs to.
    */
-  runHook: (id: BlockId, hook: string) => Promise<void>;
+  runHook: (id: BlockId, hook: string, arg?: unknown) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
-  /** Insert an already-persisted new block locally. `parentId` null means
-   *  top-level; otherwise the block is appended to that block's children. */
-  addBlock: (block: Block, parentId: BlockId | null) => void;
-  /** Reorder one block among its siblings by giving it a new `createdAt` —
-   *  siblings are ordered by topological tiebreak on `createdAt`, so this is
-   *  the whole of "moving" a block without touching containment. */
-  setCreatedAt: (id: BlockId, createdAt: number) => void;
-  /** Move a block from one container to another (either may be null for
-   *  top-level) and give it a new `createdAt` in its new position, in one
-   *  commit — used by nest/unnest. */
-  moveBlock: (
-    id: BlockId,
-    fromParentId: BlockId | null,
-    toParentId: BlockId | null,
-    createdAt: number,
-  ) => void;
-  /** Drop a block and every reference to it, optimistically. */
+  /** Link an already-persisted new block into the tree at `at`. */
+  addBlock: (block: Block, at: Position) => void;
+  /** Relink a block, and everything nested under it, at `at` — the whole of
+   *  "moving" a block, reorder and nesting alike. */
+  moveBlock: (id: BlockId, at: Position) => void;
+  /** Drop a block and everything nested under it, optimistically. */
   deleteBlock: (id: BlockId) => void;
   toBlockInputs: () => BlockInput[];
   markSaved: () => void;
   markSaveFailed: () => void;
 };
-
-function withoutBlock(
-  blocks: Record<BlockId, Block>,
-  id: BlockId,
-): Record<BlockId, Block> {
-  const next: Record<BlockId, Block> = {};
-  for (const [key, block] of Object.entries(blocks)) {
-    if (key === id) continue;
-    next[key] = {
-      ...block,
-      parents: block.parents.filter((p) => p !== id),
-      children: block.children.filter((c) => c !== id),
-    };
-  }
-  return next;
-}
-
-function toBlockInputs(blocks: Record<BlockId, Block>): BlockInput[] {
-  return Object.values(blocks).map((block) => ({
-    id: block.id,
-    kind: block.kind,
-    label: block.label,
-    createdAt: block.createdAt,
-    parents: block.parents,
-    children: block.children,
-    data: block.data,
-  }));
-}
 
 /**
  * A block graph that lives entirely in the browser once created: a hook (a
@@ -87,9 +63,9 @@ function toBlockInputs(blocks: Record<BlockId, Block>): BlockInput[] {
  * any component's own render path is what keeps a page using this
  * compatible with the React Compiler, which assumes render is pure.
  */
-export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
+export function createLiveGraph(initial: BlockGraph): LiveGraph {
   let snapshot: LiveGraphSnapshot = {
-    graph: { blocks },
+    graph: initial,
     dirty: false,
     savedAt: null,
   };
@@ -99,21 +75,28 @@ export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
     for (const listener of listeners) listener();
   }
 
-  function commit(nextBlocks: Record<BlockId, Block>, dirty: boolean) {
-    snapshot = { ...snapshot, graph: { blocks: nextBlocks }, dirty };
+  function commit(graph: BlockGraph, dirty: boolean) {
+    snapshot = { ...snapshot, graph, dirty };
     emit();
   }
 
-  async function runHook(id: BlockId, hook: string): Promise<void> {
+  async function runHook(
+    id: BlockId,
+    hook: string,
+    arg?: unknown,
+  ): Promise<void> {
     const block = snapshot.graph.blocks[id];
     if (!block) return; // Stale reference (deleted target).
     const kind = kinds[block.kind];
     if (!kind) return;
 
     const ctx: HookContext = {
-      call: async (targetId, name) => {
+      id,
+      graph: snapshot.graph,
+      registry: kinds,
+      call: async (targetId, name, callArg) => {
         try {
-          await runHook(targetId, name);
+          await runHook(targetId, name, callArg);
         } catch (error) {
           console.error(
             `hook "${hook}" on ${block.kind} ${id} called ${name} on ${targetId}, which failed:`,
@@ -121,9 +104,41 @@ export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
           );
         }
       },
+      addBlock: (childKind, data, label, parentId = id) => {
+        // Reads the live snapshot, not `ctx.graph`: a hook that cleared its
+        // children first must append to what that left behind.
+        const graph = snapshot.graph;
+        const newId = crypto.randomUUID();
+        const now = Date.now();
+        const child: Block = {
+          id: newId,
+          kind: childKind,
+          label,
+          createdAt: now,
+          modifiedAt: now,
+          next: null,
+          children: null,
+          data,
+        };
+        commit(
+          insertBlock(graph, child, {
+            parentId,
+            afterId: lastChildId(graph, parentId),
+          }),
+          true,
+        );
+        return newId;
+      },
+      clearChildren: (parentId = id) => {
+        let graph = snapshot.graph;
+        const children = childIds(graph, parentId);
+        if (children.length === 0) return;
+        for (const childId of children) graph = removeBlock(graph, childId);
+        commit(graph, true);
+      },
     };
 
-    const data = await kind.call(block.data, hook, ctx);
+    const data = await kind.call(block.data, hook, ctx, arg);
     // No liveness check here on purpose: React StrictMode's dev-only
     // mount→cleanup→mount replays a component's effects once without ever
     // recreating this engine (it lives in `useState`), so a "destroyed on
@@ -135,8 +150,11 @@ export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
     if (!current) return; // Deleted while the hook was in flight.
     commit(
       {
-        ...snapshot.graph.blocks,
-        [id]: { ...current, data, modifiedAt: Date.now() },
+        ...snapshot.graph,
+        blocks: {
+          ...snapshot.graph.blocks,
+          [id]: { ...current, data, modifiedAt: Date.now() },
+        },
       },
       true,
     );
@@ -154,64 +172,32 @@ export function createLiveGraph(blocks: Record<BlockId, Block>): LiveGraph {
       if (!current) return;
       commit(
         {
-          ...snapshot.graph.blocks,
-          [id]: {
-            ...current,
-            data: { ...current.data, [name]: value },
-            modifiedAt: Date.now(),
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [id]: {
+              ...current,
+              data: { ...current.data, [name]: value },
+              modifiedAt: Date.now(),
+            },
           },
         },
         snapshot.dirty,
       );
     },
-    addBlock(block, parentId) {
-      const blocks: Record<BlockId, Block> = {
-        ...snapshot.graph.blocks,
-        [block.id]: block,
-      };
-      const parent = parentId ? blocks[parentId] : undefined;
-      if (parent) {
-        blocks[parentId as BlockId] = {
-          ...parent,
-          children: [...parent.children, block.id],
-        };
-      }
-      commit(blocks, true);
+    addBlock(block, at) {
+      commit(insertBlock(snapshot.graph, block, at), true);
     },
-    setCreatedAt(id, createdAt) {
-      const current = snapshot.graph.blocks[id];
-      if (!current) return;
-      commit(
-        { ...snapshot.graph.blocks, [id]: { ...current, createdAt, modifiedAt: Date.now() } },
-        true,
-      );
-    },
-    moveBlock(id, fromParentId, toParentId, createdAt) {
-      const current = snapshot.graph.blocks[id];
-      if (!current) return;
-      const blocks: Record<BlockId, Block> = { ...snapshot.graph.blocks };
-      if (fromParentId) {
-        const from = blocks[fromParentId];
-        if (from) {
-          blocks[fromParentId] = {
-            ...from,
-            children: from.children.filter((childId) => childId !== id),
-          };
-        }
-      }
-      if (toParentId) {
-        const to = blocks[toParentId];
-        if (to && !to.children.includes(id)) {
-          blocks[toParentId] = { ...to, children: [...to.children, id] };
-        }
-      }
-      blocks[id] = { ...current, createdAt, modifiedAt: Date.now() };
-      commit(blocks, true);
+    moveBlock(id, at) {
+      if (!snapshot.graph.blocks[id]) return;
+      commit(moveBlock(snapshot.graph, id, at), true);
     },
     deleteBlock(id) {
-      commit(withoutBlock(snapshot.graph.blocks, id), true);
+      commit(removeBlock(snapshot.graph, id), true);
     },
-    toBlockInputs: () => toBlockInputs(snapshot.graph.blocks),
+    // A `Block` is already a valid `BlockInput`; the store ignores the extra
+    // `modifiedAt`, which it owns.
+    toBlockInputs: () => Object.values(snapshot.graph.blocks),
     markSaved() {
       snapshot = { ...snapshot, dirty: false, savedAt: Date.now() };
       emit();
