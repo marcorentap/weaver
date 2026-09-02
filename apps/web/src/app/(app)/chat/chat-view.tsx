@@ -14,7 +14,7 @@ import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import { childIds, lastChildId, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
-import type { BlockField } from "@/blocks/views";
+import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
 import { FieldEditor } from "@/components/field-editor";
@@ -287,8 +287,11 @@ function PreviewModal({
   children,
 }: {
   block: Block;
-  /** URL of the underlying file, if the kind exposes one. */
-  raw: string | undefined;
+  /** Computes the underlying file's URL, if the kind exposes one — lazy so a
+   * kind whose "file" is really an object URL (built fresh from a block's
+   * own text, not a real address) only creates one when actually opened,
+   * instead of leaking one on every re-render this modal stays open for. */
+  raw: (() => string) | undefined;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -319,7 +322,16 @@ function PreviewModal({
             {
               keys: ["Enter"],
               help: { keys: "enter", label: "Open file in a new tab" },
-              run: () => window.open(raw, "_blank", "noopener,noreferrer"),
+              run: () => {
+                const url = raw();
+                window.open(url, "_blank", "noopener,noreferrer");
+                // Object URLs only: give the new tab a moment to load the
+                // blob before releasing it. A real URL has nothing to
+                // revoke.
+                if (url.startsWith("blob:")) {
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }
+              },
             },
           ]
         : []),
@@ -363,6 +375,18 @@ function PreviewModal({
       </div>
     </ModalFrame>
   );
+}
+
+/** Closes over a view's `raw` getter without a non-null assertion: the
+ * `view.raw` truthy check and the call both happen inside one function,
+ * where TypeScript narrows it, instead of across a JSX ternary and a
+ * separately-created arrow function where it cannot. */
+function previewRaw(
+  view: BlockView,
+  block: Block,
+): (() => string) | undefined {
+  const getRaw = view.raw;
+  return getRaw ? () => getRaw(block) : undefined;
 }
 
 export function ChatView({
@@ -1107,7 +1131,7 @@ export function ChatView({
       {popup?.kind === "preview" && row && view?.Preview ? (
         <PreviewModal
           block={row.block}
-          raw={view.raw?.(row.block)}
+          raw={previewRaw(view, row.block)}
           onClose={() => setPopup(null)}
         >
           <view.Preview block={row.block} />

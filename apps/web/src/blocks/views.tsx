@@ -177,6 +177,46 @@ function ToolRow({ state }: { state: ToolState }) {
 }
 
 /**
+ * A text-based block's "open in a new tab" — the same affordance a media
+ * block gets from a real URL, built instead from the text already in the
+ * block's own state. A `data:` URL would be simpler (no object to release),
+ * but Chrome refuses to navigate a new tab to one from `window.open` even on
+ * a real click; an object URL is not subject to that block. The caller is
+ * responsible for revoking it once the tab has had a chance to load it.
+ */
+function textBlobUrl(text: string): string {
+  return URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+}
+
+/** Full-size presentation: header line, then the same output a row shows,
+ * scrolling on its own instead of clipping. */
+function ToolPreview({ state }: { state: ToolState }) {
+  const path = readPath(state);
+  return (
+    <div className="flex h-[70vh] w-full flex-col gap-2">
+      <div className="flex min-w-0 shrink-0 items-baseline gap-2">
+        <span className="shrink-0 font-medium">{state.name}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          {state.args}
+        </span>
+      </div>
+      {state.output === "" ? (
+        <p className="text-muted-foreground">No output.</p>
+      ) : (
+        <CodeBlock
+          code={state.output}
+          language={path ? languageForPath(path) : null}
+          className={cn(
+            "min-h-0 flex-1 overflow-auto overscroll-contain",
+            state.ok ? "text-muted-foreground" : "text-destructive",
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
  * Media renders inline. Big enough to actually watch or read a frame of, small
  * enough that a list of blocks still scrolls like a list; `p` opens the
  * full-size preview.
@@ -301,6 +341,13 @@ export const blockViews: Record<string, BlockView> = {
         multiline: true,
       },
     ],
+    Preview: ({ block }) => (
+      <MarkdownText
+        text={textState.parse(block.data).text}
+        className="h-[70vh] w-full overflow-auto overscroll-contain"
+      />
+    ),
+    raw: (block) => textBlobUrl(textState.parse(block.data).text),
   },
 
   [GROUP_KIND]: {
@@ -399,6 +446,8 @@ export const blockViews: Record<string, BlockView> = {
         },
       ];
     },
+    Preview: ({ block }) => <ToolPreview state={toolState.parse(block.data)} />,
+    raw: (block) => textBlobUrl(toolState.parse(block.data).output),
   },
 };
 
