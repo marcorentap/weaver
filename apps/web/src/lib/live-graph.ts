@@ -1,5 +1,6 @@
 import type {
   Block,
+  BlockData,
   BlockGraph,
   BlockId,
   HookContext,
@@ -23,6 +24,10 @@ export type LiveGraphSnapshot = {
   dirty: boolean;
   /** Epoch ms of the last successful save, or null before the first one. */
   savedAt: number | null;
+  /** Blocks with a hook currently in flight — a run's only visible state
+   *  while it is still running, since a hook's own state update lands all
+   *  at once when it resolves. */
+  running: ReadonlySet<BlockId>;
 };
 
 export type LiveGraph = {
@@ -68,6 +73,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     graph: initial,
     dirty: false,
     savedAt: null,
+    running: new Set(),
   };
   const listeners = new Set<() => void>();
 
@@ -80,6 +86,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     emit();
   }
 
+  function setRunning(id: BlockId, active: boolean) {
+    const next = new Set(snapshot.running);
+    if (active) next.add(id);
+    else next.delete(id);
+    snapshot = { ...snapshot, running: next };
+    emit();
+  }
+
   async function runHook(
     id: BlockId,
     hook: string,
@@ -89,6 +103,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     if (!block) return; // Stale reference (deleted target).
     const kind = kinds[block.kind];
     if (!kind) return;
+    // A hook already running on this block finishes on its own; a second
+    // trigger — a stray key repeat, an overlapping timer tick — is a no-op
+    // rather than a second run racing the first over the same children.
+    if (snapshot.running.has(id)) return;
 
     const ctx: HookContext = {
       id,
@@ -138,7 +156,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       },
     };
 
-    const data = await kind.call(block.data, hook, ctx, arg);
+    setRunning(id, true);
+    let data: BlockData;
+    try {
+      data = await kind.call(block.data, hook, ctx, arg);
+    } finally {
+      setRunning(id, false);
+    }
     // No liveness check here on purpose: React StrictMode's dev-only
     // mount→cleanup→mount replays a component's effects once without ever
     // recreating this engine (it lives in `useState`), so a "destroyed on

@@ -66,7 +66,7 @@ export type BlockField = {
  * `Preview`, and a `raw` URL the underlying file can be opened at.
  */
 export type BlockView = {
-  Row: (props: { block: Block; nested: number }) => ReactNode;
+  Row: (props: { block: Block; nested: number; running: boolean }) => ReactNode;
   fields?: (block: Block) => BlockField[];
   Preview?: (props: { block: Block }) => ReactNode;
   raw?: (block: Block) => string;
@@ -130,7 +130,26 @@ function IssLocationRow({ state }: { state: IssLocationState }) {
   );
 }
 
-function AgentRow({ state }: { state: AgentState }) {
+function AgentRow({
+  state,
+  running,
+}: {
+  state: AgentState;
+  running: boolean;
+}) {
+  // Checked before `error`: a re-run's failure or success is only known once
+  // it resolves, so a stale error from the previous run must not outrank
+  // "running" while this one is still going.
+  if (running) {
+    return (
+      <span className="flex min-w-0 flex-1 items-start gap-2 text-muted-foreground">
+        <span className="min-w-0 flex-1 whitespace-pre-wrap">
+          {state.prompt || "(no prompt)"}
+        </span>
+        <span className="shrink-0 animate-pulse">running…</span>
+      </span>
+    );
+  }
   if (state.error !== null) {
     return <span className="truncate text-destructive">{state.error}</span>;
   }
@@ -362,7 +381,9 @@ export const blockViews: Record<string, BlockView> = {
   },
 
   [AGENT_KIND]: {
-    Row: ({ block }) => <AgentRow state={agentState.parse(block.data)} />,
+    Row: ({ block, running }) => (
+      <AgentRow state={agentState.parse(block.data)} running={running} />
+    ),
     fields: (block) => {
       const state = agentState.parse(block.data);
       const fallback = readSettings().aiDefaultModel;

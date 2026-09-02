@@ -142,6 +142,7 @@ function BlockRow({
   row,
   selected,
   line,
+  running,
   gutter,
   shown,
   onSelect,
@@ -152,6 +153,8 @@ function BlockRow({
   selected: boolean;
   /** Number to show in the gutter, or null when line numbers are off. */
   line: number | null;
+  /** Whether this block has a hook in flight right now. */
+  running: boolean;
   /** Whether the gutter column is enabled at all (hidden pre-hydration). */
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
@@ -249,7 +252,7 @@ function BlockRow({
           className={cn("flex w-full", shown ? "" : "overflow-hidden")}
           style={shown ? undefined : { maxHeight: `${CLIP_LINES}rem` }}
         >
-          <view.Row block={row.block} nested={row.nested} />
+          <view.Row block={row.block} nested={row.nested} running={running} />
         </div>
         {!shown && clipped > 0 ? (
           <button
@@ -387,7 +390,7 @@ export function ChatView({
   // sessions remounts rather than needing this to reconcile a changed prop
   // mid-life.
   const [engine] = useState(() => createLiveGraph(initialGraph));
-  const { graph, dirty, savedAt } = useSyncExternalStore(
+  const { graph, dirty, savedAt, running } = useSyncExternalStore(
     engine.subscribe,
     engine.getSnapshot,
     engine.getSnapshot,
@@ -1026,6 +1029,7 @@ export function ChatView({
                 row={entry}
                 selected={i === index}
                 line={lineNumber(i)}
+                running={running.has(entry.block.id)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>
