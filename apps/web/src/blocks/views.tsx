@@ -37,6 +37,9 @@ export type BlockField = {
    *  actions menu in place of a blank, and as the editor's placeholder, so
    *  an inherited default is visible instead of looking unset. */
   placeholder?: string;
+  /** Content rather than a label: the editor gives it a text area where
+   *  enter inserts a newline, and the row renders every line of it. */
+  multiline?: boolean;
   /** `value`'s real type once parsed — a `"number"` field round-trips
    *  through `Number()` before it's written; everything else stays a
    *  string as-is. */
@@ -126,8 +129,10 @@ function AgentRow({ state }: { state: AgentState }) {
     return <span className="truncate text-destructive">{state.error}</span>;
   }
   return (
-    <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
-      <span className="truncate">{state.prompt || "(no prompt)"}</span>
+    <span className="flex min-w-0 flex-1 items-start gap-2 text-muted-foreground">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap">
+        {state.prompt || "(no prompt)"}
+      </span>
       <span className="shrink-0 text-muted-foreground/60">
         {state.ranAt
           ? `ran ${new Date(state.ranAt).toLocaleTimeString()}`
@@ -243,13 +248,20 @@ function MediaPreview({ state }: { state: MediaState }) {
 
 export const blockViews: Record<string, BlockView> = {
   [TEXT_KIND]: {
+    // Wraps and keeps its newlines instead of clipping to one line: a text
+    // block is content, not a label, and a truncated one is unreadable.
     Row: ({ block }) => (
-      <span className="truncate text-muted-foreground">
+      <span className="min-w-0 flex-1 whitespace-pre-wrap text-muted-foreground">
         {textState.parse(block.data).text}
       </span>
     ),
     fields: (block) => [
-      { name: "text", label: "text", value: textState.parse(block.data).text },
+      {
+        name: "text",
+        label: "text",
+        value: textState.parse(block.data).text,
+        multiline: true,
+      },
     ],
   },
 
@@ -320,7 +332,12 @@ export const blockViews: Record<string, BlockView> = {
       const state = agentState.parse(block.data);
       const fallback = readSettings().aiDefaultModel;
       return [
-        { name: "prompt", label: "prompt", value: state.prompt },
+        {
+          name: "prompt",
+          label: "prompt",
+          value: state.prompt,
+          multiline: true,
+        },
         {
           name: "model",
           label: "model",

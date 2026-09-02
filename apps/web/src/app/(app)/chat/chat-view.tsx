@@ -166,7 +166,7 @@ function BlockRow({
       aria-expanded={row.nested > 0 ? row.expanded : undefined}
       onClick={onSelect}
       className={cn(
-        "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
+        "flex cursor-pointer items-start gap-3 border-l-2 py-1 pl-1 pr-3",
         selected
           ? "border-foreground/60 bg-muted"
           : "border-transparent hover:bg-muted/40",

@@ -40,7 +40,12 @@ export function FieldEditor({
         run: onCancel,
       },
     ],
-    docs: [{ keys: "enter", label: `Save ${field.label}` }],
+    docs: field.multiline
+      ? [
+          { keys: "enter", label: "New line" },
+          { keys: "ctrl+enter", label: `Save ${field.label}` },
+        ]
+      : [{ keys: "enter", label: `Save ${field.label}` }],
   });
 
   return (
@@ -48,29 +53,54 @@ export function FieldEditor({
       label={title}
       title={title}
       meta={field.label}
+      size={field.multiline ? "lg" : undefined}
       onClose={onCancel}
     >
       <div className="space-y-1 px-3 py-2">
-        <input
-          // The only place in the app where typing beats modal keys.
-          autoFocus
-          value={value}
-          disabled={saving}
-          placeholder={field.placeholder}
-          inputMode={field.type === "number" ? "decimal" : "text"}
-          spellCheck={false}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              onSubmit(value);
-            } else if (event.key === "Escape") {
-              event.preventDefault();
-              onCancel();
-            }
-          }}
-          className="w-full border bg-background px-2 py-1 outline-none placeholder:text-muted-foreground/50 focus:border-foreground/40 disabled:opacity-50"
-        />
+        {field.multiline ? (
+          <textarea
+            // Content, so enter belongs to the text and saving moves to
+            // ctrl/cmd+enter — the same trade every message box makes.
+            autoFocus
+            rows={16}
+            value={value}
+            disabled={saving}
+            placeholder={field.placeholder}
+            spellCheck={false}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                onSubmit(value);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onCancel();
+              }
+            }}
+            className="w-full resize-y border bg-background px-2 py-1 font-mono outline-none placeholder:text-muted-foreground/50 focus:border-foreground/40 disabled:opacity-50"
+          />
+        ) : (
+          <input
+            // The only place in the app where typing beats modal keys.
+            autoFocus
+            value={value}
+            disabled={saving}
+            placeholder={field.placeholder}
+            inputMode={field.type === "number" ? "decimal" : "text"}
+            spellCheck={false}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onSubmit(value);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onCancel();
+              }
+            }}
+            className="w-full border bg-background px-2 py-1 outline-none placeholder:text-muted-foreground/50 focus:border-foreground/40 disabled:opacity-50"
+          />
+        )}
         {error ? <p className="text-destructive">{error}</p> : null}
       </div>
     </ModalFrame>
