@@ -18,11 +18,16 @@ type Load =
 export function MediaText({
   src,
   markdown = false,
+  language = null,
   className,
 }: {
   src: string;
   /** Render structure instead of the literal characters. */
   markdown?: boolean;
+  /** Highlight.js grammar name, from `languageForPath` on the original URI's
+   * path — `src` itself is the proxied `/api/media?uri=...` fetch URL, which
+   * has no file extension of its own to read. */
+  language?: string | null;
   className?: string;
 }) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
@@ -69,13 +74,10 @@ export function MediaText({
     );
   }
 
-  // A .txt or .log has no grammar to highlight, but it is still
-  // preformatted, so it goes through the same block as code and obeys the
-  // same wrap setting.
   return (
     <CodeBlock
       code={load.text}
-      language={null}
+      language={language}
       className={cn("border p-2", className)}
     />
   );

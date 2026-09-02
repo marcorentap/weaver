@@ -8,14 +8,8 @@ import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
 import { CodeBlock, languageForPath } from "@/components/code";
 import { cn } from "@/lib/utils";
-import type { FileState, MetricState } from "./kinds";
-import {
-  FILE_KIND,
-  fileState,
-  kinds,
-  METRIC_KIND,
-  metricState,
-} from "./kinds";
+import type { MetricState } from "./kinds";
+import { kinds, METRIC_KIND, metricState } from "./kinds";
 import type { MediaState } from "./media";
 import {
   MEDIA_KIND,
@@ -85,18 +79,6 @@ function MetricRow({ state }: { state: MetricState }) {
       <span className="tabular-nums text-muted-foreground">
         {state.value}/{state.limit} {state.unit}
       </span>
-    </span>
-  );
-}
-
-function FileRow({ state }: { state: FileState }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="truncate">{state.path}</span>
-      <span className="shrink-0 rounded border px-1 text-muted-foreground">
-        {state.language}
-      </span>
-      <span className="truncate text-muted-foreground">{state.summary}</span>
     </span>
   );
 }
@@ -246,6 +228,7 @@ function MediaRow({ state }: { state: MediaState }) {
         <MediaText
           src={src}
           markdown={mime === "text/markdown"}
+          language={languageForPath(mediaName(state.uri))}
           className="pointer-events-none h-48 w-96 shrink-0 overflow-hidden"
         />
       ) : null}
@@ -287,6 +270,7 @@ function MediaPreview({ state }: { state: MediaState }) {
       <MediaText
         src={src}
         markdown={mime === "text/markdown"}
+        language={languageForPath(mediaName(state.uri))}
         className="h-[70vh] w-full overflow-auto overscroll-contain"
       />
     );
@@ -335,18 +319,6 @@ export const blockViews: Record<string, BlockView> = {
         { name: "value", label: "value", value: String(state.value), type: "number" },
         { name: "limit", label: "limit", value: String(state.limit), type: "number" },
         { name: "unit", label: "unit", value: state.unit },
-      ];
-    },
-  },
-
-  [FILE_KIND]: {
-    Row: ({ block }) => <FileRow state={fileState.parse(block.data)} />,
-    fields: (block) => {
-      const state = fileState.parse(block.data);
-      return [
-        { name: "path", label: "path", value: state.path },
-        { name: "language", label: "language", value: state.language },
-        { name: "summary", label: "summary", value: state.summary },
       ];
     },
   },

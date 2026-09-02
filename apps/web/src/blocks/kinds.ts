@@ -12,7 +12,6 @@ import { toolKind } from "./tool";
  * renderer parses through the same definition instead of re-declaring fields.
  */
 export const METRIC_KIND = "metric";
-export const FILE_KIND = "file";
 
 export const metricState = z.object({
   value: z.number(),
@@ -29,24 +28,9 @@ export const metricKind = defineKind({
   defaults: { value: 0, limit: 100, unit: "" },
 });
 
-export const fileState = z.object({
-  path: z.string(),
-  language: z.string(),
-  summary: z.string(),
-});
-export type FileState = z.infer<typeof fileState>;
-
-export const fileKind = defineKind({
-  kind: FILE_KIND,
-  schema: fileState,
-  snapshot: (state) => `${state.path} — ${state.summary}`,
-  defaults: { path: "", language: "", summary: "" },
-});
-
 export const kinds = kindRegistry([
   ...coreKinds,
   metricKind,
-  fileKind,
   mediaKind,
   timerKind,
   issLocationKind,

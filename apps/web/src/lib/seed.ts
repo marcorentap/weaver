@@ -4,7 +4,7 @@ import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
 import { AGENT_KIND } from "@/blocks/agent";
 import { ISS_LOCATION_KIND } from "@/blocks/iss";
-import { FILE_KIND, METRIC_KIND } from "@/blocks/kinds";
+import { METRIC_KIND } from "@/blocks/kinds";
 import { MEDIA_KIND } from "@/blocks/media";
 import { TIMER_KIND } from "@/blocks/timer";
 
@@ -79,22 +79,14 @@ const tree: SeedNode[] = [
         label: "files",
         children: [
           {
-            kind: FILE_KIND,
+            kind: MEDIA_KIND,
             label: "block.ts",
-            data: {
-              path: "packages/core/src/block.ts",
-              language: "ts",
-              summary: "linked tree, open kinds, snapshots",
-            },
+            data: { uri: `file://${process.cwd()}/../../packages/core/src/block.ts` },
           },
           {
-            kind: FILE_KIND,
+            kind: MEDIA_KIND,
             label: "store/index.ts",
-            data: {
-              path: "packages/store/src/index.ts",
-              language: "ts",
-              summary: "sqlite persistence",
-            },
+            data: { uri: `file://${process.cwd()}/../../packages/store/src/index.ts` },
           },
         ],
       },
