@@ -6,6 +6,7 @@ import { readSettings } from "@/lib/settings";
 import { READ_ONLY_TOOLS } from "@/lib/agent-events";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
+import { CodeBlock, languageForPath } from "@/components/code";
 import type { FileState, MetricState } from "./kinds";
 import {
   FILE_KIND,
@@ -29,7 +30,7 @@ import { TIMER_KIND, timerState } from "./timer";
 import type { AgentState } from "./agent";
 import { AGENT_KIND, agentState } from "./agent";
 import type { ToolState } from "./tool";
-import { TOOL_KIND, toolState } from "./tool";
+import { TOOL_KIND, readPath, toolState } from "./tool";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -147,6 +148,7 @@ function AgentRow({ state }: { state: AgentState }) {
 }
 
 function ToolRow({ state }: { state: ToolState }) {
+  const path = readPath(state);
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-1">
       <span className="flex min-w-0 items-baseline gap-2">
@@ -155,7 +157,16 @@ function ToolRow({ state }: { state: ToolState }) {
           {state.args}
         </span>
       </span>
-      {state.output ? (
+      {state.output === "" ? null : path ? (
+        // A read's output is a source file, so it is shown as one: wrapping
+        // it like prose would reflow the indentation that carries the
+        // structure.
+        <CodeBlock
+          code={state.output}
+          language={languageForPath(path)}
+          className="w-full text-muted-foreground"
+        />
+      ) : (
         <span
           className={`min-w-0 whitespace-pre-wrap ${
             state.ok ? "text-muted-foreground" : "text-destructive"
@@ -163,7 +174,7 @@ function ToolRow({ state }: { state: ToolState }) {
         >
           {state.output}
         </span>
-      ) : null}
+      )}
     </span>
   );
 }

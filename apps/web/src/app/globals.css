@@ -82,6 +82,18 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* Syntax colours. The rest of the theme is deliberately greyscale, so
+     highlighting borrows a terminal's eight colours rather than a full IDE
+     palette: enough hues to tell a string from a keyword, few enough that a
+     code block still reads as part of the rail. */
+  --code-keyword: oklch(0.45 0.16 310);
+  --code-string: oklch(0.48 0.13 150);
+  --code-number: oklch(0.52 0.14 55);
+  --code-name: oklch(0.47 0.15 260);
+  --code-type: oklch(0.47 0.09 210);
+  --code-attr: oklch(0.5 0.12 90);
+  --code-comment: var(--muted-foreground);
 }
 
 .dark {
@@ -116,6 +128,14 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+
+  --code-keyword: oklch(0.76 0.13 310);
+  --code-string: oklch(0.8 0.13 150);
+  --code-number: oklch(0.82 0.12 60);
+  --code-name: oklch(0.78 0.12 260);
+  --code-type: oklch(0.82 0.09 205);
+  --code-attr: oklch(0.86 0.12 95);
+  --code-comment: var(--muted-foreground);
 }
 
 @layer base {
@@ -128,6 +148,63 @@
   html {
     @apply font-sans;
   }
+}
+
+/* highlight.js emits one class per token scope, and both the markdown
+   renderer and a read tool's output rely on these rules to colour them.
+   Scopes are grouped rather than styled one by one: a reader needs to tell a
+   keyword from a string from a comment, not to see forty distinct hues. */
+.hljs-comment,
+.hljs-quote {
+  color: var(--code-comment);
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-section,
+.hljs-doctag {
+  color: var(--code-keyword);
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string {
+  color: var(--code-string);
+}
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-deletion,
+.hljs-meta,
+.hljs-link {
+  color: var(--code-number);
+}
+.hljs-title,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--code-name);
+}
+.hljs-type,
+.hljs-built_in,
+.hljs-class .hljs-title,
+.hljs-params {
+  color: var(--code-type);
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-tag {
+  color: var(--code-attr);
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
 }
 
 /* Scrolls, but shows nothing: the shell is a fixed frame, and a gutter that

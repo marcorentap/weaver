@@ -6,6 +6,7 @@ import Markdown, {
 } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import { mediaSrc, parseMediaUri } from "@/blocks/media";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,14 @@ import { cn } from "@/lib/utils";
  * hand-written lines together.
  */
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+
+/**
+ * Fenced code is highlighted by the same highlight.js grammars a read tool's
+ * output uses, into `hljs-*` spans that globals.css colours. A fence with no
+ * language, or one nobody has a grammar for, is left as plain text: guessing
+ * is worse than not colouring.
+ */
+const REHYPE_PLUGINS = [rehypeHighlight];
 
 /**
  * react-markdown drops every URL whose scheme is not http, https, mailto or
@@ -51,7 +60,12 @@ const MARKDOWN: Components = {
       className="mt-2 border-l pl-2 text-muted-foreground"
     />
   ),
-  code: (props) => <code {...props} className="bg-muted px-1" />,
+  // The class list matters here: `rehype-highlight` marks the element with
+  // `hljs` and its grammar, and replacing it would throw the highlighting
+  // away.
+  code: ({ className, ...props }) => (
+    <code {...props} className={cn(className, "bg-muted px-1")} />
+  ),
   pre: (props) => (
     <pre {...props} className="mt-2 overflow-x-auto border p-2" />
   ),
@@ -89,6 +103,7 @@ export function MarkdownText({
       <Markdown
         components={MARKDOWN}
         remarkPlugins={REMARK_PLUGINS}
+        rehypePlugins={REHYPE_PLUGINS}
         urlTransform={urlTransform}
       >
         {text}

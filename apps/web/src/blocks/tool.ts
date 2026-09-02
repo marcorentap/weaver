@@ -24,6 +24,26 @@ export const toolState = z.object({
 });
 export type ToolState = z.infer<typeof toolState>;
 
+/** Arguments of a `read` call, of which only the path is interesting. */
+const readArgs = z.object({ path: z.string() });
+
+/**
+ * The file a successful `read` was pointed at, if that is what this block
+ * records. The output is bytes either way, so the path's extension is the
+ * only thing that says how to render them.
+ */
+export function readPath(state: ToolState): string | null {
+  if (state.name !== "read" || !state.ok) return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(state.args);
+  } catch {
+    return null;
+  }
+  const parsed = readArgs.safeParse(args);
+  return parsed.success ? parsed.data.path : null;
+}
+
 export const toolKind = defineKind({
   kind: TOOL_KIND,
   schema: toolState,
