@@ -825,23 +825,24 @@ export function ChatView({
   };
 
   /**
-   * The enter menu: whatever the kind declares (full-size preview, editable
-   * fields), then the actions every block has.
+   * The enter menu: whatever the kind declares (preview, editable fields,
+   * configure) first, then the actions every block has (copy id, delete)
+   * last — so a kind's own affordances read before the generic ones.
    */
   const kind = row ? kinds[row.block.kind] : undefined;
 
   const actions: KeyMenuItem[] =
     row && view
       ? [
-          {
-            label: "Copy ID",
-            key: "y",
-            detail: row.block.id,
-            run: () => {
-              void navigator.clipboard.writeText(row.block.id);
-              setPopup(null);
-            },
-          },
+          ...(view.Preview
+            ? [
+                {
+                  label: "Preview",
+                  key: "p",
+                  run: () => setPopup({ kind: "preview" }),
+                },
+              ]
+            : []),
           ...(row.block.kind === AGENT_KIND
             ? [
                 {
@@ -855,15 +856,6 @@ export function ChatView({
                       model: settings.aiDefaultModel,
                     });
                   },
-                },
-              ]
-            : []),
-          ...(view.Preview
-            ? [
-                {
-                  label: "Preview",
-                  key: "p",
-                  run: () => setPopup({ kind: "preview" }),
                 },
               ]
             : []),
@@ -882,6 +874,15 @@ export function ChatView({
                 },
               ]
             : []),
+          {
+            label: "Copy ID",
+            key: "y",
+            detail: row.block.id,
+            run: () => {
+              void navigator.clipboard.writeText(row.block.id);
+              setPopup(null);
+            },
+          },
           {
             label: `Delete ${row.block.label}`,
             key: "d",
