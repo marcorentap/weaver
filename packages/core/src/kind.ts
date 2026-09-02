@@ -1,5 +1,5 @@
 import type { ZodType } from "zod";
-import type { Block, BlockData, BlockId } from "./block";
+import type { Block, BlockData, BlockGraph, BlockId } from "./block";
 
 export type SnapshotContext = {
   /** The block being snapshotted, for metadata such as its label. */
@@ -12,17 +12,53 @@ export type SnapshotContext = {
 
 /**
  * Handed to a hook when it runs, so a hook can reach beyond its own state —
- * today, only to call another block's hook by id. This is the whole of
- * "blocks calling blocks" for now: no wiring UI, no edges, just a direct
- * reference a kind's own state carries (a timer's `targetId`, say).
+ * to call another block's hook by id, to read the graph around it, or to
+ * add/replace its own nested output. This is the whole of "blocks acting on
+ * the graph" for now: no wiring UI, no edges beyond what a kind's own state
+ * already carries (a timer's `targetId`, say).
  */
 export type HookContext = {
   /**
    * Invoke another block's named hook and let it run to completion. Silently
    * does nothing if `id` no longer exists or `hook` isn't one of its kind's
-   * hooks — a stale reference should not crash the caller.
+   * hooks — a stale reference should not crash the caller. `arg` is passed
+   * through to the target hook verbatim; a caller with nothing to say
+   * omits it.
    */
-  call: (id: BlockId, hook: string) => Promise<void>;
+  call: (id: BlockId, hook: string, arg?: unknown) => Promise<void>;
+  /** The id of the block whose hook is currently running. */
+  id: BlockId;
+  /**
+   * The graph as of this hook's invocation — lets a hook look beyond its own
+   * state at everything else, e.g. an agent block gathering its inference
+   * context from the rest of the graph. A snapshot, not a live view:
+   * mutations elsewhere during this hook's run are not reflected here. Use
+   * `addBlock`/`clearChildren` to write, never by hand.
+   */
+  graph: BlockGraph;
+  /** Every kind's definition, keyed by `BlockKind.kind` — lets a hook
+   *  snapshot arbitrary blocks (via `snapshotBlock`/`snapshotGraph`) without
+   *  needing its own reference to the app's registry. */
+  registry: KindRegistry;
+  /**
+   * Appends a new block as a child of `parentId` (default: the block running
+   * this hook), returning its id — lets a hook add to the graph instead of
+   * only rewriting its own state, e.g. an agent nesting the model's reply
+   * beneath itself.
+   */
+  addBlock: (
+    kind: string,
+    data: BlockData,
+    label: string,
+    parentId?: BlockId,
+  ) => BlockId;
+  /**
+   * Deletes every current child of `parentId` (default: the block running
+   * this hook) — lets a hook clear stale output before writing fresh
+   * results, e.g. an agent re-run replacing its previous reply instead of
+   * accumulating forever.
+   */
+  clearChildren: (parentId?: BlockId) => void;
 };
 
 /** A request from a kind's own state to have one of its hooks invoked on a
@@ -44,6 +80,9 @@ export type CallbackSpec = {
   targetField: string;
   /** State field holding the name of the hook on that block. */
   hookField: string;
+  /** State field holding the JSON-encoded argument passed to the target
+   *  hook, if any. Omit for a callback with no argument. */
+  argField?: string;
 };
 
 /**
@@ -69,7 +108,12 @@ export type BlockKind = {
    * drifts from its own kind's shape is a bug worth catching immediately,
    * not persisting.
    */
-  call: (data: BlockData, hook: string, ctx: HookContext) => Promise<BlockData>;
+  call: (
+    data: BlockData,
+    hook: string,
+    ctx: HookContext,
+    arg?: unknown,
+  ) => Promise<BlockData>;
   /**
    * Whether this block currently wants one of its own hooks invoked on a
    * timer, and how often — a timer block reads `intervalMs` off its own
@@ -104,7 +148,10 @@ export function defineKind<S>(def: {
    * (already-parsed) state and returns its next state — sync for pure
    * transforms, async for anything that does IO first (an HTTP fetch, say).
    */
-  hooks?: Record<string, (state: S, ctx: HookContext) => Promise<S> | S>;
+  hooks?: Record<
+    string,
+    (state: S, ctx: HookContext, arg?: unknown) => Promise<S> | S
+  >;
   /** State field pairs that reference another block's hook — see
    *  `CallbackSpec`. Omit for a kind with no such reference. */
   callbacks?: readonly CallbackSpec[];
@@ -128,12 +175,12 @@ export function defineKind<S>(def: {
     defaults: def.defaults !== undefined
       ? (def.schema.parse(def.defaults) as BlockData)
       : null,
-    call: async (data, hook, ctx) => {
+    call: async (data, hook, ctx, arg) => {
       const fn = hooks[hook];
       if (!fn) {
         throw new Error(`kind "${def.kind}" has no hook named "${hook}"`);
       }
-      const next = await fn(def.schema.parse(data), ctx);
+      const next = await fn(def.schema.parse(data), ctx, arg);
       return def.schema.parse(next) as BlockData;
     },
     schedule: (data) => def.schedule?.(def.schema.parse(data)) ?? null,

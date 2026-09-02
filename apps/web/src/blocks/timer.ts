@@ -17,6 +17,10 @@ export const timerState = z.object({
   targetId: z.string(),
   /** Name of the hook to call on the target block. */
   hook: z.string(),
+  /** JSON-encoded argument passed to the target hook on every tick, or ""
+   *  to call it with no argument. Defaults to "" so timers persisted before
+   *  this field existed keep parsing. */
+  arg: z.string().default(""),
   /** Fires so far, for visibility in the row — the timer's own heartbeat. */
   ticks: z.number().int().nonnegative(),
   /** Epoch ms of the last fire, or null before the first one. */
@@ -31,14 +35,15 @@ export const timerKind = defineKind({
     `every ${state.intervalMs}ms, calls ${state.hook} on ${state.targetId} (${state.ticks} ticks)`,
   schedule: (state) => ({ intervalMs: state.intervalMs, hook: "tick" }),
   callbacks: [
-    { label: "On tick", targetField: "targetId", hookField: "hook" },
+    { label: "On tick", targetField: "targetId", hookField: "hook", argField: "arg" },
   ],
   hooks: {
     /** The runtime's own tick, per `schedule` above. Nothing stops another
      *  block from calling it directly too — that just calls its target
      *  early. */
     tick: async (state, ctx) => {
-      await ctx.call(state.targetId, state.hook);
+      const arg = state.arg.trim() ? JSON.parse(state.arg) : undefined;
+      await ctx.call(state.targetId, state.hook, arg);
       return { ...state, ticks: state.ticks + 1, lastTickAt: Date.now() };
     },
   },
@@ -46,6 +51,7 @@ export const timerKind = defineKind({
     intervalMs: 1000,
     targetId: "",
     hook: "",
+    arg: "",
     ticks: 0,
     lastTickAt: null,
   },
