@@ -4,6 +4,7 @@ import { agentKind } from "./agent";
 import { issLocationKind } from "./iss";
 import { mediaKind } from "./media";
 import { timerKind } from "./timer";
+import { toolKind } from "./tool";
 
 /**
  * Custom block kinds. A kind is defined by the schema of its state: the unique
@@ -50,4 +51,5 @@ export const kinds = kindRegistry([
   timerKind,
   issLocationKind,
   agentKind,
+  toolKind,
 ]);

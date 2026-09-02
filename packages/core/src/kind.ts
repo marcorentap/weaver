@@ -91,6 +91,13 @@ export type CallbackSpec = {
  */
 export type BlockKind = {
   kind: string;
+  /**
+   * The schema of this kind's state, kept alongside the erased `parse` so a
+   * caller can *describe* a kind, not just validate against it — deriving a
+   * JSON Schema to hand a model that creates blocks, say. Reading it is
+   * fine; every write still goes through `parse`.
+   */
+  schema: ZodType<unknown>;
   /** Validate raw data into complete state. Throws when the schema fails. */
   parse: (data: BlockData) => unknown;
   /** Flatten validated state into the string handed to the LLM. */
@@ -166,6 +173,7 @@ export function defineKind<S>(def: {
   const hooks = def.hooks ?? {};
   return {
     kind: def.kind,
+    schema: def.schema as ZodType<unknown>,
     parse: (data) => def.schema.parse(data),
     // Parsing here means `def.snapshot` only ever receives complete state,
     // and no cast is needed to recover the state type.

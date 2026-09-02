@@ -3,6 +3,7 @@ import type { Block } from "@repo/core";
 import { GROUP_KIND, TEXT_KIND, textState } from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
 import { readSettings } from "@/lib/settings";
+import { READ_ONLY_TOOLS } from "@/lib/agent-events";
 import { MediaText } from "@/components/media-text";
 import type { FileState, MetricState } from "./kinds";
 import {
@@ -26,6 +27,8 @@ import type { TimerState } from "./timer";
 import { TIMER_KIND, timerState } from "./timer";
 import type { AgentState } from "./agent";
 import { AGENT_KIND, agentState } from "./agent";
+import type { ToolState } from "./tool";
+import { TOOL_KIND, toolState } from "./tool";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -138,6 +141,28 @@ function AgentRow({ state }: { state: AgentState }) {
           ? `ran ${new Date(state.ranAt).toLocaleTimeString()}`
           : "not run yet"}
       </span>
+    </span>
+  );
+}
+
+function ToolRow({ state }: { state: ToolState }) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className="shrink-0">{state.name}</span>
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+          {state.args}
+        </span>
+      </span>
+      {state.output ? (
+        <span
+          className={`min-w-0 whitespace-pre-wrap ${
+            state.ok ? "text-muted-foreground" : "text-destructive"
+          }`}
+        >
+          {state.output}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -345,6 +370,29 @@ export const blockViews: Record<string, BlockView> = {
           // A blank field means "use the settings default", so show which
           // model that actually is rather than nothing at all.
           placeholder: fallback || "no default model — see settings",
+        },
+        {
+          name: "tools",
+          label: "tools",
+          value: state.tools,
+          placeholder: READ_ONLY_TOOLS.join(", "),
+        },
+      ];
+    },
+  },
+
+  [TOOL_KIND]: {
+    Row: ({ block }) => <ToolRow state={toolState.parse(block.data)} />,
+    fields: (block) => {
+      const state = toolState.parse(block.data);
+      return [
+        { name: "name", label: "tool", value: state.name },
+        { name: "args", label: "args", value: state.args },
+        {
+          name: "output",
+          label: "output",
+          value: state.output,
+          multiline: true,
         },
       ];
     },

@@ -1,8 +1,10 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
+import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { MEDIA_KIND, mediaInfo, parseMediaUri } from "@/blocks/media";
+import { projectRoot } from "@/lib/project";
 import { getStore } from "@/lib/store";
 
 /**
@@ -10,9 +12,13 @@ import { getStore } from "@/lib/store";
  * page may not read, and remote text, which `fetch` may not read without CORS
  * headers on the origin.
  *
- * Only files a media block actually points at are served, so this stays a
- * viewer for the store's own content rather than a read-anything oracle on
- * localhost.
+ * What may be served is either something a media block already points at, or
+ * a file inside the project directory. The second rule exists because an
+ * agent's output is live: it displays a file it just read and the block
+ * showing it is only in the browser until the next autosave, so a
+ * store-reference check alone would blank every fresh block for a few
+ * seconds. Neither rule serves anything outside the project it was not
+ * already asked to.
  */
 function isReferenced(uri: string): boolean {
   const store = getStore();
@@ -22,6 +28,13 @@ function isReferenced(uri: string): boolean {
     }
   }
   return false;
+}
+
+/** Whether `path` is inside the project this server was started in. */
+function inProject(path: string): boolean {
+  const root = projectRoot();
+  const target = resolve(path);
+  return target === root || target.startsWith(`${root}/`);
 }
 
 /** `bytes=start-end`, the only form browsers send for media. */
@@ -86,8 +99,13 @@ export async function GET(request: Request): Promise<Response> {
 
   const url = parseMediaUri(uri);
   if (!url) return new Response("not a media uri", { status: 400 });
-  if (!isReferenced(uri)) {
-    return new Response("no media block references this uri", { status: 403 });
+  const allowed =
+    isReferenced(uri) ||
+    (url.protocol === "file:" && inProject(fileURLToPath(url)));
+  if (!allowed) {
+    return new Response("uri is neither referenced nor in the project", {
+      status: 403,
+    });
   }
 
   const { mime, type } = mediaInfo(uri);

@@ -212,7 +212,8 @@ const tree: SeedNode[] = [
 
   // An agent block: it names nothing else, since its context comes from
   // walking up the tree at run time and its credentials come from settings
-  // rather than from persisted state.
+  // rather than from persisted state. Its `tools` are left blank, so it can
+  // read the project but not change it or run anything.
   {
     kind: AGENT_KIND,
     label: "Summarizer",
@@ -220,6 +221,7 @@ const tree: SeedNode[] = [
       prompt:
         "In one sentence, summarize what this graph of context blocks describes.",
       model: "",
+      tools: "",
       error: null,
       ranAt: null,
     },

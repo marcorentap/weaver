@@ -2,5 +2,10 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  # Both arrive with the agent SDK; neither postinstall is needed here —
+  # @google/genai only fetches optional native bits for providers we never
+  # call, and protobufjs precompiles descriptors it also builds lazily.
+  '@google/genai': false
+  protobufjs: false
   sharp: false
   unrs-resolver: false
