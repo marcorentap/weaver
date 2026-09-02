@@ -174,6 +174,7 @@ export async function POST(request: Request): Promise<Response> {
               (entry) => `- ${entry.kind}: ${JSON.stringify(entry.schema)}`,
             ),
             'A media block shows an image, audio, video, PDF or text file by URI; a local file needs an absolute file:// URI, e.g. {"uri":"file:///home/me/diagram.png"}.',
+            "A text block renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images are all available; an image needs an http(s) or absolute file:// URL.",
           ].join("\n"),
           parameters: Type.Object({
             kind: Type.String({ description: "Block kind to create" }),

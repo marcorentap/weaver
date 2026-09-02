@@ -5,6 +5,7 @@ import { schemaMessage } from "@/lib/schema-error";
 import { readSettings } from "@/lib/settings";
 import { READ_ONLY_TOOLS } from "@/lib/agent-events";
 import { MediaText } from "@/components/media-text";
+import { MarkdownText } from "@/components/markdown";
 import type { FileState, MetricState } from "./kinds";
 import {
   FILE_KIND,
@@ -273,12 +274,14 @@ function MediaPreview({ state }: { state: MediaState }) {
 
 export const blockViews: Record<string, BlockView> = {
   [TEXT_KIND]: {
-    // Wraps and keeps its newlines instead of clipping to one line: a text
-    // block is content, not a label, and a truncated one is unreadable.
+    // A text block is content, not a label: it renders as markdown, so an
+    // agent's prose, a table or a fenced code block reads as itself rather
+    // than as its source characters.
     Row: ({ block }) => (
-      <span className="min-w-0 flex-1 whitespace-pre-wrap text-muted-foreground">
-        {textState.parse(block.data).text}
-      </span>
+      <MarkdownText
+        text={textState.parse(block.data).text}
+        className="flex-1 text-muted-foreground"
+      />
     ),
     fields: (block) => [
       {
