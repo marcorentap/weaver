@@ -6,7 +6,9 @@ import { z } from "zod";
 import {
   LINE_NUMBER_OPTIONS,
   useSettings,
+  WORD_WRAP_OPTIONS,
   type LineNumberMode,
+  type WordWrapMode,
 } from "@/lib/settings";
 import { useKeyLayer } from "@/lib/keymap";
 import { providerUrl } from "@/lib/provider";
@@ -127,6 +129,7 @@ export default function SettingsPage() {
     settings,
     hydrated,
     setLineNumber,
+    setWordWrap,
     setAiEndpoint,
     setAiApiKey,
     setAiDefaultModel,
@@ -149,9 +152,20 @@ export default function SettingsPage() {
       key: "lineNumber",
       label: "Line number",
       description: "Show each block's position in the left gutter of chat.",
+      section: "Appearance",
       options: LINE_NUMBER_OPTIONS,
       value: settings.lineNumber,
       onChange: (value) => setLineNumber(value as LineNumberMode),
+    },
+    {
+      kind: "option",
+      key: "wordWrap",
+      label: "Word wrap",
+      description:
+        "Wrap long lines in code and tool output instead of scrolling sideways.",
+      options: WORD_WRAP_OPTIONS,
+      value: settings.wordWrap,
+      onChange: (value) => setWordWrap(value as WordWrapMode),
     },
     {
       kind: "string",

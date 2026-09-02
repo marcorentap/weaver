@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { MarkdownText } from "@/components/markdown";
+import { CodeBlock } from "@/components/code";
 import { cn } from "@/lib/utils";
 
 type Load =
@@ -68,9 +69,14 @@ export function MediaText({
     );
   }
 
+  // A .txt or .log has no grammar to highlight, but it is still
+  // preformatted, so it goes through the same block as code and obeys the
+  // same wrap setting.
   return (
-    <pre className={cn("whitespace-pre border p-2", className)}>
-      {load.text}
-    </pre>
+    <CodeBlock
+      code={load.text}
+      language={null}
+      className={cn("border p-2", className)}
+    />
   );
 }

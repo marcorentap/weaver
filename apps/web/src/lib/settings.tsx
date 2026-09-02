@@ -23,9 +23,19 @@ export const LINE_NUMBER_OPTIONS = [
   { value: "relative", label: "Relative" },
 ] as const satisfies readonly { value: LineNumberMode; label: string }[];
 
+export type WordWrapMode = "off" | "on";
+
+export const WORD_WRAP_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+] as const satisfies readonly { value: WordWrapMode; label: string }[];
+
 type Settings = {
   /** Left-hand gutter beside each chat block. */
   lineNumber: LineNumberMode;
+  /** Whether preformatted content — code, and a tool's output — wraps
+   *  instead of scrolling sideways. */
+  wordWrap: WordWrapMode;
   /** Base URL of an OpenAI-completions provider, e.g. "http://seer:4000/v1"
    *  — an agent block appends "/chat/completions" itself. */
   aiEndpoint: string;
@@ -39,6 +49,7 @@ const STORAGE_KEY = "weaver.settings";
 
 const DEFAULTS: Settings = {
   lineNumber: "absolute",
+  wordWrap: "off",
   aiEndpoint: "",
   aiApiKey: "",
   aiDefaultModel: "",
@@ -88,6 +99,7 @@ type SettingsContextValue = {
   settings: Settings;
   hydrated: boolean;
   setLineNumber: (mode: LineNumberMode) => void;
+  setWordWrap: (mode: WordWrapMode) => void;
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
   setAiDefaultModel: (value: string) => void;
@@ -110,6 +122,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       commit({
         settings: {
           lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
+          wordWrap: stored?.wordWrap ?? DEFAULTS.wordWrap,
           aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
           aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
           aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
@@ -137,6 +150,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (lineNumber: LineNumberMode) => set("lineNumber", lineNumber),
     [set],
   );
+  const setWordWrap = useCallback(
+    (wordWrap: WordWrapMode) => set("wordWrap", wordWrap),
+    [set],
+  );
   const setAiEndpoint = useCallback(
     (value: string) => set("aiEndpoint", value),
     [set],
@@ -155,11 +172,20 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       settings,
       hydrated,
       setLineNumber,
+      setWordWrap,
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
     }),
-    [settings, hydrated, setLineNumber, setAiEndpoint, setAiApiKey, setAiDefaultModel],
+    [
+      settings,
+      hydrated,
+      setLineNumber,
+      setWordWrap,
+      setAiEndpoint,
+      setAiApiKey,
+      setAiDefaultModel,
+    ],
   );
 
   return <context.Provider value={value}>{children}</context.Provider>;

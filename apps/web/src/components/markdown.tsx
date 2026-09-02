@@ -8,6 +8,7 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { mediaSrc, parseMediaUri } from "@/blocks/media";
+import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 /**
@@ -25,6 +26,28 @@ const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
  * is worse than not colouring.
  */
 const REHYPE_PLUGINS = [rehypeHighlight];
+
+/**
+ * A fenced block, wrapped or scrolled per the word wrap setting. It is its own
+ * component because that choice comes from settings, and a component in the
+ * map below can read them.
+ */
+function Pre({
+  className,
+  ...props
+}: React.ComponentPropsWithoutRef<"pre">) {
+  const { settings } = useSettings();
+  return (
+    <pre
+      {...props}
+      className={cn(
+        className,
+        "mt-2 overflow-x-auto border p-2",
+        settings.wordWrap === "on" ? "whitespace-pre-wrap break-words" : "",
+      )}
+    />
+  );
+}
 
 /**
  * react-markdown drops every URL whose scheme is not http, https, mailto or
@@ -66,9 +89,7 @@ const MARKDOWN: Components = {
   code: ({ className, ...props }) => (
     <code {...props} className={cn(className, "bg-muted px-1")} />
   ),
-  pre: (props) => (
-    <pre {...props} className="mt-2 overflow-x-auto border p-2" />
-  ),
+  pre: Pre,
   hr: (props) => <hr {...props} className="my-3" />,
   table: (props) => <table {...props} className="mt-2 border" />,
   th: (props) => <th {...props} className="border px-1 text-left font-medium" />,

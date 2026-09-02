@@ -1,8 +1,11 @@
+"use client";
+
 import { Fragment } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
 import { toJsxRuntime } from "hast-util-to-jsx-runtime";
 import { common, createLowlight } from "lowlight";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/lib/settings";
 
 /**
  * highlight.js' common language set: about forty grammars, which is every
@@ -96,7 +99,17 @@ export function CodeBlock({
   language: string | null;
   className?: string;
 }) {
-  const classes = cn("min-w-0 overflow-x-auto whitespace-pre", className);
+  const { settings } = useSettings();
+  // Wrapping keeps a long line on screen; not wrapping keeps its columns.
+  // Both are defensible for code, so it is the reader's choice. Horizontal
+  // room is the caller's: an inline preview clips where a row scrolls.
+  const classes = cn(
+    "min-w-0",
+    settings.wordWrap === "on"
+      ? "whitespace-pre-wrap break-words"
+      : "whitespace-pre",
+    className,
+  );
   if (!language || !lowlight.registered(language)) {
     return <pre className={classes}>{code}</pre>;
   }

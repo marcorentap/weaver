@@ -7,6 +7,7 @@ import { READ_ONLY_TOOLS } from "@/lib/agent-events";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
 import { CodeBlock, languageForPath } from "@/components/code";
+import { cn } from "@/lib/utils";
 import type { FileState, MetricState } from "./kinds";
 import {
   FILE_KIND,
@@ -157,23 +158,18 @@ function ToolRow({ state }: { state: ToolState }) {
           {state.args}
         </span>
       </span>
-      {state.output === "" ? null : path ? (
-        // A read's output is a source file, so it is shown as one: wrapping
-        // it like prose would reflow the indentation that carries the
-        // structure.
+      {state.output === "" ? null : (
+        // Every tool prints machine output, not prose, so it all renders
+        // preformatted and obeys the wrap setting; only a read call knows a
+        // grammar to highlight it with.
         <CodeBlock
           code={state.output}
-          language={languageForPath(path)}
-          className="w-full text-muted-foreground"
+          language={path ? languageForPath(path) : null}
+          className={cn(
+            "w-full overflow-x-auto",
+            state.ok ? "text-muted-foreground" : "text-destructive",
+          )}
         />
-      ) : (
-        <span
-          className={`min-w-0 whitespace-pre-wrap ${
-            state.ok ? "text-muted-foreground" : "text-destructive"
-          }`}
-        >
-          {state.output}
-        </span>
       )}
     </span>
   );
