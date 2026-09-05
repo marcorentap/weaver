@@ -12,7 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
-import { childIds, lastChildId, topLevelBlockIds } from "@repo/core";
+import { childIds, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -32,6 +32,7 @@ import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@/blocks/kinds";
 import { USER_KIND } from "@/blocks/user";
 import { TOOL_KIND } from "@/blocks/tool";
+import { MEDIA_KIND, mediaState } from "@/blocks/media";
 import {
   createChatBlock,
   createChatSession,
@@ -1004,14 +1005,35 @@ export function ChatView({
             ? [
                 {
                   label: "Configure",
-                  key: "c",
+                  key: "o",
                   run: () => setPopup({ kind: "configure" }),
+                },
+              ]
+            : []),
+          ...(row.block.kind === TEXT_KIND || row.block.kind === MEDIA_KIND
+            ? [
+                {
+                  label:
+                    row.block.kind === TEXT_KIND ? "Copy content" : "Copy URI",
+                  key: "y",
+                  detail:
+                    row.block.kind === TEXT_KIND
+                      ? textState.parse(row.block.data).text
+                      : mediaState.parse(row.block.data).uri,
+                  run: () => {
+                    void navigator.clipboard.writeText(
+                      row.block.kind === TEXT_KIND
+                        ? textState.parse(row.block.data).text
+                        : mediaState.parse(row.block.data).uri,
+                    );
+                    setPopup(null);
+                  },
                 },
               ]
             : []),
           {
             label: "Copy ID",
-            key: "y",
+            key: "c",
             detail: row.block.id,
             run: () => {
               void navigator.clipboard.writeText(row.block.id);
