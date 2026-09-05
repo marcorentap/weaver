@@ -85,7 +85,7 @@ export default defineConfig({
       // markdown file (ported from apps/web's `reactCompiler: true`, which
       // has no Vite-native equivalent).
       babel({
-        filter: /\.[jt]sx?$/,
+        include: /\.[jt]sx?$/,
         babelConfig: {
           presets: ["@babel/preset-typescript"],
           plugins: [["babel-plugin-react-compiler", reactCompilerConfig]],
