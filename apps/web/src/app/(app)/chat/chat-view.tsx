@@ -12,7 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
-import { childIds, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
+import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -1125,10 +1125,10 @@ export function ChatView({
 
   /**
    * The visual-selection menu (`v` then `enter`): copy every selected
-   * block's content, joined, or delete the whole range. Deliberately just
-   * these two for now — a kind's own actions (preview, configure, run
-   * inference) stay single-block only, since "run inference on N blocks at
-   * once" has no obvious single meaning yet.
+   * block's content, joined, delete the whole range, or group it under a
+   * new block. A kind's own actions (preview, configure, run inference)
+   * stay single-block only, since "run inference on N blocks at once" has
+   * no obvious single meaning yet.
    */
   const selectionActions: KeyMenuItem[] =
     selectedRows.length > 0
@@ -1165,6 +1165,54 @@ export function ChatView({
                   for (const id of ids) void deleteChatBlock(graphId, id);
                 });
               }
+            },
+          },
+          {
+            label: `Group ${selectedRows.length} blocks`,
+            key: "g",
+            run: () => {
+              if (!selectionRange || !session) return;
+              setPopup(null);
+              setVisualAnchor(null);
+              const ids = selectedRows.map((entry) => entry.block.id);
+              const at = computeInsertion(rows, selectionRange[0]);
+              const groupId = crypto.randomUUID();
+              const graphId = session.id;
+              const input: BlockInput = {
+                id: groupId,
+                kind: GROUP_KIND,
+                label: "group",
+                createdAt: Date.now(),
+                data: {},
+              };
+              // Optimistic, same as delete: the group lands locally first,
+              // then each selected block relocates into it in order — an
+              // id an ancestor in this same selection already carried
+              // along is just a redundant, harmless move.
+              engine.addBlock(
+                {
+                  id: input.id,
+                  kind: input.kind,
+                  label: input.label,
+                  createdAt: input.createdAt,
+                  modifiedAt: Date.now(),
+                  next: null,
+                  children: null,
+                  data: input.data ?? {},
+                },
+                at,
+              );
+              setOpen(groupId, true);
+              for (const id of ids) {
+                relocate(id, {
+                  parentId: groupId,
+                  afterId: lastChildId(engine.getSnapshot().graph, groupId),
+                });
+              }
+              setPendingFocus({ id: groupId, openActions: false });
+              startTransition(() => {
+                void createChatBlock(graphId, input, at);
+              });
             },
           },
         ]
