@@ -419,6 +419,13 @@ export function ChatView({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const [cursor, setCursor] = useState(0);
+  /** Whether the cursor sat on the last row as of the last completed
+   *  render, and how many rows there were then — so an append (a streaming
+   *  inference reply, a hook's own result) can tell "was following the
+   *  tail" from "was parked somewhere else" and only auto-advance the
+   *  former. */
+  const lastRowCountRef = useRef(0);
+  const wasAtEndRef = useRef(true);
   const [expanded, setExpanded] = useState<ReadonlySet<BlockId>>(
     () => new Set(),
   );
@@ -532,6 +539,21 @@ export function ChatView({
   const index = Math.min(cursor, Math.max(rows.length - 1, 0));
   const row = rows[index];
   const view = row ? viewFor(row.block) : null;
+
+  // Rides the tail as it grows: a block appending (streaming inference, a
+  // hook's own result) while the cursor sat on the last row moves the
+  // cursor along to the new last row, rather than stranding it on what is
+  // now a mid-list row. Refs, not render-phase reads, since the compiler
+  // requires render to stay pure — both effects run after commit instead.
+  useEffect(() => {
+    if (rows.length > lastRowCountRef.current && wasAtEndRef.current) {
+      setCursor(rows.length - 1);
+    }
+    lastRowCountRef.current = rows.length;
+  }, [rows.length]);
+  useEffect(() => {
+    wasAtEndRef.current = rows.length > 0 && index === rows.length - 1;
+  });
 
   /** Whether the gutter column is live at all (hidden before hydration so the
    *  stored preference never flashes in with the wrong mode). */
