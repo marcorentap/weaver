@@ -136,6 +136,21 @@ export async function renameChatSession(
   return { error: null };
 }
 
+/** Deletes a session (graph) and every block in it, outright — there is no
+ *  undo, same as deleting a block. */
+export async function deleteChatSession(
+  graphId: string,
+): Promise<{ error: string | null }> {
+  try {
+    getStore().deleteGraph(graphId);
+  } catch (error) {
+    return { error: schemaMessage(error) };
+  }
+
+  revalidatePath("/chat");
+  return { error: null };
+}
+
 /**
  * Persists the client's whole live graph in one write — autosave and the
  * manual `s` → `s` shortcut both call this. The client is the source of

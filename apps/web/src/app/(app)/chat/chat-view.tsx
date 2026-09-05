@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
 import { scheduledHooks } from "@/lib/live-graph";
-import { getLiveGraph } from "@/lib/live-graph-registry";
+import { getLiveGraph, dropLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@/blocks/kinds";
 import { USER_KIND } from "@/blocks/user";
 import { TOOL_KIND, toolState } from "@/blocks/tool";
@@ -37,6 +37,7 @@ import {
   createChatBlock,
   createChatSession,
   deleteChatBlock,
+  deleteChatSession,
   moveChatBlock,
   renameChatSession,
   saveGraph,
@@ -1249,6 +1250,25 @@ export function ChatView({
             run: () => {
               setError(null);
               setPopup({ kind: "renameSession" });
+            },
+          },
+          {
+            label: "Delete session",
+            key: "d",
+            destructive: true,
+            run: () => {
+              setPopup(null);
+              const graphId = session.id;
+              // Same fire-and-forget shape as deleting a block: optimistic
+              // enough that there is nothing left to observe once gone.
+              // Drops the cached engine too, so a session id somehow
+              // reused later starts clean rather than resuming whatever
+              // was last streaming into this one.
+              dropLiveGraph(graphId);
+              startTransition(() => {
+                void deleteChatSession(graphId);
+                router.push("/chat");
+              });
             },
           },
         ]

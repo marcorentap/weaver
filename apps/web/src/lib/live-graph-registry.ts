@@ -27,3 +27,10 @@ export function getLiveGraph(graphId: string, initial: BlockGraph): LiveGraph {
   engines.set(graphId, created);
   return created;
 }
+
+/** Drops a deleted session's engine, so a future id — never reused in
+ *  practice, since ids are UUIDs, but cheap insurance regardless — starts
+ *  clean rather than resuming whatever was last streaming into this one. */
+export function dropLiveGraph(graphId: string): void {
+  engines.delete(graphId);
+}
