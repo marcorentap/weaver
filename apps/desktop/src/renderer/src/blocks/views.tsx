@@ -6,8 +6,7 @@ import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
 import { CodeBlock, languageForPath } from "@/components/code";
 import { cn } from "@/lib/utils";
-import type { MetricState } from "@shared/blocks/kinds.js";
-import { kinds, METRIC_KIND, metricState } from "@shared/blocks/kinds.js";
+import { kinds } from "@shared/blocks/kinds.js";
 import type { MediaState } from "./media";
 import {
   MEDIA_KIND,
@@ -58,23 +57,6 @@ export type BlockView = {
   Preview?: (props: { block: Block }) => ReactNode;
   raw?: (block: Block) => string;
 };
-
-function MetricRow({ state }: { state: MetricState }) {
-  const ratio = Math.min(1, state.value / state.limit);
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="h-1.5 w-24 shrink-0 rounded-full bg-muted" aria-hidden>
-        <span
-          className="block h-full rounded-full bg-foreground/60"
-          style={{ width: `${ratio * 100}%` }}
-        />
-      </span>
-      <span className="tabular-nums text-muted-foreground">
-        {state.value}/{state.limit} {state.unit}
-      </span>
-    </span>
-  );
-}
 
 function UserRow({ text, running }: { text: string; running: boolean }) {
   return (
@@ -317,18 +299,6 @@ export const blockViews: Record<string, BlockView> = {
         {nested} nested
       </span>
     ),
-  },
-
-  [METRIC_KIND]: {
-    Row: ({ block }) => <MetricRow state={metricState.parse(block.data)} />,
-    fields: (block) => {
-      const state = metricState.parse(block.data);
-      return [
-        { name: "value", label: "value", value: String(state.value), type: "number" },
-        { name: "limit", label: "limit", value: String(state.limit), type: "number" },
-        { name: "unit", label: "unit", value: state.unit },
-      ];
-    },
   },
 
   [MEDIA_KIND]: {

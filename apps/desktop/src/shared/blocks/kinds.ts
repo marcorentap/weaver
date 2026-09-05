@@ -1,34 +1,14 @@
-import { z } from "zod";
-import { coreKinds, defineKind, kindRegistry } from "@repo/core";
+import { coreKinds, kindRegistry } from "@repo/core";
 import { userKind } from "./user.js";
 import { mediaKind } from "./media.js";
 import { toolKind } from "./tool.js";
 
 /**
- * Custom block kinds. A kind is defined by the schema of its state, the unique
- * set of data needed to reconstruct that block. The schema is exported so the
- * renderer parses through the same definition instead of re-declaring fields.
+ * Custom block kinds: media, user, and tool, on top of the core set. Each
+ * kind's schema lives with its view, so this file is only the registry.
  */
-export const METRIC_KIND = "metric";
-
-export const metricState = z.object({
-  value: z.number(),
-  limit: z.number().positive(),
-  unit: z.string(),
-});
-export type MetricState = z.infer<typeof metricState>;
-
-export const metricKind = defineKind({
-  kind: METRIC_KIND,
-  schema: metricState,
-  snapshot: (state, ctx) =>
-    `${ctx.block.label}: ${state.value}/${state.limit} ${state.unit}`,
-  defaults: { value: 0, limit: 100, unit: "" },
-});
-
 export const kinds = kindRegistry([
   ...coreKinds,
-  metricKind,
   mediaKind,
   userKind,
   toolKind,

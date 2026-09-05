@@ -129,8 +129,8 @@ function InsertGap({ onClick }: { onClick: () => void }) {
 
 /** Label color by who produced a block. A person typing it (`user` kind),
  *  or an inference run appending it after the block that asked, a reply's
- *  own prose or a tool call it made along the way. Anything else (a
- *  metric, a media block someone added by hand) stays uncolored. */
+ *  own prose or a tool call it made along the way. Anything else (a media
+ *  block someone added by hand) stays uncolored. */
 function originClass(block: Block): string {
   if (block.label === "error") return "text-destructive";
   if (block.kind === USER_KIND) return "text-blue-400";
@@ -141,8 +141,7 @@ function originClass(block: Block): string {
 }
 
 /** What "Copy content" (`y`) means for a kind, or null for a kind with no
- *  single string worth copying, e.g. a timer's config or an ISS block's
- *  coordinates, which "Copy ID" already covers by way of the block itself. */
+ *  single string worth copying; "Copy ID" already covers the block itself. */
 function copyableContent(block: Block): { label: string; value: string } | null {
   switch (block.kind) {
     case TEXT_KIND:
@@ -1354,10 +1353,13 @@ function ChatView({
         ]
       : [];
 
-  /** Only kinds with a schema-valid blank state show up here. See
-   *  `BlockKind.defaults`. */
+  /** Kinds with a schema-valid blank state. `tool` stays out: a block only
+   *  becomes a tool when an inference run calls one, never by hand. */
   const createKindItems: KeyMenuItem[] = Object.values(kinds)
-    .filter((candidate) => candidate.defaults !== null)
+    .filter(
+      (candidate) =>
+        candidate.defaults !== null && candidate.kind !== TOOL_KIND,
+    )
     .map((candidate) => ({
       label: candidate.kind,
       run: () => {

@@ -3,7 +3,6 @@ import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
 import { USER_KIND } from "../../shared/blocks/user.js";
-import { METRIC_KIND } from "../../shared/blocks/kinds.js";
 import { MEDIA_KIND } from "../../shared/blocks/media.js";
 
 const t0 = Date.parse("2026-08-31T09:00:00.000Z");
@@ -29,11 +28,6 @@ const tree: SeedNode[] = [
     kind: TEXT_KIND,
     label: "env",
     data: { text: "cwd=/home/marcorentap/projects/weaver" },
-  },
-  {
-    kind: METRIC_KIND,
-    label: "context",
-    data: { value: 4820, limit: 8192, unit: "tok" },
   },
 
   // Group nesting text blocks.
@@ -88,24 +82,6 @@ const tree: SeedNode[] = [
             },
           },
         ],
-      },
-    ],
-  },
-
-  // Metric blocks with their own state schema, nested in a group.
-  {
-    kind: GROUP_KIND,
-    label: "usage",
-    children: [
-      {
-        kind: METRIC_KIND,
-        label: "prompt",
-        data: { value: 3180, limit: 8192, unit: "tok" },
-      },
-      {
-        kind: METRIC_KIND,
-        label: "output",
-        data: { value: 640, limit: 4096, unit: "tok" },
       },
     ],
   },
