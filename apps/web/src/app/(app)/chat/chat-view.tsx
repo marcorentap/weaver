@@ -991,18 +991,18 @@ export function ChatView({
     setSaving(true);
     const result = await createChatSession(trimmed);
     setSaving(false);
-    if (result.error) {
-      setError(result.error);
+    if (result.error || !result.id) {
+      setError(result.error ?? "failed to create session");
       return;
     }
     setPopup(null);
     setCursor(0);
     setExpanded(new Set());
-    router.push(`/chat?session=${encodeURIComponent(trimmed)}`);
+    router.push(`/chat?session=${encodeURIComponent(result.id)}`);
   };
 
-  /** Renames the open session, then follows it to its new address — the URL
-   *  addresses sessions by name, so the rename has to navigate. */
+  /** Renames the open session in place — its id, and so the URL, never
+   *  changes, so nothing needs to navigate. */
   const renameSession = async (name: string) => {
     if (!session) return;
     const trimmed = name.trim();
@@ -1022,7 +1022,6 @@ export function ChatView({
       return;
     }
     setPopup(null);
-    router.push(`/chat?session=${encodeURIComponent(trimmed)}`);
   };
 
   /**
@@ -1296,7 +1295,7 @@ export function ChatView({
         setPopup(null);
         setCursor(0);
         setExpanded(new Set());
-        router.push(`/chat?session=${encodeURIComponent(entry.name)}`);
+        router.push(`/chat?session=${encodeURIComponent(entry.id)}`);
       },
     })),
   ];

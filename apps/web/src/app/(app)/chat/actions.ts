@@ -96,23 +96,26 @@ export async function moveChatBlock(
   return rewrite(graphId, (graph) => moveBlock(graph, blockId, at));
 }
 
-/** Creates a new, empty session (graph), addressed by name like every other. */
+/** Creates a new, empty session (graph), addressed by name like every
+ *  other — but the id it returns, not the name, is what callers should
+ *  navigate with. */
 export async function createChatSession(
   name: string,
-): Promise<{ error: string | null }> {
+): Promise<{ error: string | null; id: string | null }> {
   const store = getStore();
   if (store.findGraph(name)) {
-    return { error: `a session named "${name}" already exists` };
+    return { error: `a session named "${name}" already exists`, id: null };
   }
 
+  let id: string;
   try {
-    store.createGraph(name);
+    id = store.createGraph(name).id;
   } catch (error) {
-    return { error: schemaMessage(error) };
+    return { error: schemaMessage(error), id: null };
   }
 
   revalidatePath("/chat");
-  return { error: null };
+  return { error: null, id };
 }
 
 /** Renames a session in place — same graph, same blocks, new address. */

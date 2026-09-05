@@ -74,6 +74,9 @@ export type BlockInput = {
 
 export type Store = {
   listGraphs: () => GraphRecord[];
+  /** Looks a graph up by id — the address every caller other than the
+   *  "session named X" uniqueness checks should use. */
+  getGraph: (id: string) => GraphRecord | undefined;
   findGraph: (name: string) => GraphRecord | undefined;
   createGraph: (name: string) => GraphRecord;
   /** Renames a graph in place, keeping its id and its blocks. Throws if the
@@ -126,6 +129,9 @@ export function openStore(options: StoreOptions = {}): Store {
 
   const selectGraphs = db.prepare(
     "SELECT id, name, created_at, modified_at FROM graph ORDER BY created_at",
+  );
+  const selectGraphById = db.prepare(
+    "SELECT id, name, created_at, modified_at FROM graph WHERE id = ?",
   );
   const selectGraphByName = db.prepare(
     "SELECT id, name, created_at, modified_at FROM graph WHERE name = ?",
@@ -208,6 +214,11 @@ export function openStore(options: StoreOptions = {}): Store {
 
   return {
     listGraphs: () => selectGraphs.all().map(toRecord),
+
+    getGraph: (id) => {
+      const raw = selectGraphById.get(id);
+      return raw === undefined ? undefined : toRecord(raw);
+    },
 
     findGraph: (name) => {
       const raw = selectGraphByName.get(name);
