@@ -11,8 +11,16 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
-import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
-import { childIds, lastChildId, topLevelBlockIds } from "@repo/core";
+import type { Block, BlockData, BlockGraph, BlockId, Position } from "@repo/core";
+import {
+  childIds,
+  findParent,
+  lastChildId,
+  snapshotAbove,
+  snapshotBlock,
+  TEXT_KIND,
+  topLevelBlockIds,
+} from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -29,7 +37,9 @@ import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
 import { createLiveGraph, scheduledHooks } from "@/lib/live-graph";
 import { kinds } from "@/blocks/kinds";
-import { AGENT_KIND } from "@/blocks/agent";
+import { USER_KIND } from "@/blocks/user";
+import { TOOL_KIND } from "@/blocks/tool";
+import { streamInference } from "@/lib/inference";
 import {
   createChatBlock,
   createChatSession,
@@ -51,6 +61,7 @@ type Popup =
   | { kind: "configure" }
   | { kind: "callHook"; hook: string }
   | { kind: "createKind" }
+  | { kind: "createUser" }
   | { kind: "createLabel" }
   | { kind: "createSession" }
   | { kind: "renameSession" }
@@ -131,6 +142,19 @@ function InsertGap({ onClick }: { onClick: () => void }) {
       </button>
     </div>
   );
+}
+
+/** Label color by who produced a block: a person typing it (`user` kind), or
+ *  an inference run appending it after the block that asked — a reply's own
+ *  prose, or a tool call it made along the way. Anything else (a metric, a
+ *  media block someone added by hand) stays uncolored. */
+function originClass(block: Block): string {
+  if (block.label === "error") return "text-destructive";
+  if (block.kind === USER_KIND) return "text-blue-400";
+  if (block.kind === TOOL_KIND || block.label === "assistant") {
+    return "text-emerald-400";
+  }
+  return "";
 }
 
 /** Tall content is clipped to this many lines until it is unhidden. Rows are
@@ -241,7 +265,9 @@ function BlockRow({
           // rows sit 8px taller than the rest.
           <span className="-my-1 size-6 shrink-0" />
         )}
-        <span className="min-w-0 truncate font-medium">{row.block.label}</span>
+        <span className={cn("min-w-0 truncate font-medium", originClass(row.block))}>
+          {row.block.label}
+        </span>
       </span>
       <span className="w-16 shrink-0 text-muted-foreground">
         {row.block.kind}
@@ -420,9 +446,15 @@ export function ChatView({
    *  `openActions` distinguishes "just created, show its actions" (create
    *  flow) from "just moved, only follow the cursor" (move/nest keys). */
   const [pendingFocus, setPendingFocus] = useState<
-    { id: BlockId; openActions: boolean } | null
+    { id: BlockId; openActions: boolean; runInference?: boolean } | null
   >(null);
   const { settings, hydrated } = useSettings();
+  /** Blocks with an inference run in flight right now — merged into a row's
+   *  `running` prop alongside kind hooks, so any block (not just one with a
+   *  hook of its own) can show the same spinner. */
+  const [inferring, setInferring] = useState<ReadonlySet<BlockId>>(
+    () => new Set(),
+  );
 
   // ---- Live graph state --------------------------------------------------
   // The client owns the graph from here on: a hook (a timer's tick, an ISS
@@ -504,6 +536,7 @@ export function ChatView({
     if (i !== -1) {
       setCursor(i);
       if (pendingFocus.openActions) setPopup({ kind: "actions" });
+      if (pendingFocus.runInference) void runInference(pendingFocus.id);
       setPendingFocus(null);
     }
   }
@@ -564,6 +597,15 @@ export function ChatView({
     setError(null);
     setCreating(computeInsertion(rows, gap));
     setPopup({ kind: "createKind" });
+  };
+
+  /** Starts the "new user block" flow for the gap before `rows[gap]` — same
+   *  gap semantics as `beginCreate`, fixed to `USER_KIND` and skipping the
+   *  kind picker, since `i`/`I` mean "write a message", not "pick a kind". */
+  const beginCreateUser = (gap: number) => {
+    setError(null);
+    setCreating(computeInsertion(rows, gap));
+    setPopup({ kind: "createUser" });
   };
 
   /** The chain a container holds, in order — the top-level chain for null. */
@@ -627,6 +669,112 @@ export function ChatView({
       afterId: container.block.id,
     });
   };
+
+  /**
+   * The global "run inference" action: any block, not just one of a
+   * particular kind, can anchor a run. Context is everything above `id`
+   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`) —
+   * so a block someone just typed becomes the last user turn. Results land
+   * as siblings appended right after `id`, chained one after the next in
+   * the order they streamed in, never nested under it — a re-run adds
+   * another reply rather than replacing the last one.
+   */
+  async function runInference(id: BlockId): Promise<void> {
+    if (!session || inferring.has(id)) return;
+    const liveGraph = engine.getSnapshot().graph;
+    const parentId = findParent(liveGraph, id);
+    let afterId: BlockId | null = id;
+    const append = (kind: string, data: BlockData, label: string) => {
+      const newId = crypto.randomUUID();
+      const now = Date.now();
+      engine.addBlock(
+        {
+          id: newId,
+          kind,
+          label,
+          createdAt: now,
+          modifiedAt: now,
+          next: null,
+          children: null,
+          data,
+        },
+        { parentId, afterId },
+      );
+      afterId = newId;
+    };
+    // Pre-flight failures land as an appended error block too — the only
+    // place in this menu-driven flow a block ever gets to say anything, once
+    // the actions popup that triggered it has already closed.
+    const { aiEndpoint, aiApiKey, aiDefaultModel } = settings;
+    if (!aiEndpoint || !aiApiKey || !aiDefaultModel) {
+      append(
+        TEXT_KIND,
+        { text: "missing endpoint, API key, or model — check settings" },
+        "error",
+      );
+      return;
+    }
+    const prompt = snapshotBlock(liveGraph, id, kinds);
+    if (!prompt.trim()) {
+      append(TEXT_KIND, { text: "block is empty — nothing to send" }, "error");
+      return;
+    }
+    setInferring((current) => new Set(current).add(id));
+    const context = snapshotAbove(liveGraph, id, kinds);
+    try {
+      let failure: string | null = null;
+      await streamInference(
+        {
+          endpoint: aiEndpoint,
+          apiKey: aiApiKey,
+          model: aiDefaultModel,
+          context,
+          prompt,
+          tools: [],
+        },
+        (event) => {
+          if (event.type === "text") {
+            append(TEXT_KIND, { text: event.text }, "assistant");
+          } else if (event.type === "tool") {
+            append(
+              TOOL_KIND,
+              {
+                name: event.name,
+                args: event.args,
+                output: event.output,
+                ok: event.ok,
+              },
+              event.name,
+            );
+          } else if (event.type === "block") {
+            const target = kinds[event.kind];
+            if (!target) return;
+            try {
+              target.parse(event.data);
+            } catch {
+              return;
+            }
+            append(event.kind, event.data, event.label);
+          } else if (event.type === "error") {
+            failure = event.message;
+          }
+        },
+      );
+      if (failure !== null) append(TEXT_KIND, { text: failure }, "error");
+    } catch (error) {
+      append(
+        TEXT_KIND,
+        { text: error instanceof Error ? error.message : String(error) },
+        "error",
+      );
+    } finally {
+      setInferring((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }
 
   useKeyLayer({
     id: "chat",
@@ -692,6 +840,16 @@ export function ChatView({
         keys: ["O"],
         help: { keys: "O", label: "Insert block before" },
         run: () => beginCreate(row ? index : 0),
+      },
+      {
+        keys: ["i"],
+        help: { keys: "i", label: "Write a message after, run inference" },
+        run: () => beginCreateUser(row ? index + 1 : 0),
+      },
+      {
+        keys: ["I"],
+        help: { keys: "I", label: "Write a message before, run inference" },
+        run: () => beginCreateUser(row ? index : 0),
       },
       {
         keys: ["G"],
@@ -803,6 +961,44 @@ export function ChatView({
     setPopup(null);
   };
 
+  /** Persists the `i`/`I` flow's message as a `user` block, then immediately
+   *  runs inference on it once it is visible — the whole point of typing a
+   *  message rather than opening its actions to pick something to do. */
+  const createUserBlock = async (text: string) => {
+    if (!session || !creating) return;
+    setSaving(true);
+    const input: BlockInput = {
+      id: crypto.randomUUID(),
+      kind: USER_KIND,
+      label: "user",
+      createdAt: Date.now(),
+      data: { text },
+    };
+    const result = await createChatBlock(session.id, input, creating);
+    setSaving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    engine.addBlock(
+      {
+        id: input.id,
+        kind: input.kind,
+        label: input.label,
+        createdAt: input.createdAt,
+        modifiedAt: Date.now(),
+        next: null,
+        children: null,
+        data: input.data ?? {},
+      },
+      creating,
+    );
+    if (creating.parentId) setOpen(creating.parentId, true);
+    setPendingFocus({ id: input.id, openActions: false, runInference: true });
+    setCreating(null);
+    setPopup(null);
+  };
+
   /** Persists a new session, then switches to it — mirrors the recent-
    *  sessions `run` below, just against a graph that did not exist yet. */
   const createSession = async (name: string) => {
@@ -867,22 +1063,14 @@ export function ChatView({
                 },
               ]
             : []),
-          ...(row.block.kind === AGENT_KIND
-            ? [
-                {
-                  label: "Run agent",
-                  key: "r",
-                  run: () => {
-                    setPopup(null);
-                    void engine.runHook(row.block.id, "run", {
-                      endpoint: settings.aiEndpoint,
-                      apiKey: settings.aiApiKey,
-                      model: settings.aiDefaultModel,
-                    });
-                  },
-                },
-              ]
-            : []),
+          {
+            label: "Run inference",
+            key: "x",
+            run: () => {
+              setPopup(null);
+              void runInference(row.block.id);
+            },
+          },
           ...(view.fields?.(row.block) ?? []).map((field) => ({
             label: `Edit ${field.label}`,
             // A blank field shows what it falls back to, not an empty column.
@@ -1078,7 +1266,9 @@ export function ChatView({
                 row={entry}
                 selected={i === index}
                 line={lineNumber(i)}
-                running={running.has(entry.block.id)}
+                running={
+                  running.has(entry.block.id) || inferring.has(entry.block.id)
+                }
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>
@@ -1172,6 +1362,21 @@ export function ChatView({
           title="New block"
           items={createKindItems}
           onClose={() => {
+            setCreating(null);
+            setPopup(null);
+          }}
+        />
+      ) : null}
+
+      {popup?.kind === "createUser" ? (
+        <FieldEditor
+          id="create-user"
+          title="New message"
+          field={{ name: "text", label: "message", value: "", multiline: true }}
+          error={error}
+          saving={saving}
+          onSubmit={(value) => void createUserBlock(value)}
+          onCancel={() => {
             setCreating(null);
             setPopup(null);
           }}

@@ -2,8 +2,6 @@ import type { ReactNode } from "react";
 import type { Block } from "@repo/core";
 import { GROUP_KIND, TEXT_KIND, textState } from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
-import { readSettings } from "@/lib/settings";
-import { READ_ONLY_TOOLS } from "@/lib/agent-events";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
 import { CodeBlock, languageForPath } from "@/components/code";
@@ -22,8 +20,7 @@ import type { IssLocationState } from "./iss";
 import { ISS_LOCATION_KIND, issLocationState } from "./iss";
 import type { TimerState } from "./timer";
 import { TIMER_KIND, timerState } from "./timer";
-import type { AgentState } from "./agent";
-import { AGENT_KIND, agentState } from "./agent";
+import { USER_KIND, userState } from "./user";
 import type { ToolState } from "./tool";
 import { TOOL_KIND, readPath, toolState } from "./tool";
 
@@ -112,39 +109,17 @@ function IssLocationRow({ state }: { state: IssLocationState }) {
   );
 }
 
-function AgentRow({
-  state,
-  running,
-}: {
-  state: AgentState;
-  running: boolean;
-}) {
-  // Checked before `error`: a re-run's failure or success is only known once
-  // it resolves, so a stale error from the previous run must not outrank
-  // "running" while this one is still going.
-  if (running) {
-    return (
-      <span className="flex min-w-0 flex-1 items-start gap-2 text-muted-foreground">
-        <span className="min-w-0 flex-1 whitespace-pre-wrap">
-          {state.prompt || "(no prompt)"}
-        </span>
-        <span className="shrink-0 animate-pulse">running…</span>
-      </span>
-    );
-  }
-  if (state.error !== null) {
-    return <span className="truncate text-destructive">{state.error}</span>;
-  }
+function UserRow({ text, running }: { text: string; running: boolean }) {
   return (
-    <span className="flex min-w-0 flex-1 items-start gap-2 text-muted-foreground">
+    <span className="flex min-w-0 flex-1 items-start gap-2">
       <span className="min-w-0 flex-1 whitespace-pre-wrap">
-        {state.prompt || "(no prompt)"}
+        {text || "(empty)"}
       </span>
-      <span className="shrink-0 text-muted-foreground/60">
-        {state.ranAt
-          ? `ran ${new Date(state.ranAt).toLocaleTimeString()}`
-          : "not run yet"}
-      </span>
+      {running ? (
+        <span className="shrink-0 animate-pulse text-muted-foreground">
+          running…
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -399,36 +374,18 @@ export const blockViews: Record<string, BlockView> = {
     ),
   },
 
-  [AGENT_KIND]: {
+  [USER_KIND]: {
     Row: ({ block, running }) => (
-      <AgentRow state={agentState.parse(block.data)} running={running} />
+      <UserRow text={userState.parse(block.data).text} running={running} />
     ),
-    fields: (block) => {
-      const state = agentState.parse(block.data);
-      const fallback = readSettings().aiDefaultModel;
-      return [
-        {
-          name: "prompt",
-          label: "prompt",
-          value: state.prompt,
-          multiline: true,
-        },
-        {
-          name: "model",
-          label: "model",
-          value: state.model,
-          // A blank field means "use the settings default", so show which
-          // model that actually is rather than nothing at all.
-          placeholder: fallback || "no default model — see settings",
-        },
-        {
-          name: "tools",
-          label: "tools",
-          value: state.tools,
-          placeholder: READ_ONLY_TOOLS.join(", "),
-        },
-      ];
-    },
+    fields: (block) => [
+      {
+        name: "text",
+        label: "text",
+        value: userState.parse(block.data).text,
+        multiline: true,
+      },
+    ],
   },
 
   [TOOL_KIND]: {

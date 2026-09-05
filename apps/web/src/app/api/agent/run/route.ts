@@ -8,7 +8,6 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { kinds } from "@/blocks/kinds";
-import { AGENT_KIND } from "@/blocks/agent";
 import { TOOL_KIND } from "@/blocks/tool";
 import {
   ALLOWED_TOOLS,
@@ -28,10 +27,9 @@ export const dynamic = "force-dynamic";
  *  discovery pass is disabled, so nothing is actually read from it. */
 const AGENT_DIR = "/tmp/weaver-agent";
 
-/** Kinds the `display` tool refuses to create: an agent nesting agents is a
- *  loop nobody asked for, and a tool block is the harness's own record of a
- *  call rather than something to fabricate. */
-const NOT_DISPLAYABLE = new Set<string>([AGENT_KIND, TOOL_KIND]);
+/** A tool block is the harness's own record of a call rather than something
+ *  to fabricate, so the `display` tool refuses to create one. */
+const NOT_DISPLAYABLE = new Set<string>([TOOL_KIND]);
 
 /**
  * The agent SDK types its event payloads as `any`, so everything crossing

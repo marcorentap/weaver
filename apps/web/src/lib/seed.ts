@@ -2,7 +2,7 @@ import type { BlockData } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
-import { AGENT_KIND } from "@/blocks/agent";
+import { USER_KIND } from "@/blocks/user";
 import { ISS_LOCATION_KIND } from "@/blocks/iss";
 import { METRIC_KIND } from "@/blocks/kinds";
 import { MEDIA_KIND } from "@/blocks/media";
@@ -202,20 +202,13 @@ const tree: SeedNode[] = [
     },
   },
 
-  // An agent block: it names nothing else, since its context comes from
-  // walking up the tree at run time and its credentials come from settings
-  // rather than from persisted state. Its `tools` are left blank, so it can
-  // read the project but not change it or run anything.
+  // A user block: run inference on it (enter > x) to see the AI reply
+  // appended right after it, using everything above as context.
   {
-    kind: AGENT_KIND,
-    label: "Summarizer",
+    kind: USER_KIND,
+    label: "user",
     data: {
-      prompt:
-        "In one sentence, summarize what this graph of context blocks describes.",
-      model: "",
-      tools: "",
-      error: null,
-      ranAt: null,
+      text: "In one sentence, summarize what this graph of context blocks describes.",
     },
   },
 ];
