@@ -42,6 +42,8 @@ export interface CreateSessionResult extends MutationResult {
 export interface CheckResult {
   ok: boolean;
   message: string;
+  /** Model ids the provider reports, when the probe reached `/models`. */
+  models?: string[];
 }
 
 /**

@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   LINE_NUMBER_OPTIONS,
@@ -30,6 +30,10 @@ type SettingDef =
       options: readonly { value: string; label: string }[];
       value: string;
       onChange: (value: string) => void;
+      /** Also editable by typing (enter), like a string setting. */
+      editable?: boolean;
+      /** Rejects a typed value on `enter`, returning why. */
+      validate?: (value: string) => string | null;
     }
   | {
       kind: "number";
@@ -83,6 +87,7 @@ function displayValue(def: SettingDef): string {
 function cycle(def: SettingDef, direction: 1 | -1) {
   if (def.kind === "option") {
     const values = def.options.map((option) => option.value);
+    if (values.length === 0) return;
     const index = values.indexOf(def.value);
     const next = values[(index + direction + values.length) % values.length]!;
     def.onChange(next);
@@ -96,15 +101,21 @@ function cycle(def: SettingDef, direction: 1 | -1) {
   }
 }
 
-/** `number` and `string` settings can also be typed directly. */
-function isEditable(def: SettingDef): def is Extract<
-  SettingDef,
-  { kind: "number" | "string" }
-> {
-  return def.kind === "number" || def.kind === "string";
+/** Settings you can type a value into: `number` and `string`, plus an
+ *  `option` marked editable (pick from the list or type your own). */
+type EditableSettingDef =
+  | Extract<SettingDef, { kind: "number" | "string" }>
+  | (Extract<SettingDef, { kind: "option" }> & { editable: true });
+
+function isEditable(def: SettingDef): def is EditableSettingDef {
+  return (
+    def.kind === "number" ||
+    def.kind === "string" ||
+    (def.kind === "option" && def.editable === true)
+  );
 }
 
-function commitEdit(def: Extract<SettingDef, { kind: "number" | "string" }>, raw: string) {
+function commitEdit(def: EditableSettingDef, raw: string) {
   if (def.kind === "number") {
     const parsed = Number(raw);
     if (Number.isNaN(parsed)) return;
@@ -114,6 +125,7 @@ function commitEdit(def: Extract<SettingDef, { kind: "number" | "string" }>, raw
     );
     def.onChange(clamped);
   } else {
+    // `string` and a typeable `option` both commit plain text.
     def.onChange(raw);
   }
 }
@@ -138,6 +150,7 @@ export default function SettingsPage() {
   const [probe, setProbe] = useState<{
     ok: boolean | null;
     message: string;
+    models?: string[];
   } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -191,13 +204,26 @@ export default function SettingsPage() {
       provider: true,
     },
     {
-      kind: "string",
+      kind: "option",
       key: "aiDefaultModel",
       label: "Default model",
       description: "Used when an agent block's own model field is blank.",
+      // The arrows cycle the provider's reported models. Enter types a
+      // value by hand; it must be one of the available models once the
+      // list has loaded, or a blank (provider default).
+      options: (probe?.models ?? []).map((model) => ({
+        value: model,
+        label: model,
+      })),
       value: settings.aiDefaultModel,
       onChange: setAiDefaultModel,
-      placeholder: "anthropic/claude-haiku-4-5",
+      editable: true,
+      validate: (value) => {
+        if (value && probe?.models?.length && !probe.models.includes(value)) {
+          return "invalid model";
+        }
+        return null;
+      },
     },
     {
       kind: "string",
@@ -234,8 +260,9 @@ export default function SettingsPage() {
   };
 
   /** Asks the main process whether the current pair actually works. Runs on
-   *  every committed endpoint or key, since either one alone proves nothing. */
-  const checkProvider = async (endpoint: string, apiKey: string) => {
+   *  every committed endpoint or key, and once when the page loads, since
+   *  either input alone proves nothing. */
+  const checkProvider = useCallback(async (endpoint: string, apiKey: string) => {
     if (!endpoint.trim() && !apiKey) {
       setProbe(null);
       return;
@@ -243,18 +270,34 @@ export default function SettingsPage() {
     setProbe({ ok: null, message: "checking…" });
     try {
       const verdict = await window.api.agent.check(endpoint, apiKey);
-      setProbe({ ok: verdict.ok, message: verdict.message });
+      setProbe({ ok: verdict.ok, message: verdict.message, models: verdict.models });
     } catch {
       setProbe({ ok: false, message: "check request failed" });
     }
-  };
+  }, []);
+
+  // Probe once on visit, so the models list is there without forcing a
+  // re-edit. Deferred out of the effect so the synchronous setProbe never
+  // runs inside one (react-hooks/set-state-in-effect).
+  useEffect(() => {
+    if (!hydrated) return;
+    if (!settings.aiEndpoint.trim() || !settings.aiApiKey) return;
+    const timer = setTimeout(
+      () => void checkProvider(settings.aiEndpoint, settings.aiApiKey),
+      0,
+    );
+    return () => clearTimeout(timer);
+  }, [hydrated, settings.aiEndpoint, settings.aiApiKey, checkProvider]);
 
   const finishEdit = () => {
     if (!editing || !def || def.key !== editing || !isEditable(def)) {
       setEditing(null);
       return;
     }
-    const invalid = def.kind === "string" ? (def.validate?.(draft) ?? null) : null;
+    const invalid =
+      isEditable(def) && def.kind !== "number"
+        ? (def.validate?.(draft) ?? null)
+        : null;
     if (invalid) {
       // Stays open with the draft intact. The value is the user's, and
       // discarding what they typed to tell them it was wrong is hostile.
@@ -466,6 +509,23 @@ export default function SettingsPage() {
                   )}
                 >
                   Provider: {probe.message}
+                </div>
+              ) : null}
+              {entry.kind === "string" &&
+              entry.key === "aiDefaultModel" &&
+              probe?.models?.length ? (
+                <div className="border-l-2 border-transparent py-1 pl-1 pr-3">
+                  <span className="block font-medium">Available models</span>
+                  <div className="mt-1 max-h-40 overflow-auto rounded border border-border font-mono text-xs text-muted-foreground">
+                    {probe.models.map((model) => (
+                      <div
+                        key={model}
+                        className="border-b border-border/60 px-2 py-1 last:border-b-0"
+                      >
+                        {model}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </Fragment>

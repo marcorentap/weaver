@@ -694,10 +694,14 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
     };
   }
 
-  const models = parsed.data.data?.length ?? 0;
+  const modelIds = parsed.data.data?.map((model) => model.id) ?? [];
   return {
     ok: true,
-    message: models > 0 ? `reachable, ${models} models` : "reachable",
+    message:
+      modelIds.length > 0
+        ? `reachable, ${modelIds.length} models`
+        : "reachable",
+    models: modelIds,
   };
 }
 
