@@ -16,10 +16,6 @@ import {
   mediaSrc,
   mediaState,
 } from "./media";
-import type { IssLocationState } from "@shared/blocks/iss.js";
-import { ISS_LOCATION_KIND, issLocationState } from "@shared/blocks/iss.js";
-import type { TimerState } from "@shared/blocks/timer.js";
-import { TIMER_KIND, timerState } from "@shared/blocks/timer.js";
 import { USER_KIND, userState } from "@shared/blocks/user.js";
 import type { ToolState } from "@shared/blocks/tool.js";
 import { TOOL_KIND, toolLanguage, toolState } from "@shared/blocks/tool.js";
@@ -76,35 +72,6 @@ function MetricRow({ state }: { state: MetricState }) {
       <span className="tabular-nums text-muted-foreground">
         {state.value}/{state.limit} {state.unit}
       </span>
-    </span>
-  );
-}
-
-function TimerRow({ state }: { state: TimerState }) {
-  return (
-    <span className="flex min-w-0 items-center gap-2 truncate text-muted-foreground">
-      <span>
-        Every {state.intervalMs}ms → {state.hook}
-      </span>
-      <span className="shrink-0 text-muted-foreground/60">
-        {state.ticks} ticks
-      </span>
-    </span>
-  );
-}
-
-function IssLocationRow({ state }: { state: IssLocationState }) {
-  if (state.error !== null) {
-    return <span className="truncate text-destructive">{state.error}</span>;
-  }
-  if (state.latitude === null || state.longitude === null) {
-    return (
-      <span className="truncate text-muted-foreground">Not fetched yet</span>
-    );
-  }
-  return (
-    <span className="truncate text-muted-foreground">
-      {state.latitude.toFixed(2)}, {state.longitude.toFixed(2)}
     </span>
   );
 }
@@ -378,24 +345,6 @@ export const blockViews: Record<string, BlockView> = {
       const uri = mediaState.parse(block.data).uri;
       return mediaInfo(uri).type === "youtube" ? uri : mediaSrc(uri);
     },
-  },
-
-  [TIMER_KIND]: {
-    Row: ({ block }) => <TimerRow state={timerState.parse(block.data)} />,
-    fields: (block) => [
-      {
-        name: "intervalMs",
-        label: "interval (ms)",
-        value: String(timerState.parse(block.data).intervalMs),
-        type: "number",
-      },
-    ],
-  },
-
-  [ISS_LOCATION_KIND]: {
-    Row: ({ block }) => (
-      <IssLocationRow state={issLocationState.parse(block.data)} />
-    ),
   },
 
   [USER_KIND]: {

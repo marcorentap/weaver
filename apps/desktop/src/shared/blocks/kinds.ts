@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { coreKinds, defineKind, kindRegistry } from "@repo/core";
 import { userKind } from "./user.js";
-import { issLocationKind } from "./iss.js";
 import { mediaKind } from "./media.js";
-import { timerKind } from "./timer.js";
 import { toolKind } from "./tool.js";
 
 /**
@@ -32,8 +30,6 @@ export const kinds = kindRegistry([
   ...coreKinds,
   metricKind,
   mediaKind,
-  timerKind,
-  issLocationKind,
   userKind,
   toolKind,
 ]);

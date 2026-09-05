@@ -3,23 +3,18 @@ import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
 import { USER_KIND } from "../../shared/blocks/user.js";
-import { ISS_LOCATION_KIND } from "../../shared/blocks/iss.js";
 import { METRIC_KIND } from "../../shared/blocks/kinds.js";
 import { MEDIA_KIND } from "../../shared/blocks/media.js";
-import { TIMER_KIND } from "../../shared/blocks/timer.js";
 
 const t0 = Date.parse("2026-08-31T09:00:00.000Z");
 
 /**
  * The seed is authored as the tree it renders as, with order as position in
  * the list and nesting as nesting, then flattened into linked blocks below.
- * Real ids are minted at insert time, so a block another block has to call
- * (a timer's target) carries a readable `key` instead.
  */
 type SeedNode = {
   kind: string;
   label: string;
-  key?: string;
   data?: BlockData;
   children?: SeedNode[];
 };
@@ -80,13 +75,17 @@ const tree: SeedNode[] = [
         children: [
           {
             kind: MEDIA_KIND,
-            label: "block.ts",
-            data: { uri: `file://${process.cwd()}/../../packages/core/src/block.ts` },
+            label: "fs.js",
+            data: {
+              uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/fs.js",
+            },
           },
           {
             kind: MEDIA_KIND,
-            label: "store/index.ts",
-            data: { uri: `file://${process.cwd()}/../../packages/store/src/index.ts` },
+            label: "path.js",
+            data: {
+              uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/path.js",
+            },
           },
         ],
       },
@@ -112,12 +111,13 @@ const tree: SeedNode[] = [
   },
 
   // Media, addressed by URI: one per detected type. Everything is fetched over
-  // https, so the repo carries no sample binaries; the one file:// entry points
-  // at an svg the Next template already ships.
+  // https, so the repo carries no sample binaries.
   {
     kind: MEDIA_KIND,
-    label: "globe.svg",
-    data: { uri: `file://${process.cwd()}/public/globe.svg` },
+    label: "example.svg",
+    data: {
+      uri: "https://upload.wikimedia.org/wikipedia/commons/8/84/Example.svg",
+    },
   },
   {
     kind: MEDIA_KIND,
@@ -162,7 +162,7 @@ const tree: SeedNode[] = [
     kind: MEDIA_KIND,
     label: "readme.md",
     data: {
-      uri: "https://raw.githubusercontent.com/nodejs/node/main/README.md",
+      uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/README.md",
     },
   },
   {
@@ -174,35 +174,6 @@ const tree: SeedNode[] = [
     },
   },
 
-  // A timer calling another block's hook on an interval: one block driving
-  // another, with no link between them, because the tree is containment and
-  // order, never wiring.
-  {
-    kind: ISS_LOCATION_KIND,
-    label: "ISS location",
-    key: "iss",
-    data: {
-      latitude: null,
-      longitude: null,
-      timestamp: null,
-      fetchedAt: null,
-      error: null,
-    },
-  },
-  {
-    kind: TIMER_KIND,
-    label: "ISS poll",
-    data: {
-      intervalMs: 2000,
-      targetId: "iss",
-      hook: "update",
-      arg: "",
-      ticks: 0,
-      lastTickAt: null,
-    },
-  },
-
-  // A user block: run inference on it (enter > x) to see the AI reply
   // appended right after it, using everything above as context.
   {
     kind: USER_KIND,
@@ -213,16 +184,13 @@ const tree: SeedNode[] = [
   },
 ];
 
-/** Blocks for a fresh graph: ids minted, chains linked, keys resolved. */
+/** Blocks for a fresh graph: ids minted, chains linked. */
 export function seedBlocks(): BlockInput[] {
   const ids = new Map<SeedNode, string>();
-  const byKey = new Map<string, string>();
 
   const mint = (nodes: SeedNode[]) => {
     for (const node of nodes) {
-      const id = newId();
-      ids.set(node, id);
-      if (node.key) byKey.set(node.key, id);
+      ids.set(node, newId());
       mint(node.children ?? []);
     }
   };
@@ -240,16 +208,6 @@ export function seedBlocks(): BlockInput[] {
 
   const emit = (nodes: SeedNode[]) => {
     nodes.forEach((node, at) => {
-      let data = node.data;
-      // A timer's `targetId` is authored above as the target's seed key, not
-      // a real id, and resolved here the way links are.
-      if (node.kind === TIMER_KIND && typeof data?.targetId === "string") {
-        const target = byKey.get(data.targetId);
-        if (!target) {
-          throw new Error(`seed references unknown key: ${data.targetId}`);
-        }
-        data = { ...data, targetId: target };
-      }
       inputs.push({
         id: idOf(node) as string,
         kind: node.kind,
@@ -257,7 +215,7 @@ export function seedBlocks(): BlockInput[] {
         createdAt: (createdAt += 1000),
         next: idOf(nodes[at + 1]),
         children: idOf(node.children?.[0]),
-        data,
+        data: node.data,
       });
       emit(node.children ?? []);
     });
