@@ -16,6 +16,12 @@ import {
   type AgentEvent,
 } from "@/lib/agent-events";
 import { projectRoot } from "@/lib/project";
+import { readSource } from "@/lib/read-source";
+import {
+  formatWebSearchResults,
+  searchDuckDuckGo,
+  type WebSearchResult,
+} from "@/lib/web-search";
 import { schemaMessage } from "@/lib/schema-error";
 
 // The agent SDK reads the project and spawns processes, so this runs in Node
@@ -236,7 +242,46 @@ export async function POST(request: Request): Promise<Response> {
           },
         });
 
+        /** DuckDuckGo web search — no API key, so it's safe to grant by
+         *  default (see READ_ONLY_TOOLS). */
+        const webSearch = defineTool({
+          name: "web_search",
+          label: "Web Search",
+          description:
+            "Search the web via DuckDuckGo and get back titles, URLs, and snippets. No API key required.",
+          parameters: Type.Object({
+            query: Type.String({ description: "Search query" }),
+            limit: Type.Optional(
+              Type.Number({
+                description: "Max results to return (default 8, max 20)",
+              }),
+            ),
+          }),
+          execute: async (_toolCallId, params) => {
+            let results: WebSearchResult[];
+            try {
+              results = await searchDuckDuckGo(params.query, {
+                limit: params.limit,
+              });
+            } catch (error) {
+              throw new Error(
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: formatWebSearchResults(params.query, results),
+                },
+              ],
+              details: {},
+            };
+          },
+        });
+
         const cwd = projectRoot();
+
         const resourceLoader = new DefaultResourceLoader({
           cwd,
           agentDir: AGENT_DIR,
@@ -251,6 +296,73 @@ export async function POST(request: Request): Promise<Response> {
         });
         await resourceLoader.reload();
 
+        /**
+         * Replaces the SDK's own `read` (bare filesystem paths only): same
+         * name and same `path`/`offset`/`limit` shape, but `path` may also
+         * be a `file://`, `http(s)://` or `ssh://` URI. The tool registry
+         * resolves a custom tool over a built-in one of the same name, so
+         * naming this `read` is what makes the replacement automatic rather
+         * than a second tool to choose between.
+         */
+        const read = defineTool({
+          name: "read",
+          label: "Read",
+          description: [
+            "Read a file and return its content, windowed either by line or by byte.",
+            "`path` may be a filesystem path (relative to the project root, or absolute),",
+            "or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
+            "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config) — it is not configured here.",
+            "Default is line mode: `offset`/`limit` window onto 1-indexed lines.",
+            "For content a line boundary can't usefully cut — one huge line, e.g. minified JS or a single long JSON blob — use `byteOffset`/`byteLength` (0-indexed) instead. Pass one pair or the other, never both.",
+          ].join("\n"),
+          parameters: Type.Object({
+            path: Type.String({
+              description:
+                "Filesystem path, or file://, http(s)://, ssh:// URI",
+            }),
+            offset: Type.Optional(
+              Type.Number({
+                description: "Line number to start reading from (1-indexed)",
+              }),
+            ),
+            limit: Type.Optional(
+              Type.Number({ description: "Maximum number of lines to read" }),
+            ),
+            byteOffset: Type.Optional(
+              Type.Number({ description: "Byte to start reading from (0-indexed)" }),
+            ),
+            byteLength: Type.Optional(
+              Type.Number({ description: "Maximum number of bytes to read" }),
+            ),
+          }),
+          execute: async (_toolCallId, params) => {
+            let result;
+            try {
+              result = await readSource(params.path, cwd, {
+                offset: params.offset,
+                limit: params.limit,
+                byteOffset: params.byteOffset,
+                byteLength: params.byteLength,
+              });
+            } catch (error) {
+              throw new Error(
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+            const header = !result.truncated
+              ? ""
+              : result.byteStart !== undefined
+                ? `[bytes ${result.byteStart}-${result.byteEnd}]\n\n`
+                : `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}]\n\n`;
+            return {
+              content: [
+                { type: "text" as const, text: `${header}${result.content}` },
+              ],
+              details: {},
+            };
+          },
+        });
+
         const requested = body.tools.filter((name) =>
           (ALLOWED_TOOLS as readonly string[]).includes(name),
         );
@@ -264,7 +376,7 @@ export async function POST(request: Request): Promise<Response> {
           resourceLoader,
           sessionManager: SessionManager.inMemory(cwd),
           tools: [...tools, display.name],
-          customTools: [display],
+          customTools: [display, webSearch, read],
         });
 
         // Arguments arrive with the call and the result with its end, so they

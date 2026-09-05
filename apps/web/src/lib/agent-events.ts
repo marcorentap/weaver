@@ -53,8 +53,9 @@ export const agentRunRequest = z.object({
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;
 
 /** Built-in tools a run gets when its block names none: it can look around
- *  the project but cannot change it, and cannot run commands. */
-export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls"] as const;
+ *  the project and search the web, but cannot change the project or run
+ *  commands. */
+export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "web_search"] as const;
 
 /** Everything a block may ask for, `bash`/`write`/`edit` included — this
  *  server runs commands as whoever started it, so granting them is a
@@ -67,4 +68,5 @@ export const ALLOWED_TOOLS = [
   "bash",
   "write",
   "edit",
+  "web_search",
 ] as const;
