@@ -1339,7 +1339,7 @@ export function ChatView({
       {popup?.kind === "actions" ? (
         <KeyMenu
           id="actions"
-          title={row ? `Block ${row.block.label}` : "Block"}
+          title={row?.block.label ?? "Block"}
           items={actions}
           onClose={() => setPopup(null)}
         />
@@ -1386,6 +1386,7 @@ export function ChatView({
         <FieldEditor
           id="edit"
           title={row ? `Edit ${row.block.label}` : "Edit"}
+          meta={popup.field.label}
           field={popup.field}
           error={error}
           saving={saving}
@@ -1398,11 +1399,8 @@ export function ChatView({
         <FieldEditor
           id="call-hook"
           title={`Call ${popup.hook}`}
-          field={{
-            name: "arg",
-            label: "Argument (JSON, optional)",
-            value: "",
-          }}
+          meta="Argument (JSON, optional)"
+          field={{ name: "arg", label: "Argument (JSON, optional)", value: "" }}
           error={error}
           saving={saving}
           onSubmit={(value) => runCallHook(popup.hook, value)}

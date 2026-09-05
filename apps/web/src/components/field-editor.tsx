@@ -13,6 +13,7 @@ import { useKeyLayer } from "@/lib/keymap";
 export function FieldEditor({
   id,
   title,
+  meta,
   field,
   error,
   saving,
@@ -21,6 +22,10 @@ export function FieldEditor({
 }: {
   id: string;
   title: string;
+  /** Extra header context, distinct from `title` — which field this is
+   *  editing, say. Omit when the title alone already says everything (a
+   *  "New session" dialog doesn't need "name" tacked on beside it). */
+  meta?: string;
   field: BlockField;
   error: string | null;
   saving: boolean;
@@ -52,7 +57,7 @@ export function FieldEditor({
     <ModalFrame
       label={title}
       title={title}
-      meta={field.label}
+      meta={meta}
       size={field.multiline ? "lg" : undefined}
       onClose={onCancel}
     >
