@@ -42,6 +42,10 @@ function Pre({
       {...props}
       className={cn(
         className,
+        // Plain class marker, not a Tailwind utility: globals.css uses it
+        // to strip the inline-code background back off the `<code>` this
+        // wraps (see the `code` renderer below).
+        "md-fenced-block",
         "mt-2 overflow-x-auto border p-2",
         settings.wordWrap === "on" ? "whitespace-pre-wrap break-words" : "",
       )}
@@ -83,18 +87,14 @@ const MARKDOWN: Components = {
       className="mt-2 border-l pl-2 text-muted-foreground"
     />
   ),
-  // `rehype-highlight` classes a fenced block's `<code>` (the "hljs" scope
-  // plus its detected language) — inline code never gets a className,
-  // which is what distinguishes the two here. Only inline code gets its
-  // own background/padding; a fenced block already has `Pre`'s border and
-  // padding, so re-applying both there just painted a second, redundant
-  // gray box behind the highlighted text — and stripping className for a
-  // fenced block would throw the highlighting away entirely.
+  // Always styled as inline code; globals.css strips this back off for a
+  // fenced block's `<code>` (marked via `Pre`'s `md-fenced-block` class),
+  // since a `className`-presence check isn't reliable there — a fenced
+  // block with no language `rehype-highlight` can identify gets no class
+  // at all, so it fell through as "inline" and kept the gray background
+  // this was meant to remove.
   code: ({ className, ...props }) => (
-    <code
-      {...props}
-      className={cn(className, !className && "bg-muted px-1")}
-    />
+    <code {...props} className={cn(className, "bg-muted px-1")} />
   ),
   pre: Pre,
   hr: (props) => <hr {...props} className="my-3" />,

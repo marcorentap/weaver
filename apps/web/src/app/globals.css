@@ -207,6 +207,16 @@
   font-weight: 600;
 }
 
+/* markdown.tsx's `code` renderer always styles a <code> as inline code
+   (background + padding); a fenced block's own <code> — marked here by
+   `Pre`'s `md-fenced-block` class, not by whether rehype-highlight found a
+   language — undoes that, since the surrounding <pre> already draws the
+   block's border and padding of its own. */
+.md-fenced-block code {
+  background-color: transparent;
+  padding: 0;
+}
+
 /* Every scrollable region gets this instead of the platform's default
    scrollbar, so a scroll track reads as part of the UI rather than a native
    overlay clashing with the greyscale theme. `scrollbar-none` (below) opts
