@@ -19,12 +19,14 @@
  *   links point at each other, and immediate FK checks would reject whichever
  *   row happened to land first.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA_SQL = `
 CREATE TABLE graph (
   id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,
+  -- Not unique: a session is identified by id, and its name is
+  -- display-only, so two sessions may share one.
+  name        TEXT NOT NULL,
   created_at  INTEGER NOT NULL,
   modified_at INTEGER NOT NULL
 ) STRICT;

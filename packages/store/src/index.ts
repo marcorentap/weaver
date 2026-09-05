@@ -74,13 +74,11 @@ export type BlockInput = {
 
 export type Store = {
   listGraphs: () => GraphRecord[];
-  /** Looks a graph up by id — the address every caller other than the
-   *  "session named X" uniqueness checks should use. */
+  /** Looks a graph up by id. */
   getGraph: (id: string) => GraphRecord | undefined;
-  findGraph: (name: string) => GraphRecord | undefined;
   createGraph: (name: string) => GraphRecord;
-  /** Renames a graph in place, keeping its id and its blocks. Throws if the
-   *  name is already taken — `graph.name` is unique. */
+  /** Renames a graph in place, keeping its id and its blocks. Names are not
+   *  unique, so this never fails on the new name alone. */
   renameGraph: (id: string, name: string) => void;
   deleteGraph: (id: string) => void;
   loadGraph: (graphId: string) => BlockGraph;
@@ -132,9 +130,6 @@ export function openStore(options: StoreOptions = {}): Store {
   );
   const selectGraphById = db.prepare(
     "SELECT id, name, created_at, modified_at FROM graph WHERE id = ?",
-  );
-  const selectGraphByName = db.prepare(
-    "SELECT id, name, created_at, modified_at FROM graph WHERE name = ?",
   );
   const insertGraph = db.prepare(
     "INSERT INTO graph (id, name, created_at, modified_at) VALUES (?, ?, ?, ?)",
@@ -217,11 +212,6 @@ export function openStore(options: StoreOptions = {}): Store {
 
     getGraph: (id) => {
       const raw = selectGraphById.get(id);
-      return raw === undefined ? undefined : toRecord(raw);
-    },
-
-    findGraph: (name) => {
-      const raw = selectGraphByName.get(name);
       return raw === undefined ? undefined : toRecord(raw);
     },
 
