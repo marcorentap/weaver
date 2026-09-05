@@ -369,7 +369,12 @@ export const blockViews: Record<string, BlockView> = {
     Preview: ({ block }) => (
       <MediaPreview state={mediaState.parse(block.data)} />
     ),
-    raw: (block) => mediaSrc(mediaState.parse(block.data).uri),
+    // The embed URL `mediaSrc` builds for a YouTube video is only good for
+    // an iframe; "open in new tab" should land on the actual watch page.
+    raw: (block) => {
+      const uri = mediaState.parse(block.data).uri;
+      return mediaInfo(uri).type === "youtube" ? uri : mediaSrc(uri);
+    },
   },
 
   [TIMER_KIND]: {
