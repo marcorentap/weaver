@@ -152,7 +152,7 @@ function originClass(block: Block): string {
 /** Tall content is clipped to this many lines until it is unhidden. Rows are
  *  `text-xs`, whose line height is exactly `1rem`, so this is also its
  *  height in rem. */
-const CLIP_LINES = 25;
+const CLIP_LINES = 12;
 
 function BlockRow({
   row,
