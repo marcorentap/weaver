@@ -1,19 +1,30 @@
 appId: com.marcorentap.weaver
 productName: Weaver
+# electron-builder's default artifact name interpolates package.json's
+# `name` verbatim ("@apps/desktop"), and the slash breaks the output path.
+# Pin every artifact name to productName instead.
+artifactName: "${productName}-${version}-${arch}.${ext}"
+# Same slash issue applies to the launched binary name; pin it explicitly.
+executableName: weaver
 directories:
   buildResources: resources
   output: release
 files:
   - out/**/*
   - package.json
-asarUnpack:
-  # node:sqlite's native binding and ssh's child_process spawn both need
-  # real files on disk, not asar's virtual filesystem.
-  - "**/node_modules/@repo/store/**"
+  # `@repo/core`/`@repo/store` are bundled into out/main/index.js by
+  # electron-vite (see electron.vite.config.ts); their workspace symlinks
+  # point outside apps/desktop and confuse electron-builder's asar path
+  # resolution ("X must be under apps/desktop") if left in node_modules.
+  - "!**/node_modules/@repo/core{,/**}"
+  - "!**/node_modules/@repo/store{,/**}"
+  - "!**/.turbo{,/**}"
+  - "!**/eslint.config.mjs"
+  - "!**/tsconfig*.json"
+  - "!**/*.tsbuildinfo"
 linux:
   target:
     - AppImage
-    - deb
   category: Development
 mac:
   target:

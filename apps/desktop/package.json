@@ -1,5 +1,12 @@
 {
   "name": "@apps/desktop",
+  "version": "0.1.0",
+  "description": "Weaver desktop app",
+  "author": {
+    "name": "Marc Owen Rentap",
+    "email": "17574533+marcorentap@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/marcorentap/weaver",
   "type": "module",
   "private": true,
   "main": "./out/main/index.js",
@@ -8,7 +15,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "package": "electron-vite build && electron-builder --dir",
-    "build:linux": "electron-vite build && electron-builder --linux",
+    "build:linux": "electron-vite build && electron-builder --linux AppImage",
     "lint": "eslint --max-warnings 0",
     "check-types": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
