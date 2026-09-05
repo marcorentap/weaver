@@ -65,10 +65,26 @@ function updateBlockField(
   });
 }
 
-/**
- * Creates one block from an already-built `BlockInput`. The client picks the
- * kind, id and label; this places it at `at` and persists the resulting tree.
- */
+/** Renames a block's label in place. The label is a top-level field, not
+ *  part of `data`, so it lives outside `updateBlockField`. */
+function updateBlockLabel(
+  graphId: string,
+  blockId: string,
+  label: string,
+): MutationResult {
+  return rewrite(graphId, (graph) => {
+    const block = graph.blocks[blockId];
+    if (!block) throw new Error("block no longer exists");
+    return {
+      ...graph,
+      blocks: {
+        ...graph.blocks,
+        [blockId]: { ...block, label, modifiedAt: Date.now() },
+      },
+    };
+  });
+}
+
 function createChatBlock(
   graphId: string,
   input: BlockInput,
@@ -184,6 +200,11 @@ export function registerChatHandlers(): void {
     "chat:updateBlockField",
     (_event, graphId: string, blockId: string, name: string, value: string | number) =>
       updateBlockField(graphId, blockId, name, value),
+  );
+  ipcMain.handle(
+    "chat:updateBlockLabel",
+    (_event, graphId: string, blockId: string, label: string) =>
+      updateBlockLabel(graphId, blockId, label),
   );
   ipcMain.handle(
     "chat:createChatBlock",

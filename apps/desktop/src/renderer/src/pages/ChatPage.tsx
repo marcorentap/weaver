@@ -40,6 +40,7 @@ type Popup =
   | { kind: "sessions" }
   | { kind: "preview" }
   | { kind: "field"; field: BlockField }
+  | { kind: "labelField" }
   | { kind: "configure" }
   | { kind: "callHook"; hook: string }
   | { kind: "createKind" }
@@ -912,6 +913,35 @@ function ChatView({
     setPopup(null);
   };
 
+  /** Renames the selected block's label in place. The label is a top-level
+   *  field, not part of `data`, so it gets its own persist call and reflects
+   *  locally through `engine.updateLabel`. */
+  const renameBlock = async (label: string) => {
+    if (!session || !row) return;
+    const trimmed = label.trim();
+    if (!trimmed) {
+      setError("label cannot be empty");
+      return;
+    }
+    if (trimmed === row.block.label) {
+      setPopup(null);
+      return;
+    }
+    setSaving(true);
+    const result = await window.api.chat.updateBlockLabel(
+      session.id,
+      row.block.id,
+      trimmed,
+    );
+    setSaving(false);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    engine.updateLabel(row.block.id, trimmed);
+    setPopup(null);
+  };
+
   /** Calls a callable directly from the configure menu. `argText` is
    *  optional JSON, parsed here so a malformed argument surfaces before the
    *  hook ever runs instead of failing inside it. */
@@ -1125,6 +1155,15 @@ function ChatView({
                 ]
               : [];
           })(),
+          {
+            label: "Edit label",
+            key: "l",
+            detail: row.block.label,
+            run: () => {
+              setError(null);
+              setPopup({ kind: "labelField" });
+            },
+          },
           {
             label: "Copy ID",
             key: "c",
@@ -1508,6 +1547,19 @@ function ChatView({
           error={error}
           saving={saving}
           onSubmit={(value) => void saveField(popup.field, value)}
+          onCancel={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "labelField" && row ? (
+        <FieldEditor
+          id="edit-label"
+          title="Edit label"
+          meta={row.block.kind}
+          field={{ name: "label", label: "label", value: row.block.label }}
+          error={error}
+          saving={saving}
+          onSubmit={(value) => void renameBlock(value)}
           onCancel={() => setPopup(null)}
         />
       ) : null}

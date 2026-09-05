@@ -64,6 +64,11 @@ export interface WeaverApi {
       name: string,
       value: string | number,
     ): Promise<MutationResult>;
+    updateBlockLabel(
+      graphId: string,
+      blockId: string,
+      label: string,
+    ): Promise<MutationResult>;
     createChatBlock(
       graphId: string,
       input: BlockInput,

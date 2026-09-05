@@ -34,6 +34,13 @@ const api: WeaverApi = {
         name,
         value,
       ) as Promise<MutationResult>,
+    updateBlockLabel: (graphId, blockId, label) =>
+      ipcRenderer.invoke(
+        "chat:updateBlockLabel",
+        graphId,
+        blockId,
+        label,
+      ) as Promise<MutationResult>,
     createChatBlock: (graphId, input: BlockInput, at: Position) =>
       ipcRenderer.invoke("chat:createChatBlock", graphId, input, at) as Promise<MutationResult>,
     moveChatBlock: (graphId, blockId, at: Position) =>

@@ -67,6 +67,9 @@ export type LiveGraph = {
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
+  /** Apply an already-persisted label edit locally. The label lives at the
+   *  top level of a block, not inside `data`. */
+  updateLabel: (id: BlockId, label: string) => void;
   /** Abort the inference anchored at `id`, if one is in flight. */
   abortRun: (id: BlockId) => boolean;
   /** Link an already-persisted new block into the tree at `at`. */
@@ -385,6 +388,20 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               data: { ...current.data, [name]: value },
               modifiedAt: Date.now(),
             },
+          },
+        },
+        snapshot.dirty,
+      );
+    },
+    updateLabel(id, label) {
+      const current = snapshot.graph.blocks[id];
+      if (!current) return;
+      commit(
+        {
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [id]: { ...current, label, modifiedAt: Date.now() },
           },
         },
         snapshot.dirty,
