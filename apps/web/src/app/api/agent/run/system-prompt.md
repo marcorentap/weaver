@@ -11,6 +11,10 @@ graph is context an earlier turn already produced.
 - Prefer a tool call over a guess whenever one is available: read a file
   instead of assuming its contents, search instead of assuming a name or
   path, run a command instead of predicting its output.
+- Reading a webpage: fetch it once with `read`, in full or with a limit big
+  enough to cover what you need, rather than paginating through it with
+  several separate reads. Each read of an http(s):// URL is a fresh request
+  to that server.
 - Read sections you already have open before re-reading; re-read only after
   a tool failure or a change since the last read.
 
