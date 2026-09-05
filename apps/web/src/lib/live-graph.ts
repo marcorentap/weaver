@@ -8,15 +8,21 @@ import type {
 } from "@repo/core";
 import {
   childIds,
+  findParent,
   insertBlock,
   lastChildId,
   moveBlock,
   removeBlock,
+  snapshotAbove,
+  snapshotBlock,
+  TEXT_KIND,
 } from "@repo/core";
 // Type-only: `@repo/store` reaches for node:sqlite, so a value import here
 // would drag the whole persistence layer into the browser bundle.
 import type { BlockInput } from "@repo/store";
 import { kinds } from "@/blocks/kinds";
+import { TOOL_KIND } from "@/blocks/tool";
+import { streamInference } from "@/lib/inference";
 
 export type LiveGraphSnapshot = {
   graph: BlockGraph;
@@ -24,9 +30,10 @@ export type LiveGraphSnapshot = {
   dirty: boolean;
   /** Epoch ms of the last successful save, or null before the first one. */
   savedAt: number | null;
-  /** Blocks with a hook currently in flight — a run's only visible state
-   *  while it is still running, since a hook's own state update lands all
-   *  at once when it resolves. */
+  /** Blocks with a hook or an inference run currently in flight — a run's
+   *  only visible state while it is still running, since both a hook's and
+   *  an inference run's own state update land all at once when they
+   *  resolve. */
   running: ReadonlySet<BlockId>;
 };
 
@@ -40,6 +47,23 @@ export type LiveGraph = {
    * "ISS location" is, and never needs to.
    */
   runHook: (id: BlockId, hook: string, arg?: unknown) => Promise<void>;
+  /**
+   * The global "run inference" action: any block, not just one of a
+   * particular kind, can anchor a run. Context is everything above `id`
+   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`) —
+   * so a block someone just typed becomes the last user turn. Results land
+   * as siblings appended right after `id`, chained one after the next in
+   * the order they streamed in, never nested under it — a re-run adds
+   * another reply rather than replacing the last one.
+   *
+   * Lives on the engine, not a component, so the fetch stream survives the
+   * view that started it unmounting (switching tabs and back) — it keeps
+   * appending into this graph regardless of who, if anyone, is watching.
+   */
+  runInference: (
+    id: BlockId,
+    options: { endpoint: string; apiKey: string; model: string; tools?: string[] },
+  ) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
@@ -165,11 +189,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     }
     // No liveness check here on purpose: React StrictMode's dev-only
     // mount→cleanup→mount replays a component's effects once without ever
-    // recreating this engine (it lives in `useState`), so a "destroyed on
-    // cleanup" flag would go permanently true on that first fake unmount
-    // and silently swallow every real update for the rest of the session. A
-    // result landing after the view holding this engine is truly gone just
-    // updates an object nothing reads anymore — harmless.
+    // recreating this engine (it is cached in the live-graph registry, not
+    // component state), so a "destroyed on cleanup" flag would go
+    // permanently true on that first fake unmount and silently swallow
+    // every real update for the rest of the session. A result landing
+    // after the view holding this engine is gone just updates an object
+    // nothing reads anymore — harmless.
     const current = snapshot.graph.blocks[id];
     if (!current) return; // Deleted while the hook was in flight.
     commit(
@@ -184,6 +209,99 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     );
   }
 
+  async function runInference(
+    id: BlockId,
+    { endpoint, apiKey, model, tools = [] }: {
+      endpoint: string;
+      apiKey: string;
+      model: string;
+      tools?: string[];
+    },
+  ): Promise<void> {
+    const block = snapshot.graph.blocks[id];
+    if (!block) return; // Stale reference (deleted target).
+    if (snapshot.running.has(id)) return; // Already running for this block.
+
+    const parentId = findParent(snapshot.graph, id);
+    let afterId: BlockId | null = id;
+    const append = (kind: string, data: BlockData, label: string) => {
+      const newId = crypto.randomUUID();
+      const now = Date.now();
+      const child: Block = {
+        id: newId,
+        kind,
+        label,
+        createdAt: now,
+        modifiedAt: now,
+        next: null,
+        children: null,
+        data,
+      };
+      commit(insertBlock(snapshot.graph, child, { parentId, afterId }), true);
+      afterId = newId;
+    };
+    // Pre-flight failures land as an appended error block too, and never
+    // set `running` — there is nothing in flight to show a spinner for.
+    if (!endpoint || !apiKey || !model) {
+      append(
+        TEXT_KIND,
+        { text: "missing endpoint, API key, or model — check settings" },
+        "error",
+      );
+      return;
+    }
+    const prompt = snapshotBlock(snapshot.graph, id, kinds);
+    if (!prompt.trim()) {
+      append(TEXT_KIND, { text: "block is empty — nothing to send" }, "error");
+      return;
+    }
+    const context = snapshotAbove(snapshot.graph, id, kinds);
+
+    setRunning(id, true);
+    try {
+      let failure: string | null = null;
+      await streamInference(
+        { endpoint, apiKey, model, context, prompt, tools },
+        (event) => {
+          if (event.type === "text") {
+            append(TEXT_KIND, { text: event.text }, "assistant");
+          } else if (event.type === "tool") {
+            append(
+              TOOL_KIND,
+              {
+                name: event.name,
+                args: event.args,
+                output: event.output,
+                ok: event.ok,
+              },
+              event.name,
+            );
+          } else if (event.type === "block") {
+            const target = kinds[event.kind];
+            if (!target) return;
+            try {
+              target.parse(event.data);
+            } catch {
+              return;
+            }
+            append(event.kind, event.data, event.label);
+          } else if (event.type === "error") {
+            failure = event.message;
+          }
+        },
+      );
+      if (failure !== null) append(TEXT_KIND, { text: failure }, "error");
+    } catch (error) {
+      append(
+        TEXT_KIND,
+        { text: error instanceof Error ? error.message : String(error) },
+        "error",
+      );
+    } finally {
+      setRunning(id, false);
+    }
+  }
+
   return {
     subscribe(listener) {
       listeners.add(listener);
@@ -191,6 +309,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     },
     getSnapshot: () => snapshot,
     runHook,
+    runInference,
     updateField(id, name, value) {
       const current = snapshot.graph.blocks[id];
       if (!current) return;

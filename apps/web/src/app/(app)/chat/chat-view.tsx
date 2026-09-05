@@ -11,16 +11,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Plus } from "lucide-react";
-import type { Block, BlockData, BlockGraph, BlockId, Position } from "@repo/core";
-import {
-  childIds,
-  findParent,
-  lastChildId,
-  snapshotAbove,
-  snapshotBlock,
-  TEXT_KIND,
-  topLevelBlockIds,
-} from "@repo/core";
+import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
+import { childIds, lastChildId, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -35,11 +27,11 @@ import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
-import { createLiveGraph, scheduledHooks } from "@/lib/live-graph";
+import { scheduledHooks } from "@/lib/live-graph";
+import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@/blocks/kinds";
 import { USER_KIND } from "@/blocks/user";
 import { TOOL_KIND } from "@/blocks/tool";
-import { streamInference } from "@/lib/inference";
 import {
   createChatBlock,
   createChatSession,
@@ -449,22 +441,19 @@ export function ChatView({
     { id: BlockId; openActions: boolean; runInference?: boolean } | null
   >(null);
   const { settings, hydrated } = useSettings();
-  /** Blocks with an inference run in flight right now — merged into a row's
-   *  `running` prop alongside kind hooks, so any block (not just one with a
-   *  hook of its own) can show the same spinner. */
-  const [inferring, setInferring] = useState<ReadonlySet<BlockId>>(
-    () => new Set(),
-  );
 
   // ---- Live graph state --------------------------------------------------
   // The client owns the graph from here on: a hook (a timer's tick, an ISS
-  // fetch — this file has no idea which) mutates it and notifies
-  // subscribers immediately, so it lands on screen the instant it resolves,
-  // not on whatever cadence a poll happened to run at. `initialGraph` seeds
-  // it once per mount — page keys `<ChatView>` by session id, so switching
-  // sessions remounts rather than needing this to reconcile a changed prop
-  // mid-life.
-  const [engine] = useState(() => createLiveGraph(initialGraph));
+  // fetch, an inference run — this file has no idea which) mutates it and
+  // notifies subscribers immediately, so it lands on screen the instant it
+  // resolves, not on whatever cadence a poll happened to run at. The engine
+  // itself lives in a module-scope registry keyed by session id, not in
+  // `useState`: this component (and everything under `/chat`) unmounts on a
+  // plain tab switch, and a `useState` engine — along with any run still
+  // streaming into it — would go with it. `initialGraph` only seeds a
+  // session's engine the first time it is asked for; every later mount
+  // reattaches to whatever the registry already has.
+  const engine = getLiveGraph(session?.id ?? "none", initialGraph);
   const { graph, dirty, savedAt, running } = useSyncExternalStore(
     engine.subscribe,
     engine.getSnapshot,
@@ -672,108 +661,20 @@ export function ChatView({
 
   /**
    * The global "run inference" action: any block, not just one of a
-   * particular kind, can anchor a run. Context is everything above `id`
-   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`) —
-   * so a block someone just typed becomes the last user turn. Results land
-   * as siblings appended right after `id`, chained one after the next in
-   * the order they streamed in, never nested under it — a re-run adds
-   * another reply rather than replacing the last one.
+   * particular kind, can anchor a run. The engine owns the actual prompt
+   * assembly, streaming, and result blocks (`lib/live-graph`'s
+   * `runInference`) — kept there rather than here so a run survives this
+   * component unmounting mid-stream, e.g. a tab switch away from chat and
+   * back.
    */
-  async function runInference(id: BlockId): Promise<void> {
-    if (!session || inferring.has(id)) return;
-    const liveGraph = engine.getSnapshot().graph;
-    const parentId = findParent(liveGraph, id);
-    let afterId: BlockId | null = id;
-    const append = (kind: string, data: BlockData, label: string) => {
-      const newId = crypto.randomUUID();
-      const now = Date.now();
-      engine.addBlock(
-        {
-          id: newId,
-          kind,
-          label,
-          createdAt: now,
-          modifiedAt: now,
-          next: null,
-          children: null,
-          data,
-        },
-        { parentId, afterId },
-      );
-      afterId = newId;
-    };
-    // Pre-flight failures land as an appended error block too — the only
-    // place in this menu-driven flow a block ever gets to say anything, once
-    // the actions popup that triggered it has already closed.
+  function runInference(id: BlockId): Promise<void> {
+    if (!session) return Promise.resolve();
     const { aiEndpoint, aiApiKey, aiDefaultModel } = settings;
-    if (!aiEndpoint || !aiApiKey || !aiDefaultModel) {
-      append(
-        TEXT_KIND,
-        { text: "missing endpoint, API key, or model — check settings" },
-        "error",
-      );
-      return;
-    }
-    const prompt = snapshotBlock(liveGraph, id, kinds);
-    if (!prompt.trim()) {
-      append(TEXT_KIND, { text: "block is empty — nothing to send" }, "error");
-      return;
-    }
-    setInferring((current) => new Set(current).add(id));
-    const context = snapshotAbove(liveGraph, id, kinds);
-    try {
-      let failure: string | null = null;
-      await streamInference(
-        {
-          endpoint: aiEndpoint,
-          apiKey: aiApiKey,
-          model: aiDefaultModel,
-          context,
-          prompt,
-          tools: [],
-        },
-        (event) => {
-          if (event.type === "text") {
-            append(TEXT_KIND, { text: event.text }, "assistant");
-          } else if (event.type === "tool") {
-            append(
-              TOOL_KIND,
-              {
-                name: event.name,
-                args: event.args,
-                output: event.output,
-                ok: event.ok,
-              },
-              event.name,
-            );
-          } else if (event.type === "block") {
-            const target = kinds[event.kind];
-            if (!target) return;
-            try {
-              target.parse(event.data);
-            } catch {
-              return;
-            }
-            append(event.kind, event.data, event.label);
-          } else if (event.type === "error") {
-            failure = event.message;
-          }
-        },
-      );
-      if (failure !== null) append(TEXT_KIND, { text: failure }, "error");
-    } catch (error) {
-      append(
-        TEXT_KIND,
-        { text: error instanceof Error ? error.message : String(error) },
-        "error",
-      );
-    } finally {
-      setInferring((current) => {
-        const next = new Set(current);
-        next.delete(id);
-        return next;
-      });
-    }
+    return engine.runInference(id, {
+      endpoint: aiEndpoint,
+      apiKey: aiApiKey,
+      model: aiDefaultModel,
+    });
   }
 
   useKeyLayer({
@@ -1266,9 +1167,7 @@ export function ChatView({
                 row={entry}
                 selected={i === index}
                 line={lineNumber(i)}
-                running={
-                  running.has(entry.block.id) || inferring.has(entry.block.id)
-                }
+                running={running.has(entry.block.id)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>
