@@ -1,26 +1,13 @@
 /**
- * Web search via DuckDuckGo's no-JS HTML frontend. No API key, no dependency
- * on an auth broker or credential store. Modeled on omp's
- * `DuckDuckGoProvider` (packages/coding-agent/src/web/search/providers/duckduckgo.ts
- * in github.com/can1357/oh-my-pi), trimmed to what a single stateless request
- * needs. The locale and pagination handling that provider carries for its
- * own multi-provider fallback chain is not worth reproducing here.
+ * Web search through a SearXNG instance's JSON API. SearXNG spreads queries
+ * across several upstream engines, so one provider blocking the instance
+ * stops being fatal, and it needs no API key. The renderer's "Search"
+ * settings set the instance URL; a blank URL disables web search, and the
+ * tool reports that clearly rather than failing silently.
  */
 
-const DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/";
 const DEFAULT_NUM_RESULTS = 8;
 const MAX_NUM_RESULTS = 20;
-
-/** Static desktop Chrome fingerprint. DuckDuckGo's HTML endpoint blocks
- *  requests with no browser-shaped headers at all; it does not require a
- *  rotating fingerprint for a handful of requests per run. */
-const BROWSER_HEADERS: Record<string, string> = {
-  Accept:
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-  "Accept-Language": "en-US,en;q=0.9",
-  "User-Agent":
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-};
 
 export interface WebSearchResult {
   title: string;
@@ -33,92 +20,40 @@ export type WebSearchRecency = "day" | "week" | "month" | "year";
 export interface WebSearchOptions {
   /** Number of results to return, clamped to [1, 20]. Default 8. */
   limit?: number;
-  /** Time-window filter; DuckDuckGo's `df` form field. */
+  /** Time-window filter; SearXNG's `time_range` search param. */
   recency?: WebSearchRecency;
   signal?: AbortSignal;
 }
 
-const RECENCY_TO_DDG_DF: Record<WebSearchRecency, string> = {
-  day: "d",
-  week: "w",
-  month: "m",
-  year: "y",
+/** SearXNG's own `time_range` values line up with ours name-for-name. */
+const RECENCY_TO_TIME_RANGE: Record<WebSearchRecency, string> = {
+  day: "day",
+  week: "week",
+  month: "month",
+  year: "year",
 };
 
-/** Strip tags/entities out of a fragment lifted from DDG markup. */
-function decodeHtmlText(value: string): string {
-  return value
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
-      String.fromCharCode(Number.parseInt(code, 16)),
-    )
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
-    .replace(/&lt;/gi, "<")
-    .replace(/&gt;/gi, ">")
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+/** One SearXNG JSON result, as the field shapes we actually read. */
+type SearxngResult = {
+  title?: unknown;
+  url?: unknown;
+  content?: unknown;
+};
 
-/** DDG routes result links through `//duckduckgo.com/l/?uddg=<encoded>` for
- *  click analytics; unwrap back to the real target. */
-function unwrapResultUrl(href: string): string | undefined {
-  if (!href) return undefined;
-  const decoded = href.replace(/&amp;/gi, "&");
-  const wrapped = /[?&]uddg=([^&]+)/.exec(decoded);
-  if (wrapped) {
-    try {
-      return decodeURIComponent(wrapped[1]!);
-    } catch {
-      return undefined;
-    }
-  }
-  if (decoded.startsWith("//")) return `https:${decoded}`;
-  if (decoded.startsWith("http://") || decoded.startsWith("https://"))
-    return decoded;
-  return undefined;
-}
-
-function parseHtmlResults(html: string): WebSearchResult[] {
-  const results: WebSearchResult[] = [];
-  const blockRe =
-    /<div\b[^>]*\bclass="[^"]*\bresult\b[^"]*"[^>]*>([\s\S]*?)(?=<div\b[^>]*\bclass="[^"]*\bresult\b|<div\b[^>]*\bclass="[^"]*\bnav-link\b|$)/g;
-  const titleRe =
-    /<a\b[^>]*\bclass="[^"]*\bresult__a\b[^"]*"[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>/;
-  const snippetRe =
-    /<(?:a|div|span)\b[^>]*\bclass="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\/(?:a|div|span)>/;
-  for (const match of html.matchAll(blockRe)) {
-    const block = match[1]!;
-    const title = titleRe.exec(block);
-    if (!title) continue;
-    const url = unwrapResultUrl(title[1]!);
-    if (!url) continue;
-    const titleText = decodeHtmlText(title[2]!);
-    if (!titleText) continue;
-    const snippet = snippetRe.exec(block);
-    results.push({
-      title: titleText,
-      url,
-      snippet: snippet ? decodeHtmlText(snippet[1]!) : undefined,
-    });
-  }
-  return results;
-}
-
-/** `true` when DDG served its bot-challenge modal instead of real results. */
-function isAnomalyResponse(html: string): boolean {
-  return html.includes("anomaly-modal") || html.includes("anomaly.js");
+/** Pull a safe string out of a field SearXNG may send as string or null. */
+function textOf(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 /**
- * Run a DuckDuckGo web search and return parsed results. Throws with a
- * user-facing message on transport failure, HTTP error, or bot-detection
- * block. Callers surface that as the tool's failure text.
+ * Run a web search against a SearXNG instance. Throws with a user-facing
+ * message on transport failure, a non-2xx response, or an error the
+ * instance reports in its JSON.
  */
-export async function searchDuckDuckGo(
+export async function searchSearXNG(
+  baseUrl: string,
   query: string,
   options: WebSearchOptions = {},
 ): Promise<WebSearchResult[]> {
@@ -126,32 +61,54 @@ export async function searchDuckDuckGo(
     Math.max(1, Math.trunc(options.limit ?? DEFAULT_NUM_RESULTS)),
     MAX_NUM_RESULTS,
   );
-  const form = new URLSearchParams({ q: query, kl: "us-en", b: "" });
-  const df = options.recency ? RECENCY_TO_DDG_DF[options.recency] : undefined;
-  if (df) form.set("df", df);
+  const url = new URL("/search", baseUrl.replace(/\/+$/, ""));
+  url.searchParams.set("q", query);
+  url.searchParams.set("format", "json");
+  url.searchParams.set("pageno", "1");
+  const recency = options.recency ? RECENCY_TO_TIME_RANGE[options.recency] : undefined;
+  if (recency) url.searchParams.set("time_range", recency);
 
-  const response = await fetch(DUCKDUCKGO_HTML_URL, {
-    method: "POST",
-    headers: {
-      ...BROWSER_HEADERS,
-      "Content-Type": "application/x-www-form-urlencoded",
-      Referer: "https://html.duckduckgo.com/",
-    },
-    body: form.toString(),
-    signal: options.signal,
-  });
-
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`DuckDuckGo HTML error (${response.status})`);
-  }
-  if (isAnomalyResponse(body)) {
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: options.signal });
+  } catch (error) {
     throw new Error(
-      "DuckDuckGo blocked the request with a bot-detection challenge (common from datacenter IPs). Try again shortly.",
+      `could not reach the search instance at ${baseUrl}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      { cause: error },
     );
   }
+  if (!response.ok) {
+    throw new Error(`SearXNG error (${response.status})`);
+  }
 
-  return parseHtmlResults(body).slice(0, limit);
+  const payload = (await response.json()) as {
+    results?: unknown;
+    error?: unknown;
+  };
+  if (payload.error) {
+    throw new Error(`SearXNG error: ${textOf(payload.error) ?? "unknown"}`);
+  }
+  if (!Array.isArray(payload.results)) {
+    throw new Error("SearXNG returned an unexpected payload");
+  }
+
+  const results: WebSearchResult[] = [];
+  for (const raw of payload.results) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const { title, url: rawUrl, content } = raw as SearxngResult;
+    const text = textOf(title);
+    const href = textOf(rawUrl);
+    if (!text || !href) continue;
+    results.push({
+      title: text,
+      url: href,
+      snippet: textOf(content),
+    });
+    if (results.length >= limit) break;
+  }
+  return results;
 }
 
 /** Render results as text for a tool result / LLM message. */

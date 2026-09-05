@@ -127,6 +127,7 @@ export default function SettingsPage() {
     setAiEndpoint,
     setAiApiKey,
     setAiDefaultModel,
+    setSearxngUrl,
   } = useSettings();
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
@@ -197,6 +198,21 @@ export default function SettingsPage() {
       value: settings.aiDefaultModel,
       onChange: setAiDefaultModel,
       placeholder: "anthropic/claude-haiku-4-5",
+    },
+    {
+      kind: "string",
+      key: "searxngUrl",
+      label: "SearXNG URL",
+      description:
+        "Base URL of a SearXNG instance used for web search. Blank disables the tool.",
+      section: "Search",
+      value: settings.searxngUrl,
+      onChange: setSearxngUrl,
+      placeholder: "http://searxng-host:8085",
+      validate: (value) =>
+        !value.trim() || providerUrl(value, "search")
+          ? null
+          : "needs a scheme and host, e.g. http://searxng-host:8085",
     },
   ];
 

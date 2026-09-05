@@ -27,16 +27,35 @@ import { writeSource } from "../lib/write-source.js";
 import { editSource } from "../lib/edit-source.js";
 import {
   formatWebSearchResults,
-  searchDuckDuckGo,
+  searchSearXNG,
   type WebSearchResult,
 } from "../lib/web-search.js";
 import { schemaMessage } from "../lib/schema-error.js";
+import { getStore } from "../lib/store.js";
 import { MEDIA_KIND } from "../../shared/blocks/media.js";
 import { registerPendingMedia } from "../lib/pending-media.js";
 
-/** Config directory handed to the SDK. Sessions are in-memory and every
+/** Config directory handed to the agent. Sessions are in-memory and every
  *  discovery pass is disabled, so nothing is actually read from it. */
 const AGENT_DIR = "/tmp/weaver-agent";
+
+/** The SearXNG base URL from Settings > Search, or undefined when unset.
+ *  Settings live as one JSON blob under `weaver.settings` in the store;
+ *  reading it here keeps the tool decoupled from renderer state. */
+function storedSearxngUrl(): string | undefined {
+  const raw = getStore().getSetting("weaver.settings");
+  if (!raw) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined;
+  if (!("searxngUrl" in parsed)) return undefined;
+  const value: unknown = parsed.searxngUrl;
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
 
 /** A tool block is the harness's own record of a call rather than something
  *  to fabricate, so the `display` tool refuses to create one. */
@@ -269,13 +288,14 @@ async function runAgent(
       },
     });
 
-    /** DuckDuckGo web search. No API key, so it is part of the default
-     *  tool set below same as everything else. */
+    /** Web search through the SearXNG instance named in Settings > Search.
+     *  Aggregates upstream engines, so no single provider's rate limit stops
+     *  a run. */
     const webSearch = defineTool({
       name: "web_search",
       label: "Web Search",
       description:
-        "Use this when you need current information you don't already have. Returns titles, URLs, and snippets via DuckDuckGo, no API key.",
+        "Use this when you need current information you don't already have. Returns titles, URLs, and snippets from the configured SearXNG instance.",
       parameters: Type.Object({
         query: Type.String({ description: "Search query" }),
         limit: Type.Optional(
@@ -285,9 +305,18 @@ async function runAgent(
         ),
       }),
       execute: async (_toolCallId, params) => {
+        // The SearXNG instance comes from Settings > Search, read straight
+        // from the store so the tool is decoupled from what the renderer
+        // happens to have. Blank means no search engine is set up.
+        const searxngUrl = storedSearxngUrl();
+        if (!searxngUrl) {
+          throw new Error(
+            "no SearXNG instance set: open Settings > Search > SearXNG URL and point it at an instance, e.g. http://searxng-host:8085",
+          );
+        }
         let results: WebSearchResult[];
         try {
-          results = await searchDuckDuckGo(params.query, {
+          results = await searchSearXNG(searxngUrl, params.query, {
             limit: params.limit,
           });
         } catch (error) {
