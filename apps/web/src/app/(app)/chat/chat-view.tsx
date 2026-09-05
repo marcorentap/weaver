@@ -833,6 +833,18 @@ export function ChatView({
         run: () => beginCreateUser(row ? index : 0),
       },
       {
+        keys: ["e"],
+        help: { keys: "e", label: "Edit primary field" },
+        run: () => {
+          if (!row) return;
+          // A kind's first field is the one worth a direct key for — a
+          // media block's URI, a text block's text — everything else still
+          // reaches the rest through the actions menu.
+          const field = view?.fields?.(row.block)[0];
+          if (field) openField(field);
+        },
+      },
+      {
         keys: ["G"],
         help: { keys: "G / <n>G", label: "Jump to last block / line <n>" },
         run: (count) => jump(count ?? rows.length),
