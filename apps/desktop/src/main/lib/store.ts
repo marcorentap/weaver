@@ -20,7 +20,7 @@ const cache = globalThis as unknown as {
 };
 
 /** Name of the session a fresh store starts with. */
-const SEED_GRAPH = "dev";
+const SEED_GRAPH = "seed";
 
 /**
  * An empty database has no session for chat to open, and the media protocol
