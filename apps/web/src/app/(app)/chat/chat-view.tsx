@@ -48,6 +48,7 @@ export type SessionSummary = { id: string; name: string; modifiedAt: number };
 /** Which modal popup, if any, sits above chat's normal mode. */
 type Popup =
   | { kind: "actions" }
+  | { kind: "selection" }
   | { kind: "sessions" }
   | { kind: "preview" }
   | { kind: "field"; field: BlockField }
@@ -175,6 +176,7 @@ const CLIP_LINES = 12;
 function BlockRow({
   row,
   selected,
+  inSelection,
   line,
   running,
   gutter,
@@ -185,6 +187,9 @@ function BlockRow({
 }: {
   row: Row;
   selected: boolean;
+  /** Whether this row falls inside an active visual selection (`v`),
+   *  cursor row included. */
+  inSelection: boolean;
   /** Number to show in the gutter, or null when line numbers are off. */
   line: number | null;
   /** Whether this block has a hook in flight right now. */
@@ -241,7 +246,9 @@ function BlockRow({
         "flex cursor-pointer items-start gap-3 border-l-2 py-1 pl-1 pr-3",
         selected
           ? "border-foreground/60 bg-muted"
-          : "border-transparent hover:bg-muted/40",
+          : inSelection
+            ? "border-foreground/30 bg-muted/40"
+            : "border-transparent hover:bg-muted/40",
       )}
     >
       <Gutter line={line} show={gutter} current={selected} />
@@ -444,6 +451,10 @@ export function ChatView({
    *  former. */
   const lastRowCountRef = useRef(0);
   const wasAtEndRef = useRef(true);
+  /** Row index the current visual selection (`v`) is anchored to, or null
+   *  when no selection is active. The other end is always the live
+   *  cursor, so `j`/`k`/`G`/`gg` extend the selection for free. */
+  const [visualAnchor, setVisualAnchor] = useState<number | null>(null);
   const [expanded, setExpanded] = useState<ReadonlySet<BlockId>>(
     () => new Set(),
   );
@@ -557,6 +568,22 @@ export function ChatView({
   const index = Math.min(cursor, Math.max(rows.length - 1, 0));
   const row = rows[index];
   const view = row ? viewFor(row.block) : null;
+
+  // The selection spans the anchor to the live cursor, inclusive of both —
+  // clamped in case a block vanished (deleted, container collapsed) since
+  // the anchor was dropped.
+  const selectionRange: [number, number] | null =
+    visualAnchor === null
+      ? null
+      : [
+          Math.min(Math.min(visualAnchor, rows.length - 1), index),
+          Math.max(Math.min(visualAnchor, rows.length - 1), index),
+        ];
+  const selectedRows = selectionRange
+    ? rows.slice(selectionRange[0], selectionRange[1] + 1)
+    : row
+      ? [row]
+      : [];
 
   // Rides the tail as it grows: a block appending (streaming inference, a
   // hook's own result) while the cursor sat on the last row moves the
@@ -762,10 +789,22 @@ export function ChatView({
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "Actions for selected block" },
+        help: { keys: "enter", label: "Actions for selected block(s)" },
         run: () => {
-          if (row) setPopup({ kind: "actions" });
+          if (visualAnchor !== null) setPopup({ kind: "selection" });
+          else if (row) setPopup({ kind: "actions" });
         },
+      },
+      {
+        keys: ["v"],
+        help: { keys: "v", label: "Toggle visual selection" },
+        run: () =>
+          setVisualAnchor((current) => (current === null ? index : null)),
+      },
+      {
+        keys: ["Escape"],
+        help: { keys: "esc", label: "Cancel visual selection" },
+        run: () => setVisualAnchor(null),
       },
       {
         keys: ["s"],
@@ -1073,6 +1112,53 @@ export function ChatView({
       : [];
 
   /**
+   * The visual-selection menu (`v` then `enter`): copy every selected
+   * block's content, joined, or delete the whole range. Deliberately just
+   * these two for now — a kind's own actions (preview, configure, run
+   * inference) stay single-block only, since "run inference on N blocks at
+   * once" has no obvious single meaning yet.
+   */
+  const selectionActions: KeyMenuItem[] =
+    selectedRows.length > 0
+      ? [
+          {
+            label: "Copy content",
+            key: "y",
+            detail: `${selectedRows.length} blocks`,
+            run: () => {
+              const text = selectedRows
+                .map((entry) => copyableContent(entry.block)?.value)
+                .filter((value): value is string => value != null)
+                .join("\n\n");
+              void navigator.clipboard.writeText(text);
+              setPopup(null);
+              setVisualAnchor(null);
+            },
+          },
+          {
+            label: `Delete ${selectedRows.length} blocks`,
+            key: "d",
+            destructive: true,
+            run: () => {
+              setPopup(null);
+              setVisualAnchor(null);
+              const ids = selectedRows.map((entry) => entry.block.id);
+              // Optimistic, same as a single delete — each id's own nested
+              // contents go with it, and an id an ancestor in this same
+              // selection already dropped is just a no-op.
+              for (const id of ids) engine.deleteBlock(id);
+              if (session) {
+                const graphId = session.id;
+                startTransition(() => {
+                  for (const id of ids) void deleteChatBlock(graphId, id);
+                });
+              }
+            },
+          },
+        ]
+      : [];
+
+  /**
    * The configure menu: a block's callables (hooks it exposes, invocable
    * directly) and callbacks (its own references to another block's hook,
    * declared by its kind's `callbacks` — a timer's target, say).
@@ -1221,6 +1307,11 @@ export function ChatView({
               <BlockRow
                 row={entry}
                 selected={i === index}
+                inSelection={
+                  selectionRange !== null &&
+                  i >= selectionRange[0] &&
+                  i <= selectionRange[1]
+                }
                 line={lineNumber(i)}
                 running={running.has(entry.block.id)}
                 shown={showEverything || shown.has(entry.block.id)}
@@ -1250,6 +1341,15 @@ export function ChatView({
           id="actions"
           title={row ? `Block ${row.block.label}` : "Block"}
           items={actions}
+          onClose={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "selection" ? (
+        <KeyMenu
+          id="selection"
+          title={`${selectedRows.length} blocks`}
+          items={selectionActions}
           onClose={() => setPopup(null)}
         />
       ) : null}
