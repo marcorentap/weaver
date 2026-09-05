@@ -1034,7 +1034,6 @@ export function ChatView({
                   {
                     label: content.label,
                     key: "y",
-                    detail: content.value,
                     run: () => {
                       void navigator.clipboard.writeText(content.value);
                       setPopup(null);
