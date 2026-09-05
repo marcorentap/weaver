@@ -197,6 +197,7 @@ async function runAgent(
         ),
         'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. A local file needs an absolute file:// URI, e.g. {"uri":"file:///home/me/diagram.png"}.',
         "Text: renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images all work; an image needs an http(s) or absolute file:// URL.",
+        "A `Text` block is already visible. Don't restate its content in your reply. Summarizing is fine.",
       ].join("\n"),
       parameters: Type.Object({
         kind: Type.String({ description: "Block kind to create" }),
