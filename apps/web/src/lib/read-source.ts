@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { open } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runSsh, shellQuote, sshPath } from "./ssh";
 
 /** Schemes this reads directly; anything else is a bare filesystem path. */
 const SCHEMES = new Set(["file:", "http:", "https:", "ssh:"]);
@@ -66,49 +66,6 @@ async function readHttpRange(url: URL, start: number, length: number): Promise<B
   // huge such resource is still downloaded whole either way — a pre-existing
   // limitation of reading arbitrary URLs, not one this adds.
   return res.status === 206 ? buf : buf.subarray(start, start + length);
-}
-
-/** Single-quotes a path for the POSIX shell `ssh` hands the remote command
- *  to — the only quoting `ssh`'s argv-to-command-string join needs. */
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function sshPath(url: URL): string {
-  if (url.pathname.length <= 1) {
-    throw new Error(`ssh:// URI is missing a path: ${url}`);
-  }
-  return decodeURIComponent(url.pathname);
-}
-
-/**
- * Runs `remoteCommand` over `ssh` and returns what it printed. Auth, host
- * keys and `~/.ssh/config` aliases are entirely the operator's concern — set
- * up externally, same as a person would use `ssh` from a terminal — so this
- * only shells out to the `ssh` binary and reads what it prints.
- */
-async function runSsh(url: URL, remoteCommand: string): Promise<Buffer> {
-  const args: string[] = [];
-  if (url.port) args.push("-p", url.port);
-  const host = url.username ? `${url.username}@${url.hostname}` : url.hostname;
-  args.push("--", host, remoteCommand);
-
-  return await new Promise<Buffer>((settle, reject) => {
-    const child = spawn("ssh", args, { stdio: ["ignore", "pipe", "pipe"] });
-    const out: Buffer[] = [];
-    const err: Buffer[] = [];
-    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        const message = Buffer.concat(err).toString("utf8").trim();
-        reject(new Error(message || `ssh exited with code ${code}`));
-        return;
-      }
-      settle(Buffer.concat(out));
-    });
-  });
 }
 
 /** `tail -c +N | head -c L` bounds the remote side to the range asked for,

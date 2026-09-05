@@ -52,20 +52,16 @@ export const agentRunRequest = z.object({
    *  server has no view of the live graph, which lives in the browser. */
   context: z.string(),
   prompt: z.string(),
-  /** Built-in tool names to enable for this run. Empty means read-only. */
+  /** Built-in tool names to enable for this run. Empty means every built-in
+   *  tool (see `ALLOWED_TOOLS`). */
   tools: z.array(z.string()),
 });
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;
 
-/** Built-in tools a run gets when its block names none: it can look around
- *  the project and search the web, but cannot change the project or run
- *  commands. */
-export const READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "web_search"] as const;
-
-/** Everything a block may ask for, `bash`/`write`/`edit` included — this
- *  server runs commands as whoever started it, so granting them is a
- *  per-block decision rather than a default. */
+/** Every built-in tool name a block may ask for — `bash`/`write`/`edit`
+ *  included. This server runs commands as whoever started it, so this is
+ *  also the default when a block names none. */
 export const ALLOWED_TOOLS = [
   "read",
   "grep",

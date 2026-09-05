@@ -249,7 +249,7 @@ function BlockRow({
           ? "border-foreground/60 bg-muted"
           : inSelection
             ? "border-foreground/30 bg-muted/40"
-            : "border-transparent hover:bg-muted/40",
+            : "border-transparent",
       )}
     >
       <Gutter line={line} show={gutter} current={selected} />
@@ -307,7 +307,7 @@ function BlockRow({
             }}
             className="text-muted-foreground/60 hover:text-foreground"
           >
-            {clipped} more {clipped === 1 ? "line" : "lines"} — click or ctrl+o
+            truncated
           </button>
         ) : null}
       </span>

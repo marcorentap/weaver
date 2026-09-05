@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineKind } from "@repo/core";
+import { languageForPath } from "@/lib/languages";
 
 /**
  * One tool call an agent made. An agent run does not produce a single string
@@ -32,7 +33,7 @@ const readArgs = z.object({ path: z.string() });
  * records. The output is bytes either way, so the path's extension is the
  * only thing that says how to render them.
  */
-export function readPath(state: ToolState): string | null {
+function readPath(state: ToolState): string | null {
   if (state.name !== "read" || !state.ok) return null;
   let args: unknown;
   try {
@@ -42,6 +43,16 @@ export function readPath(state: ToolState): string | null {
   }
   const parsed = readArgs.safeParse(args);
   return parsed.success ? parsed.data.path : null;
+}
+
+/** Grammar to highlight a tool's `output` with. A successful `edit` call's
+ *  output is always a unified diff, whatever file it touched, so it is
+ *  always highlighted as one; a `read` call's output is the target file's
+ *  own language, by extension. Every other tool renders as plain text. */
+export function toolLanguage(state: ToolState): string | null {
+  if (state.name === "edit" && state.ok) return "diff";
+  const path = readPath(state);
+  return path ? languageForPath(path) : null;
 }
 
 export const toolKind = defineKind({

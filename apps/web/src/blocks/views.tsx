@@ -22,7 +22,7 @@ import type { TimerState } from "./timer";
 import { TIMER_KIND, timerState } from "./timer";
 import { USER_KIND, userState } from "./user";
 import type { ToolState } from "./tool";
-import { TOOL_KIND, readPath, toolState } from "./tool";
+import { TOOL_KIND, toolLanguage, toolState } from "./tool";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -125,7 +125,6 @@ function UserRow({ text, running }: { text: string; running: boolean }) {
 }
 
 function ToolRow({ state }: { state: ToolState }) {
-  const path = readPath(state);
   return (
     <span className="flex min-w-0 flex-1 flex-col gap-1">
       <span className="flex min-w-0 items-baseline gap-2">
@@ -136,13 +135,13 @@ function ToolRow({ state }: { state: ToolState }) {
       </span>
       {state.output === "" ? null : (
         // Every tool prints machine output, not prose, so it all renders
-        // preformatted and obeys the wrap setting; only a read call knows a
-        // grammar to highlight it with.
+        // preformatted and obeys the wrap setting; `toolLanguage` is the one
+        // spot that knows which calls have a grammar to highlight it with.
         <CodeBlock
           code={state.output}
-          language={path ? languageForPath(path) : null}
+          language={toolLanguage(state)}
           className={cn(
-            "w-full overflow-x-auto",
+            "w-full overflow-x-auto border p-2",
             state.ok ? "text-muted-foreground" : "text-destructive",
           )}
         />
@@ -166,7 +165,6 @@ function textBlobUrl(text: string): string {
 /** Full-size presentation: header line, then the same output a row shows,
  * scrolling on its own instead of clipping. */
 function ToolPreview({ state }: { state: ToolState }) {
-  const path = readPath(state);
   return (
     <div className="flex h-[70vh] w-full flex-col gap-2">
       <div className="flex min-w-0 shrink-0 items-baseline gap-2">
@@ -180,7 +178,7 @@ function ToolPreview({ state }: { state: ToolState }) {
       ) : (
         <CodeBlock
           code={state.output}
-          language={path ? languageForPath(path) : null}
+          language={toolLanguage(state)}
           className={cn(
             "min-h-0 flex-1 overflow-auto overscroll-contain",
             state.ok ? "text-muted-foreground" : "text-destructive",

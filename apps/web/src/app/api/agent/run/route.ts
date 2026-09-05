@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { Type } from "typebox";
 import { z } from "zod";
 import {
@@ -11,12 +13,13 @@ import { kinds } from "@/blocks/kinds";
 import { TOOL_KIND } from "@/blocks/tool";
 import {
   ALLOWED_TOOLS,
-  READ_ONLY_TOOLS,
   agentRunRequest,
   type AgentEvent,
 } from "@/lib/agent-events";
 import { projectRoot } from "@/lib/project";
 import { readSource } from "@/lib/read-source";
+import { writeSource } from "@/lib/write-source";
+import { editSource } from "@/lib/edit-source";
 import {
   formatWebSearchResults,
   searchDuckDuckGo,
@@ -36,6 +39,18 @@ const AGENT_DIR = "/tmp/weaver-agent";
 /** A tool block is the harness's own record of a call rather than something
  *  to fabricate, so the `display` tool refuses to create one. */
 const NOT_DISPLAYABLE = new Set<string>([TOOL_KIND]);
+
+/**
+ * Appended to the SDK's own system prompt (see `resourceLoader` below):
+ * everything here is what's specific to running as one block in a weaver
+ * graph rather than as a general-purpose repo-editing CLI agent. Kept as its
+ * own committed file rather than an inline string so it reads and diffs like
+ * prose, not code.
+ */
+const WEAVER_SYSTEM_PROMPT = readFileSync(
+  join(process.cwd(), "src/app/api/agent/run/system-prompt.md"),
+  "utf8",
+);
 
 /**
  * The agent SDK types its event payloads as `any`, so everything crossing
@@ -171,14 +186,13 @@ export async function POST(request: Request): Promise<Response> {
           name: "display",
           label: "Display",
           description: [
-            "Add a block below your own block, to show something to the user.",
-            "Pick the kind that fits what you are showing and pass that kind's state as `data`.",
-            "Available kinds, with the JSON Schema of their `data`:",
+            "Use this to show the user something concrete: code, a diagram, a fetched page, structured data. Don't just describe it in your reply, add a block for it.",
+            "Pick the kind that fits and pass its state as `data`. Available kinds, with the JSON Schema of their `data`:",
             ...displayable.map(
               (entry) => `- ${entry.kind}: ${JSON.stringify(entry.schema)}`,
             ),
-            'A media block shows an image, audio, video, PDF or text file by URI; a local file needs an absolute file:// URI, e.g. {"uri":"file:///home/me/diagram.png"}.',
-            "A text block renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images are all available; an image needs an http(s) or absolute file:// URL.",
+            'Media: an image, audio, video, PDF, or text file by URI. A local file needs an absolute file:// URI, e.g. {"uri":"file:///home/me/diagram.png"}.',
+            "Text: renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images all work; an image needs an http(s) or absolute file:// URL.",
           ].join("\n"),
           parameters: Type.Object({
             kind: Type.String({ description: "Block kind to create" }),
@@ -242,13 +256,13 @@ export async function POST(request: Request): Promise<Response> {
           },
         });
 
-        /** DuckDuckGo web search — no API key, so it's safe to grant by
-         *  default (see READ_ONLY_TOOLS). */
+        /** DuckDuckGo web search — no API key, so it's part of the default
+         *  tool set below same as everything else. */
         const webSearch = defineTool({
           name: "web_search",
           label: "Web Search",
           description:
-            "Search the web via DuckDuckGo and get back titles, URLs, and snippets. No API key required.",
+            "Use this when you need current information you don't already have. Returns titles, URLs, and snippets via DuckDuckGo. No API key required.",
           parameters: Type.Object({
             query: Type.String({ description: "Search query" }),
             limit: Type.Optional(
@@ -293,6 +307,11 @@ export async function POST(request: Request): Promise<Response> {
           noPromptTemplates: true,
           noThemes: true,
           noContextFiles: true,
+          // Appended, not a replacement: the SDK's own prompt already lists
+          // the enabled tools and default guidelines from `tools` below: this
+          // only adds what is specific to running as a weaver block instead
+          // of a repo-editing CLI agent.
+          appendSystemPrompt: [WEAVER_SYSTEM_PROMPT],
         });
         await resourceLoader.reload();
 
@@ -308,12 +327,11 @@ export async function POST(request: Request): Promise<Response> {
           name: "read",
           label: "Read",
           description: [
-            "Read a file and return its content, windowed either by line or by byte.",
-            "`path` may be a filesystem path (relative to the project root, or absolute),",
-            "or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
-            "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config) — it is not configured here.",
+            "Use this to check what's actually in a file, or to visit or fetch a webpage, instead of guessing. Windows the result by line or by byte.",
+            "`path` may be a filesystem path (relative to the project root, or absolute), or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
+            "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
             "Default is line mode: `offset`/`limit` window onto 1-indexed lines.",
-            "For content a line boundary can't usefully cut — one huge line, e.g. minified JS or a single long JSON blob — use `byteOffset`/`byteLength` (0-indexed) instead. Pass one pair or the other, never both.",
+            "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line a line boundary can't usefully cut, e.g. minified JS or a single long JSON blob. Pass one pair or the other, never both.",
           ].join("\n"),
           parameters: Type.Object({
             path: Type.String({
@@ -363,10 +381,105 @@ export async function POST(request: Request): Promise<Response> {
           },
         });
 
+        /**
+         * Replaces the SDK's own `write`: same name and `path`/`content`
+         * shape, but `path` may also be a `file://` or `ssh://` URI (no
+         * `http(s)://` — writing to an arbitrary URL has no general
+         * meaning, unlike reading one).
+         */
+        const write = defineTool({
+          name: "write",
+          label: "Write",
+          description: [
+            "Use this when the user wants a file created, or its content replaced outright. Creates the file if it doesn't exist, overwrites if it does, and creates parent directories automatically.",
+            "`path` may be a filesystem path (relative to the project root, or absolute), a file:// URI, or an ssh://[user@]host[:port]/path URI.",
+            "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
+          ].join("\n"),
+          parameters: Type.Object({
+            path: Type.String({
+              description: "Filesystem path, file://, or ssh:// URI",
+            }),
+            content: Type.String({ description: "Content to write" }),
+          }),
+          execute: async (_toolCallId, params) => {
+            try {
+              await writeSource(params.path, cwd, params.content);
+            } catch (error) {
+              throw new Error(
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: `wrote ${params.content.length} bytes to ${params.path}`,
+                },
+              ],
+              details: {},
+            };
+          },
+        });
+
+        /**
+         * Replaces the SDK's own `edit`: same name and `path`/`edits[]`
+         * shape (each edit an exact, unique `oldText`/`newText` pair,
+         * matched against the original file rather than incrementally), but
+         * `path` may also be a `file://` or `ssh://` URI. The tool's output
+         * is a unified diff rather than a success message, so the block
+         * this call produces renders the change instead of just naming it —
+         * `toolLanguage` in blocks/tool.ts always highlights an `edit`
+         * call's output as one, regardless of the file it touched.
+         */
+        const edit = defineTool({
+          name: "edit",
+          label: "Edit",
+          description: [
+            "Use this to change part of a file without rewriting the whole thing. Each edits[].oldText must match exactly once in the original file and must not overlap any other edit in the same call.",
+            "`path` may be a filesystem path (relative to the project root, or absolute), a file:// URI, or an ssh://[user@]host[:port]/path URI.",
+            "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
+            "For several changes in one file, pass multiple entries in edits[] in a single call rather than calling edit repeatedly.",
+          ].join("\n"),
+          parameters: Type.Object({
+            path: Type.String({
+              description: "Filesystem path, file://, or ssh:// URI",
+            }),
+            edits: Type.Array(
+              Type.Object({
+                oldText: Type.String({
+                  description:
+                    "Exact text for one targeted replacement. Must be unique in the original file and must not overlap any other edits[].oldText in the same call.",
+                }),
+                newText: Type.String({
+                  description: "Replacement text for this targeted edit.",
+                }),
+              }),
+              { description: "One or more targeted replacements" },
+            ),
+          }),
+          execute: async (_toolCallId, params) => {
+            let result;
+            try {
+              result = await editSource(params.path, cwd, params.edits);
+            } catch (error) {
+              throw new Error(
+                error instanceof Error ? error.message : String(error),
+              );
+            }
+            return {
+              content: [{ type: "text" as const, text: result.diff }],
+              details: {},
+            };
+          },
+        });
+
         const requested = body.tools.filter((name) =>
           (ALLOWED_TOOLS as readonly string[]).includes(name),
         );
-        const tools = requested.length > 0 ? requested : [...READ_ONLY_TOOLS];
+        // Every built-in tool by default: this is a single-operator
+        // harness, not a hosted service, so there is no untrusted third
+        // party to hold `bash`/`write`/`edit` back from.
+        const tools = requested.length > 0 ? requested : [...ALLOWED_TOOLS];
 
         const { session } = await createAgentSession({
           cwd,
@@ -376,7 +489,7 @@ export async function POST(request: Request): Promise<Response> {
           resourceLoader,
           sessionManager: SessionManager.inMemory(cwd),
           tools: [...tools, display.name],
-          customTools: [display, webSearch, read],
+          customTools: [display, webSearch, read, write, edit],
         });
 
         // Arguments arrive with the call and the result with its end, so they
