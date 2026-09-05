@@ -22,13 +22,23 @@ import type { AgentEvent, AgentRunRequest } from "@shared/agent-events.js";
 export function streamInference(
   request: AgentRunRequest,
   onEvent: (event: AgentEvent) => void,
-): Promise<void> {
+): { done: Promise<void>; cancel: () => void } {
   // `Promise.withResolvers` would read cleaner here, but this project's
   // shared tsconfig pins `lib` to `es2022`, which predates it.
-  return new Promise((resolve) => {
-    window.api.agent.run(request, (event) => {
-      onEvent(event);
-      if (event.type === "done" || event.type === "error") resolve();
-    });
+  let finish: () => void;
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
   });
+  const runCancel = window.api.agent.run(request, (event) => {
+    onEvent(event);
+    if (event.type === "done" || event.type === "error") finish();
+  });
+  // The preload's cancel unsubscribes its own IPC listener, so the main
+  // process's terminal event never reaches `onEvent` after an abort. Resolve
+  // the promise ourselves, or the engine would keep the run flagged forever.
+  const cancel = () => {
+    runCancel();
+    finish();
+  };
+  return { done, cancel };
 }

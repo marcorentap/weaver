@@ -67,6 +67,8 @@ export type LiveGraph = {
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
+  /** Abort the inference anchored at `id`, if one is in flight. */
+  abortRun: (id: BlockId) => boolean;
   /** Link an already-persisted new block into the tree at `at`. */
   addBlock: (block: Block, at: Position) => void;
   /** Relink a block, and everything nested under it, at `at`. That is the
@@ -100,6 +102,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     running: new Set(),
   };
   const listeners = new Set<() => void>();
+  /** Cancel handle per in-flight inference, so an abort can be aimed at a
+   *  specific block rather than being a global stop. */
+  const runningAborts = new Map<BlockId, () => void>();
 
   function emit() {
     for (const listener of listeners) listener();
@@ -290,7 +295,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     setRunning(id, true);
     try {
       let failure: string | null = null;
-      await streamInference(
+      const { done, cancel } = streamInference(
         { endpoint, apiKey, model, context, prompt, tools },
         (event) => {
           if (event.type === "text_delta") {
@@ -336,6 +341,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           }
         },
       );
+      runningAborts.set(id, cancel);
+      await done;
       if (failure !== null) append(TEXT_KIND, { text: failure }, "error");
     } catch (error) {
       append(
@@ -344,8 +351,16 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         "error",
       );
     } finally {
+      runningAborts.delete(id);
       setRunning(id, false);
     }
+  }
+
+  function abortRun(id: BlockId): boolean {
+    const abort = runningAborts.get(id);
+    if (!abort) return false;
+    abort();
+    return true;
   }
 
   return {
@@ -355,6 +370,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     },
     getSnapshot: () => snapshot,
     runHook,
+    abortRun,
     runInference,
     updateField(id, name, value) {
       const current = snapshot.graph.blocks[id];

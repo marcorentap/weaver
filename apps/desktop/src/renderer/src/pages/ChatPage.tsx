@@ -807,6 +807,24 @@ function ChatView({
         run: () => setVisualAnchor(null),
       },
       {
+        keys: ["ctrl+c"],
+        help: { keys: "ctrl+c", label: "Stop the nearest running inference" },
+        run: () => {
+          // A run's replies are siblings after the anchoring block, not
+          // descendants, so "up" means earlier in the rendered chain, not
+          // parents. Scan backward from the cursor for the closest block
+          // with a run in flight and stop it.
+          const { running } = engine.getSnapshot();
+          for (let i = index; i >= 0; i--) {
+            const target = rows[i]?.block;
+            if (target && running.has(target.id)) {
+              engine.abortRun(target.id);
+              break;
+            }
+          }
+        },
+      },
+      {
         keys: ["s"],
         help: { keys: "s", label: "Recent sessions" },
         run: () => setPopup({ kind: "sessions" }),
