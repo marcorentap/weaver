@@ -74,8 +74,8 @@ const MARKDOWN: Components = {
   a: (props) => (
     <a {...props} target="_blank" rel="noreferrer" className="underline" />
   ),
-  ul: (props) => <ul {...props} className="mt-2 list-disc pl-4" />,
-  ol: (props) => <ol {...props} className="mt-2 list-decimal pl-4" />,
+  ul: (props) => <ul {...props} className="mt-2 list-disc list-inside pl-4" />,
+  ol: (props) => <ol {...props} className="mt-2 list-decimal list-inside pl-4" />,
   li: (props) => <li {...props} className="mt-0.5" />,
   blockquote: (props) => (
     <blockquote
