@@ -31,6 +31,8 @@ import {
   type WebSearchResult,
 } from "../lib/web-search.js";
 import { schemaMessage } from "../lib/schema-error.js";
+import { MEDIA_KIND } from "../../shared/blocks/media.js";
+import { registerPendingMedia } from "../lib/pending-media.js";
 
 /** Config directory handed to the SDK. Sessions are in-memory and every
  *  discovery pass is disabled, so nothing is actually read from it. */
@@ -247,6 +249,13 @@ async function runAgent(
           kinds[params.kind]?.parse(state);
         } catch (error) {
           refuse(schemaMessage(error));
+        }
+        // A file this block points at is not in the store until the next
+        // autosave, so the media protocol would refuse it on the renderer's
+        // first request. Say "this is about to be shown" ahead of that so
+        // the fresh block displays without a reload (see pending-media.ts).
+        if (params.kind === MEDIA_KIND && typeof state.uri === "string") {
+          registerPendingMedia(state.uri);
         }
         emit({
           type: "block",

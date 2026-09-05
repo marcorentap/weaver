@@ -8,6 +8,7 @@ import { MEDIA_KIND, mediaInfo, parseMediaUri } from "../../shared/blocks/media.
 import { MEDIA_PROTOCOL } from "../../shared/ipc-contract.js";
 import { projectRoot } from "../lib/project.js";
 import { getStore } from "../lib/store.js";
+import { isPendingMedia } from "../lib/pending-media.js";
 
 /**
  * Privileges the `weaver-media://` scheme needs registered before
@@ -34,13 +35,14 @@ export const MEDIA_PROTOCOL_PRIVILEGES: CustomScheme = {
  * renderer page may not read, and remote text, which `fetch` may not read
  * without CORS headers on the origin.
  *
- * What may be served is either something a media block already points at, or
- * a file inside the project directory. The second rule exists because an
- * agent's output is live: it displays a file it just read and the block
- * showing it is only in the renderer until the next autosave, so a
- * store-reference check alone would blank every fresh block for a few
- * seconds. Neither rule serves anything outside the project it was not
- * already asked to.
+ * What may be served is either something a media block already points at, a
+ * file inside the project directory, or a URI the display tool has just
+ * handed to a live agent run (see `pending-media.ts`). The second and third
+ * rules exist because an agent's output is live: it displays a file it just
+ * read or wrote and the block showing it is only in the renderer until the
+ * next autosave, so a store-reference check alone would blank every fresh
+ * block for a few seconds, and the first and third rules only ever let
+ * through a URI a block or run already points at.
  */
 function isReferenced(uri: string): boolean {
   const store = getStore();
@@ -131,6 +133,7 @@ async function handleMediaRequest(request: Request): Promise<Response> {
   if (!url) return new Response("not a media uri", { status: 400 });
   const allowed =
     isReferenced(uri) ||
+    isPendingMedia(uri) ||
     (url.protocol === "file:" && inProject(fileURLToPath(url)));
   if (!allowed) {
     return new Response("uri is neither referenced nor in the project", {
