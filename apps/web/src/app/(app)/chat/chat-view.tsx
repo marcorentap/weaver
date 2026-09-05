@@ -31,7 +31,7 @@ import { scheduledHooks } from "@/lib/live-graph";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@/blocks/kinds";
 import { USER_KIND } from "@/blocks/user";
-import { TOOL_KIND } from "@/blocks/tool";
+import { TOOL_KIND, toolState } from "@/blocks/tool";
 import { MEDIA_KIND, mediaState } from "@/blocks/media";
 import {
   createChatBlock,
@@ -148,6 +148,23 @@ function originClass(block: Block): string {
     return "text-emerald-400";
   }
   return "";
+}
+
+/** What "Copy content" (`y`) means for a kind, or null for a kind with no
+ *  single string worth copying — e.g. a timer's config or an ISS block's
+ *  coordinates, which "Copy ID" already covers by way of the block itself. */
+function copyableContent(block: Block): { label: string; value: string } | null {
+  switch (block.kind) {
+    case TEXT_KIND:
+    case USER_KIND:
+      return { label: "Copy content", value: textState.parse(block.data).text };
+    case MEDIA_KIND:
+      return { label: "Copy URI", value: mediaState.parse(block.data).uri };
+    case TOOL_KIND:
+      return { label: "Copy output", value: toolState.parse(block.data).output };
+    default:
+      return null;
+  }
 }
 
 /** Tall content is clipped to this many lines until it is unhidden. Rows are
@@ -1010,27 +1027,22 @@ export function ChatView({
                 },
               ]
             : []),
-          ...(row.block.kind === TEXT_KIND || row.block.kind === MEDIA_KIND
-            ? [
-                {
-                  label:
-                    row.block.kind === TEXT_KIND ? "Copy content" : "Copy URI",
-                  key: "y",
-                  detail:
-                    row.block.kind === TEXT_KIND
-                      ? textState.parse(row.block.data).text
-                      : mediaState.parse(row.block.data).uri,
-                  run: () => {
-                    void navigator.clipboard.writeText(
-                      row.block.kind === TEXT_KIND
-                        ? textState.parse(row.block.data).text
-                        : mediaState.parse(row.block.data).uri,
-                    );
-                    setPopup(null);
+          ...(() => {
+            const content = copyableContent(row.block);
+            return content
+              ? [
+                  {
+                    label: content.label,
+                    key: "y",
+                    detail: content.value,
+                    run: () => {
+                      void navigator.clipboard.writeText(content.value);
+                      setPopup(null);
+                    },
                   },
-                },
-              ]
-            : []),
+                ]
+              : [];
+          })(),
           {
             label: "Copy ID",
             key: "c",
