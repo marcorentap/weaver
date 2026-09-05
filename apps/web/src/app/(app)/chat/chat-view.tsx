@@ -287,9 +287,6 @@ function BlockRow({
           {row.block.label}
         </span>
       </span>
-      <span className="w-16 shrink-0 text-muted-foreground">
-        {row.block.kind}
-      </span>
       <span className="flex min-w-0 flex-1 flex-col items-start">
         <div
           ref={content}
@@ -1419,6 +1416,7 @@ export function ChatView({
         <KeyMenu
           id="actions"
           title={row?.block.label ?? "Block"}
+          meta={row?.block.kind}
           items={actions}
           onClose={() => setPopup(null)}
         />

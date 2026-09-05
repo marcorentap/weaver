@@ -23,11 +23,13 @@ export type KeyMenuItem = {
 export function KeyMenu({
   id,
   title,
+  meta,
   items,
   onClose,
 }: {
   id: string;
   title: string;
+  meta?: string;
   items: KeyMenuItem[];
   onClose: () => void;
 }) {
@@ -81,7 +83,7 @@ export function KeyMenu({
   });
 
   return (
-    <ModalFrame label={title} title={title} onClose={onClose}>
+    <ModalFrame label={title} title={title} meta={meta} onClose={onClose}>
       <ul className="max-h-72 overflow-y-auto overscroll-contain py-1">
           {items.length === 0 ? (
             <li className="px-3 py-1 text-muted-foreground">Nothing here</li>

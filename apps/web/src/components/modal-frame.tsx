@@ -47,10 +47,10 @@ export function ModalFrame({
           size === "lg" ? "max-w-3xl" : "max-w-md",
         )}
       >
-        <div className="flex items-center gap-2 border-b px-3 py-1.5">
-          <span className="shrink-0 font-medium">{title}</span>
+        <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5">
+          <span className="min-w-0 truncate font-medium">{title}</span>
           {meta ? (
-            <span className="min-w-0 truncate text-muted-foreground">
+            <span className="shrink-0 truncate text-muted-foreground">
               {meta}
             </span>
           ) : null}
