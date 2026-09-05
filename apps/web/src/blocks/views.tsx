@@ -245,11 +245,16 @@ function MediaRow({ state }: { state: MediaState }) {
         />
       ) : null}
       {type === "text" ? (
+        // No fixed height or overflow of its own: the row's own clip (see
+        // BlockRow) is what caps this and drives the "truncated" marker,
+        // same as a text or tool block's content. A fixed box here would
+        // silently hide overflow the row-level clip never sees, so the
+        // marker would never show no matter how much longer the file is.
         <MediaText
           src={src}
           markdown={mime === "text/markdown"}
           language={languageForPath(mediaName(state.uri))}
-          className="pointer-events-none h-48 w-96 shrink-0 overflow-hidden"
+          className="pointer-events-none w-96 shrink-0"
         />
       ) : null}
       {type === "unknown" ? (
