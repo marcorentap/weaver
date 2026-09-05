@@ -120,12 +120,21 @@ const MARKDOWN: Components = {
 export function MarkdownText({
   text,
   className,
+  clips = false,
 }: {
   text: string;
   className?: string;
+  /** The row clips this box, so it clamps itself and hides its overflow. */
+  clips?: boolean;
 }) {
   return (
-    <div className={cn("min-w-0", className)}>
+    // `data-clip` lets the enclosing row read this wrapper's own scrollHeight
+    // to decide whether it is truncated, since the capped box hides the
+    // overflow the wrapper alone would have seen.
+    <div
+      data-clip={clips ? "1" : undefined}
+      className={cn("min-w-0", clips && "max-h-full overflow-hidden", className)}
+    >
       <Markdown
         components={MARKDOWN}
         remarkPlugins={REMARK_PLUGINS}

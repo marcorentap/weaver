@@ -209,19 +209,35 @@ function BlockRow({
     // Nothing to measure once the row is shown in full; the stale count is
     // simply not rendered, and a re-hide measures again.
     if (!box || shown) return;
-    const inner = box.firstElementChild;
     const measure = () => {
       const height = parseFloat(getComputedStyle(box).lineHeight) || 16;
-      const over = box.scrollHeight - box.clientHeight;
+      // The box itself reports growth it never clips (markdown, images).
+      let over = box.scrollHeight - box.clientHeight;
+      // A self-clipping content card (code wall, tool output) is capped at
+      // the row height so its border stays whole, hiding its overflow from
+      // the box; each such card reports its own hidden text.
+      for (const card of box.querySelectorAll<HTMLElement>("[data-clip]")) {
+        over = Math.max(over, card.scrollHeight - card.clientHeight);
+      }
       setClipped(over > 1 ? Math.max(1, Math.round(over / height)) : 0);
     };
     measure();
-    // The clip's own box never changes size, so the content inside it is what
-    // has to be watched. A media block's text arrives long after mount.
-    if (!inner) return;
     const observer = new ResizeObserver(measure);
-    observer.observe(inner);
-    return () => observer.disconnect();
+    observer.observe(box);
+    // A media file's text arrives long after mount, so watch for cards (and
+    // new content) and re-arm the observer against them.
+    const reobserve = () => {
+      for (const card of box.querySelectorAll<HTMLElement>("[data-clip]")) {
+        observer.observe(card);
+      }
+    };
+    reobserve();
+    const added = new MutationObserver(reobserve);
+    added.observe(box, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      added.disconnect();
+    };
   }, [shown]);
 
   return (

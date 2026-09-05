@@ -18,15 +18,19 @@ export function MediaText({
   markdown = false,
   language = null,
   className,
+  clips = false,
 }: {
   src: string;
   /** Render structure instead of the literal characters. */
   markdown?: boolean;
-  /** Highlight.js grammar name, from `languageForPath` on the original URI's
+  /** highlight.js grammar name, from `languageForPath` on the original URI's
    * path. `src` itself is the proxied `weaver-media://` fetch URL, which
    * has no file extension of its own to read. */
   language?: string | null;
   className?: string;
+  /** The row clips the text box, so it clamps itself and hides its overflow
+   *  instead of spilling past the row's clip. Previews leave it off. */
+  clips?: boolean;
 }) {
   const [load, setLoad] = useState<Load>({ status: "loading" });
 
@@ -66,9 +70,15 @@ export function MediaText({
   }
 
   // Overflow is the caller's call. Inline rows clip, previews scroll.
+  // `clips` marks a row render: hide our own overflow rather than leave it
+  // to the row clip, which was cutting the card's borders in half.
   if (markdown) {
     return (
-      <MarkdownText text={load.text} className={cn("border p-2", className)} />
+      <MarkdownText
+        text={load.text}
+        clips={clips}
+        className={cn("border p-2", className)}
+      />
     );
   }
 
@@ -76,7 +86,8 @@ export function MediaText({
     <CodeBlock
       code={load.text}
       language={language}
-      className={cn("border p-2", className)}
+      clips={clips}
+      className={cn("border p-2", clips && "overflow-hidden", className)}
     />
   );
 }

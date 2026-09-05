@@ -89,8 +89,12 @@ function ToolRow({ state }: { state: ToolState }) {
         <CodeBlock
           code={state.output}
           language={toolLanguage(state)}
+          clips
           className={cn(
-            "w-full overflow-x-auto border p-2",
+            // `flex-1 min-h-0` bounds the card to whatever the header above
+            // it leaves of the row, so its border closes instead of the row
+            // clip slashing through it.
+            "w-full flex-1 min-h-0 overflow-x-auto overflow-y-hidden border p-2",
             state.ok ? "text-muted-foreground" : "text-destructive",
           )}
         />
@@ -148,7 +152,7 @@ function MediaRow({ state }: { state: MediaState }) {
   const src = mediaSrc(state.uri);
 
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <span className="flex min-w-0 flex-1 items-center gap-2">
       {type === "image" ? (
         // A media block's URI is arbitrary, any host or a local file behind
         // the media protocol, so a fixed remotePatterns allowlist can't
@@ -193,16 +197,16 @@ function MediaRow({ state }: { state: MediaState }) {
         />
       ) : null}
       {type === "text" ? (
-        // No fixed height or overflow of its own. The row's own clip (see
-        // BlockRow) is what caps this and drives the "truncated" marker,
-        // same as a text or tool block's content. A fixed box here would
-        // silently hide overflow the row-level clip never sees, so the
-        // marker would never show no matter how much longer the file is.
+        // The text card fills the rest of the column and clips its own overflow
+        // at the row height (`clips`), so its border stays whole and long
+        // code lines truncate inside it. The row reads the card's hidden
+        // text through `data-clip` to drive the "truncated" marker.
         <MediaText
           src={src}
           markdown={mime === "text/markdown"}
           language={languageForPath(mediaName(state.uri))}
-          className="pointer-events-none w-96 shrink-0"
+          clips
+          className="pointer-events-none min-w-0 flex-1"
         />
       ) : null}
       {type === "unknown" ? (

@@ -16,17 +16,27 @@ export { languageForPath } from "@shared/languages.js";
 const lowlight = createLowlight(common);
 
 /**
- * Code, highlighted into `hljs-*` spans that globals.css colours. An unknown
- * or unregistered grammar still renders, as the plain text it came in as.
+ * CodeBlock, highlighted into `hljs-*` spans that globals.css colours. An
+ * unknown or unregistered grammar simply renders, just as the plain text it
+ * came in as.
+ *
+ * `clips` caps the box at the row's clip height and clips its own overflow
+ * (`max-h-full` — the parent is the bounded row), so the card's border stays
+ * whole and its content truncates inside it. Inline rows opt in so the
+ * row-level clip stops cutting through the card; previews leave it off and
+ * scroll.
  */
 export function CodeBlock({
   code,
   language,
   className,
+  clips = false,
 }: {
   code: string;
   language: string | null;
   className?: string;
+  /** The row clips this box, so it clamps itself and hides its overflow. */
+  clips?: boolean;
 }) {
   const { settings } = useSettings();
   // Wrapping keeps a long line on screen; not wrapping keeps its columns.
@@ -34,21 +44,24 @@ export function CodeBlock({
   // room is the caller's. An inline preview clips where a row scrolls.
   const classes = cn(
     "min-w-0",
+    clips && "max-h-full",
     settings.wordWrap === "on"
       ? "whitespace-pre-wrap break-words"
       : "whitespace-pre",
     className,
   );
-  if (!language || !lowlight.registered(language)) {
-    return <pre className={classes}>{code}</pre>;
-  }
+  // `data-clip` lets the enclosing row read this card's own scrollHeight
+  // to decide whether it is truncated, since the capped box hides the
+  // overflow the wrapper alone would have seen.
   return (
-    <pre className={classes}>
-      {toJsxRuntime(lowlight.highlight(language, code), {
-        Fragment,
-        jsx,
-        jsxs,
-      })}
+    <pre data-clip={clips ? "1" : undefined} className={classes}>
+      {!language || !lowlight.registered(language)
+        ? code
+        : toJsxRuntime(lowlight.highlight(language, code), {
+            Fragment,
+            jsx,
+            jsxs,
+          })}
     </pre>
   );
 }
