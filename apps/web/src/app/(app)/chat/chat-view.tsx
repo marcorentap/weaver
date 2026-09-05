@@ -800,6 +800,12 @@ export function ChatView({
           setVisualAnchor((current) => (current === null ? index : null)),
       },
       {
+        // Undocumented: this exists only to stop the browser's default
+        // page-down-on-space, not to bind a feature to the key.
+        keys: [" "],
+        run: () => {},
+      },
+      {
         keys: ["Escape"],
         help: { keys: "esc", label: "Cancel visual selection" },
         run: () => setVisualAnchor(null),
