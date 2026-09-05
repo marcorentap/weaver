@@ -3,6 +3,7 @@ import { app, BrowserWindow, protocol, shell } from "electron";
 import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-protocol.js";
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
+import { registerSettingsHandlers } from "./ipc/settings.js";
 
 // Must run before `app.whenReady()` — Electron only honors privilege
 // registration for schemes declared at module load time.
@@ -48,6 +49,7 @@ void app.whenReady().then(() => {
   registerMediaProtocol();
   registerChatHandlers();
   registerAgentHandlers();
+  registerSettingsHandlers();
 
   createWindow();
 

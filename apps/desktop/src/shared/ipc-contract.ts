@@ -77,6 +77,12 @@ export interface WeaverApi {
     deleteChatSession(graphId: string): Promise<MutationResult>;
     saveGraph(graphId: string, blocks: BlockInput[]): Promise<MutationResult>;
   };
+  settings: {
+    /** One opaque key/value row. `null` when the key has never been
+     *  written. */
+    get(key: string): Promise<string | null>;
+    set(key: string, value: string): Promise<void>;
+  };
   agent: {
     check(endpoint: string, apiKey: string): Promise<CheckResult>;
     /** Starts a run and subscribes `onEvent` to its events. Returns a

@@ -90,6 +90,10 @@ export type Store = {
    * rather than trying to express structural edits row by row.
    */
   writeGraph: (graphId: string, inputs: BlockInput[]) => void;
+  /** One opaque key/value row, unvalidated past being a string.
+   *  `undefined` means the key was never written. */
+  getSetting: (key: string) => string | undefined;
+  setSetting: (key: string, value: string) => void;
   close: () => void;
 };
 
@@ -160,6 +164,12 @@ export function openStore(options: StoreOptions = {}): Store {
       revision = block.revision + 1
   `);
   const deleteBlockStmt = db.prepare("DELETE FROM block WHERE id = ?");
+
+  const selectSetting = db.prepare("SELECT value FROM setting WHERE key = ?");
+  const upsertSetting = db.prepare(`
+    INSERT INTO setting (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
 
   const loadGraph = (graphId: string): BlockGraph => {
     const blocks: Record<BlockId, Block> = {};
@@ -253,6 +263,15 @@ export function openStore(options: StoreOptions = {}): Store {
         }
         touchGraph.run(now, graphId);
       }),
+
+    getSetting: (key) => {
+      const raw = selectSetting.get(key);
+      return raw === undefined
+        ? undefined
+        : z.object({ value: z.string() }).parse(raw).value;
+    },
+
+    setSetting: (key, value) => void upsertSetting.run(key, value),
 
     close: () => db.close(),
   };

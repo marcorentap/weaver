@@ -47,6 +47,12 @@ const api: WeaverApi = {
     saveGraph: (graphId, blocks: BlockInput[]) =>
       ipcRenderer.invoke("chat:saveGraph", graphId, blocks) as Promise<MutationResult>,
   },
+  settings: {
+    get: (key: string) =>
+      ipcRenderer.invoke("settings:get", key) as Promise<string | null>,
+    set: (key: string, value: string) =>
+      ipcRenderer.invoke("settings:set", key, value) as Promise<void>,
+  },
   agent: {
     check: (endpoint, apiKey) =>
       ipcRenderer.invoke("agent:check", endpoint, apiKey) as Promise<CheckResult>,

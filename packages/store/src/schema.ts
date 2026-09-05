@@ -19,7 +19,7 @@
  *   links point at each other, and immediate FK checks would reject whichever
  *   row happened to land first.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 CREATE TABLE graph (
@@ -45,4 +45,12 @@ CREATE TABLE block (
 ) STRICT;
 
 CREATE INDEX block_graph ON block(graph_id, created_at);
+
+-- Opaque renderer preferences (appearance, AI provider settings): one row
+-- per key, value is whatever JSON string the caller gave it. The store
+-- validates nothing about the value's shape; that's the renderer's concern.
+CREATE TABLE setting (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+) STRICT;
 `;

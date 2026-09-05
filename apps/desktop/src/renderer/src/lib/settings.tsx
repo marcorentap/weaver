@@ -8,10 +8,12 @@ import {
 } from "react";
 
 /**
- * Appearance preferences, persisted in localStorage. Backed by a tiny module
- * store read through `useSyncExternalStore`, so hydration reads the stored
- * value once and re-renders through the external snapshot — no setState-in-
- * effect and no SSR mismatch (the server snapshot is always the defaults).
+ * Appearance and AI provider preferences, persisted under one key in the
+ * main process's SQLite store via `window.api.settings`. Backed by a tiny
+ * module store read through `useSyncExternalStore`, so hydration reads the
+ * stored value once and re-renders through the external snapshot: no
+ * setState-in-effect, no SSR mismatch (the server snapshot is always the
+ * defaults).
  */
 export type LineNumberMode = "off" | "absolute" | "relative";
 
@@ -113,35 +115,39 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Read the stored value once, after the server snapshot has been painted.
+  // Defaults render first; `hydrated` flips once the IPC round trip
+  // resolves.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const stored = raw ? (JSON.parse(raw) as Partial<Settings>) : null;
-      commit({
-        settings: {
-          lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
-          wordWrap: stored?.wordWrap ?? DEFAULTS.wordWrap,
-          aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
-          aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
-          aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
-        },
-        hydrated: true,
-      });
-    } catch {
-      // Corrupt or unavailable storage: keep defaults, don't crash the shell.
-      commit({ settings: DEFAULTS, hydrated: true });
-    }
+    void (async () => {
+      try {
+        const raw = await window.api.settings.get(STORAGE_KEY);
+        const stored = raw ? (JSON.parse(raw) as Partial<Settings>) : null;
+        commit({
+          settings: {
+            lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
+            wordWrap: stored?.wordWrap ?? DEFAULTS.wordWrap,
+            aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
+            aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
+            aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
+          },
+          hydrated: true,
+        });
+      } catch {
+        // Corrupt stored JSON, or the main process unreachable: keep
+        // defaults, don't crash the shell.
+        commit({ settings: DEFAULTS, hydrated: true });
+      }
+    })();
   }, []);
 
-  /** Every setter writes one field the same way: merge, persist, commit. */
+  /** Every setter writes one field the same way: merge, commit, persist.
+   *  Committed before the IPC round trip resolves, same optimistic order as
+   *  every other mutation in the app, so a keystroke never waits on the
+   *  main process to render. */
   const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     const next = { ...current.settings, [key]: value };
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } catch {
-      // localStorage can throw when full or off; the in-memory value stands.
-    }
     commit({ settings: next, hydrated: current.hydrated });
+    void window.api.settings.set(STORAGE_KEY, JSON.stringify(next));
   }, []);
 
   const setLineNumber = useCallback(
