@@ -83,11 +83,18 @@ const MARKDOWN: Components = {
       className="mt-2 border-l pl-2 text-muted-foreground"
     />
   ),
-  // The class list matters here: `rehype-highlight` marks the element with
-  // `hljs` and its grammar, and replacing it would throw the highlighting
-  // away.
+  // `rehype-highlight` classes a fenced block's `<code>` (the "hljs" scope
+  // plus its detected language) — inline code never gets a className,
+  // which is what distinguishes the two here. Only inline code gets its
+  // own background/padding; a fenced block already has `Pre`'s border and
+  // padding, so re-applying both there just painted a second, redundant
+  // gray box behind the highlighted text — and stripping className for a
+  // fenced block would throw the highlighting away entirely.
   code: ({ className, ...props }) => (
-    <code {...props} className={cn(className, "bg-muted px-1")} />
+    <code
+      {...props}
+      className={cn(className, !className && "bg-muted px-1")}
+    />
   ),
   pre: Pre,
   hr: (props) => <hr {...props} className="my-3" />,
