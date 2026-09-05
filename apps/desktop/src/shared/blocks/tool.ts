@@ -17,7 +17,7 @@ export const toolState = z.object({
   name: z.string(),
   /** JSON-encoded arguments object, or "" for a call that took none. */
   args: z.string(),
-  /** Everything the call printed, verbatim — often multi-line and long. */
+  /** Everything the call printed, verbatim. Often multi-line and long. */
   output: z.string(),
   /** False when the tool reported an error, which makes `output` the failure
    *  rather than a result. */
@@ -60,8 +60,8 @@ export const toolKind = defineKind({
   schema: toolState,
   snapshot: (state) => {
     const call = `tool ${state.name}(${state.args}) ->`;
-    // A failed call is labelled as such: an agent reading this back must not
-    // mistake an error message for what the tool found.
+    // A failed call is labelled as such, so an agent reading this back does
+    // not mistake an error message for what the tool found.
     return state.ok
       ? `${call}\n${state.output}`
       : `${call} error:\n${state.output}`;

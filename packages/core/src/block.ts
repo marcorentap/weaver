@@ -10,9 +10,9 @@ export type BlockData = Record<string, unknown>;
  *
  * The graph is a binary tree used as a linked list of linked lists: `next`
  * is the following block at this level, `children` is the first block nested
- * inside this one. Both orderings are therefore explicit — nothing is
- * derived from timestamps, so nothing can disagree about what comes after
- * what — and nesting is independent of `kind`, so every kind may nest.
+* inside this one. Both orderings are explicit, not derived from timestamps,
+ * so nothing can disagree about what comes after what. Nesting is
+ * independent of `kind`, so every kind may nest.
  */
 export type Block<D extends BlockData = BlockData> = {
   id: BlockId;
@@ -52,7 +52,7 @@ export function getBlock(graph: BlockGraph, id: BlockId): Block {
 
 /**
  * Every id along one `next` chain, starting at `first`. Loops throw rather
- * than hang: a chain that eats itself is corruption, and a renderer walking
+ * than hang. A chain that eats itself is corruption, and a renderer walking
  * it would otherwise never return.
  */
 export function chainIds(graph: BlockGraph, first: BlockId | null): BlockId[] {
@@ -211,7 +211,7 @@ export function insertBlock(
 
 /**
  * Move `id`, and everything nested under it, to `at`. Moving a block into
- * its own subtree throws: that would cut the moved branch out of the tree
+ * its own subtree throws. That would cut the moved branch out of the tree
  * entirely, leaving a ring nothing can reach.
  */
 export function moveBlock(
@@ -247,9 +247,9 @@ export function removeBlock(graph: BlockGraph, id: BlockId): BlockGraph {
 
 /**
  * Throws unless the links really form a tree: every reachable link resolves,
- * no block is reached twice (which is also how a loop shows up), and no
+ * no block is reached twice, which is also how a loop shows up, and no
  * stored block is unreachable. An unreachable block is as bad as a dangling
- * link — it renders nowhere, yet keeps being saved forever.
+ * link. It renders nowhere, yet the store keeps saving it forever.
  */
 export function assertTree(graph: BlockGraph): void {
   const seen = new Set<BlockId>();
@@ -312,12 +312,12 @@ export function snapshotGraph(
 
 /**
  * Everything that appears before `id`, walking up from it: the ancestor
- * chain from the root down to `id`'s direct parent, and at every level —
- * starting at the top and ending at `id`'s own siblings — every block that
- * comes before the next step on the way down to `id`, snapshotted in full
- * and joined top-down. `id`'s own subtree, the blocks after it, and anything
- * after its ancestors are never included — this is a block's view of "the
- * graph so far", not the whole graph.
+ * chain from the root down to `id`'s direct parent, and at every level,
+ * starting at the top and ending at `id`'s own siblings, every block that
+ * comes before the next step on the way down to `id`. The pieces are
+ * snapshotted in full and joined top-down. `id`'s own subtree, the blocks
+ * after it, and anything after its ancestors are never included. This is a
+ * block's view of "the graph so far", not the whole graph.
  */
 export function snapshotAbove(
   graph: BlockGraph,

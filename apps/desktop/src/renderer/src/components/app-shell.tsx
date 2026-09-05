@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 /**
  * The shell's own header region. A page fills it through `ShellHeader`, so its
  * bar is a sibling of the tab bar rather than the first row of the scrolling
- * content: both stay put, and only what is between them moves.
+ * content. Both stay put, and only what is between them moves.
  */
 const headerSlot = createContext<HTMLElement | null>(null);
 
@@ -30,7 +30,7 @@ const TABS = [
 ] as const;
 
 /**
- * Normal mode: the bottom of the keymap stack, live everywhere. Page layers
+ * Normal mode is the bottom of the keymap stack, live everywhere. Page layers
  * stack on top of it, so tab switching keeps working inside a page's mode and
  * stops only inside a modal popup.
  */

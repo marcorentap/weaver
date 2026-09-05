@@ -7,13 +7,13 @@ import type { AgentEvent, AgentRunRequest } from "./agent-events.js";
  * privileged, stream-capable scheme in the main process (see
  * `src/main/ipc/media-protocol.ts`) so `<img>`/`<video>`/`<audio>` tags and
  * plain `fetch()` in the renderer can address local `file://` bytes and
- * remote text the same way the old `/api/media` route did — a renderer page
+ * remote text the same way the old `/api/media` route did. A renderer page
  * cannot read `file://` bytes or CORS-less remote text on its own.
  */
 export const MEDIA_PROTOCOL = "weaver-media";
 
 /** Builds the `weaver-media://` URL for a stored media URI (`file://…`,
- *  `http(s)://…`). Pure string building — the main process does the actual
+ *  `http(s)://…`). Pure string building. The main process does the actual
  *  allowlisting and byte-serving when the URL is requested. */
 export function mediaProtocolUrl(uri: string): string {
   return `${MEDIA_PROTOCOL}://local/${encodeURIComponent(uri)}`;
@@ -46,10 +46,10 @@ export interface CheckResult {
 
 /**
  * The renderer-facing API `contextBridge` exposes as `window.api`. Every
- * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair —
+ * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair,
  * the direct replacement for the old Next.js server actions. `agent.run` is
- * the one push-based channel: it starts a run and streams `AgentEvent`s back
- * until `done`/`error`, since `invoke`/`handle` alone cannot carry an
+ * the one push-based channel. It starts a run and streams `AgentEvent`s back
+ * until `done`/`error`, because `invoke`/`handle` alone cannot carry an
  * open-ended event stream.
  */
 export interface WeaverApi {

@@ -33,11 +33,11 @@ export const WORD_WRAP_OPTIONS = [
 type Settings = {
   /** Left-hand gutter beside each chat block. */
   lineNumber: LineNumberMode;
-  /** Whether preformatted content — code, and a tool's output — wraps
-   *  instead of scrolling sideways. */
+  /** Whether preformatted content, code and a tool's output, wraps instead
+   *  of scrolling sideways. */
   wordWrap: WordWrapMode;
-  /** Base URL of an OpenAI-completions provider, e.g. "http://seer:4000/v1"
-   *  — an agent block appends "/chat/completions" itself. */
+  /** Base URL of an OpenAI-completions provider, e.g. "http://seer:4000/v1".
+   *  An agent block appends "/chat/completions" itself. */
   aiEndpoint: string;
   /** Bearer token sent to `aiEndpoint`. */
   aiApiKey: string;
@@ -81,10 +81,10 @@ function getServerSnapshot(): Snapshot {
 }
 
 /**
- * The current settings outside a component — for plain functions called
+ * The current settings outside a component, for plain functions called
  * during the render of something that already subscribes (a kind's `fields`,
- * called from chat's own render). Not reactive on its own: a caller that
- * needs to re-render on a change must use `useSettings`.
+ * called from chat's own render). Not reactive on its own. Callers that need
+ * to re-render on a change must use `useSettings`.
  */
 export function readSettings(): Settings {
   return current.settings;
@@ -133,7 +133,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           hydrated: true,
         });
       } catch {
-        // Corrupt stored JSON, or the main process unreachable: keep
+        // Corrupt stored JSON, or the main process unreachable. Keep
         // defaults, don't crash the shell.
         commit({ settings: DEFAULTS, hydrated: true });
       }

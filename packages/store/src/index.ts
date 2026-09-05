@@ -58,7 +58,7 @@ export type GraphRecord = {
 
 /**
  * A block as callers supply it; `modifiedAt` and `revision` belong to the
- * store. Both links default to null — a lone block links to nothing. A
+ * store. Both links default to null, so a lone block links to nothing. A
  * `Block` already satisfies this, so a caller holding a graph writes
  * `Object.values(graph.blocks)` rather than re-mapping every field.
  */
@@ -83,11 +83,11 @@ export type Store = {
   deleteGraph: (id: string) => void;
   loadGraph: (graphId: string) => BlockGraph;
   /**
-   * Replace a graph's blocks with exactly `inputs`: rows absent from it are
-   * deleted. A tree is only ever valid as a whole — an insert rewrites its
-   * new neighbor's link, a delete rewrites its predecessor's — so callers
-   * apply core's tree operations to a loaded graph and write the result back,
-   * rather than trying to express structural edits row by row.
+   * Replace a graph's blocks with exactly `inputs`, deleting rows absent
+   * from it. A tree is only ever valid as a whole. An insert rewrites its
+   * new neighbor's link, a delete rewrites its predecessor's, so callers
+   * apply core's tree operations to a loaded graph and write the result
+   * back rather than trying to express structural edits row by row.
    */
   writeGraph: (graphId: string, inputs: BlockInput[]) => void;
   /** One opaque key/value row, unvalidated past being a string.
@@ -242,8 +242,8 @@ export function openStore(options: StoreOptions = {}): Store {
       transact(graphId, () => {
         const now = Date.now();
         const kept = new Set(inputs.map((input) => input.id));
-        // Stale rows go first: a block removed from the tree must not still
-        // be sitting there, unreachable, when the write is validated.
+        // Delete stale rows first. A block removed from the tree must not
+        // still sit there, unreachable, when the write is validated.
         for (const raw of selectBlockIds.all(graphId)) {
           const { id } = idRowSchema.parse(raw);
           if (!kept.has(id)) deleteBlockStmt.run(id);

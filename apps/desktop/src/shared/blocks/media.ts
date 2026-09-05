@@ -3,7 +3,7 @@ import { defineKind } from "@repo/core";
 import { languageForPath } from "../languages.js";
 
 /**
- * A media context block: one file, addressed by URI. What it *is* comes from
+ * A media context block, one file, addressed by URI. What it *is* comes from
  * the file extension rather than a hand-set type field, so the state stays the
  * minimum needed to reconstruct the block.
  */
@@ -85,10 +85,11 @@ export function mediaName(uri: string): string {
 /**
  * `EXTENSIONS` covers everything with a dedicated non-text viewer (images,
  * video, audio, pdf) plus a handful of always-plain-text extensions with
- * their own mime type. Anything else `languageForPath` recognises — every
- * source-code extension `CodeBlock` can highlight — is text too, just with
- * no more specific mime than `text/plain`; only that fallback keeps a `.ts`
- * or `.py` file from landing on "No viewer for this extension."
+ * their own mime type. Anything else `languageForPath` recognises is text
+ * too, just with no more specific mime than `text/plain`. That set is every
+ * source-code extension that `CodeBlock` can highlight, and this fallback
+ * is what keeps a `.ts` or `.py` file from landing on "No viewer for this
+ * extension."
  */
 export function mediaInfo(uri: string): { type: MediaType; mime: string } {
   const url = parseMediaUri(uri);

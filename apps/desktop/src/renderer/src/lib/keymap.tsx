@@ -25,7 +25,7 @@ export type KeyBinding = {
    */
   keys?: string[];
   /**
-   * A two-key sequence — `["Tab", "1"]` waits for `Tab` then `1` — instead of
+   * A two-key sequence, `["Tab", "1"]` waiting for `Tab` then `1`, instead of
    * a single key. A binding may declare `chord`, `keys`, or both.
    */
   chord?: readonly [string, string];
@@ -49,8 +49,7 @@ export type KeyLayer = {
   bindings: KeyBinding[];
   /**
    * Keys this layer documents but does not dispatch, because something else
-   * owns them — a text input, for instance, which the keymap deliberately
-   * ignores.
+   * owns them, like a text input, which the keymap deliberately ignores.
    */
   docs?: { keys: string; label: string }[];
 };
@@ -96,7 +95,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
   const [layers] = useState(() => new Map<string, KeyLayer>());
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // Vim-style count/chord state. Kept in refs, not state: they never affect
+  // Vim-style count/chord state. Kept in refs, not state. They never affect
   // what's on screen, only how the next keydown is interpreted, so there is
   // nothing here worth a render.
   const pendingCount = useRef("");
@@ -137,7 +136,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       if (isTextEntry(event.target)) return;
 
       // A modified key reaches only bindings that asked for it by name, and
-      // skips counts, chords and help entirely: `3ctrl+o` is not a thing,
+      // skips counts, chords and help entirely. `3ctrl+o` is not a thing,
       // and an unclaimed browser shortcut must keep working.
       if (event.ctrlKey || event.metaKey) {
         if (event.altKey) return;
@@ -155,7 +154,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       }
       if (event.altKey) return;
 
-      // Help is reserved: a modal layer must not be able to hide the only way
+      // The help key is reserved, so a modal layer cannot hide the only way
       // of finding out which keys it binds.
       if (event.key === HELP_KEY) {
         event.preventDefault();
@@ -169,7 +168,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       }
 
       // A pending leader (e.g. `Tab`) resolves against exactly this key, hit
-      // or miss — a mistyped chord cancels rather than falling through to an
+      // or miss. A mistyped chord cancels instead of falling through to an
       // unrelated single-key binding.
       if (pendingChord.current) {
         const leader = pendingChord.current;
@@ -190,8 +189,8 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Digits build a count prefix for the next binding — "3j" moves three
-      // rows, "12G" jumps to line 12 — vim-style. A leading zero can't start
+      // Digits build a count prefix for the next binding, vim-style. "3j"
+      // moves three rows, "12G" jumps to line 12. A leading zero can't start
       // one, so it is free to be an ordinary binding.
       if (
         /^[0-9]$/.test(event.key) &&
@@ -250,7 +249,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
     [layers, push, toggleHelp],
   );
 
-  // Only the layers a key can actually reach, matching dispatch: everything
+  // Only the layers a key can actually reach, matching dispatch, everything
   // from the innermost modal layer up.
   const reachable = stack
     .flatMap((id) => {

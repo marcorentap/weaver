@@ -4,13 +4,13 @@ import { kinds } from "../../shared/blocks/kinds.js";
 import { seedBlocks } from "./seed.js";
 
 // Electron's main process is a long-lived Node process, not a per-request
-// worker — a module-level cache here is the same one instance for the whole
+// worker. A module-level cache here is the same one instance for the whole
 // app's lifetime, not a dev-reload artifact to defend against.
 //
 // The cache is keyed by a per-evaluation nonce, because the store closes over
-// the kind registry it validates writes against: a handle kept across a reload
-// would keep validating against the kinds of a previous module instance, which
-// silently lets unvalidated state reach the database.
+// the kind registry it validates writes against. A handle kept across a
+// reload would keep validating against the kinds of a previous module
+// instance, which silently lets unvalidated state reach the database.
 const nonce = newId();
 
 // The cached value may predate this module's shape, so nothing about it is
@@ -24,7 +24,7 @@ const SEED_GRAPH = "dev";
 
 /**
  * An empty database has no session for chat to open, and the media protocol
- * serves only URIs a block references — so seeding is what makes a first run
+ * serves only URIs a block references. Seeding is what makes a first run
  * show anything at all.
  */
 function seeded(store: Store): Store {

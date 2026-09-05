@@ -30,29 +30,29 @@ export type BlockField = {
   name: string;
   label: string;
   value: string;
-  /** What an empty `value` actually resolves to at run time — shown in the
+  /** What an empty `value` actually resolves to at run time. Shown in the
    *  actions menu in place of a blank, and as the editor's placeholder, so
    *  an inherited default is visible instead of looking unset. */
   placeholder?: string;
-  /** Content rather than a label: the editor gives it a text area where
+  /** Content rather than a label. The editor gives it a text area where
    *  enter inserts a newline, and the row renders every line of it. */
   multiline?: boolean;
-  /** `value`'s real type once parsed — a `"number"` field round-trips
+  /** `value`'s real type once parsed. A `"number"` field round-trips
    *  through `Number()` before it's written; everything else stays a
    *  string as-is. */
   type?: "number";
 };
 
 /**
- * How a kind renders its row. The rail itself is uniform — every block is one
- * solid node — so a kind only decides what its state looks like as content.
+ * How a kind renders its row. The rail itself is uniform, one solid node per
+ * block, so a kind only decides what its state looks like as content.
  *
  * Each view parses `block.data` through its kind's schema, so components
  * receive complete state and never guess at missing fields. `nested` is the
- * number of blocks nested directly inside this one: a block only links to
+ * number of blocks nested directly inside this one. A block only links to
  * the first of them, so counting is the caller's job, not a view's.
  *
- * Rows are not limited to one line: this is a GUI, so a kind renders its
+ * Rows are not limited to one line. This is a GUI, so a kind renders its
  * content inline. Beyond that a kind may add editable `fields`, a full-size
  * `Preview`, and a `raw` URL the underlying file can be opened at.
  */
@@ -151,11 +151,11 @@ function ToolRow({ state }: { state: ToolState }) {
 }
 
 /**
- * A text-based block's "open in a new tab" — the same affordance a media
- * block gets from a real URL, built instead from the text already in the
- * block's own state. A `data:` URL would be simpler (no object to release),
- * but Chrome refuses to navigate a new tab to one from `window.open` even on
- * a real click; an object URL is not subject to that block. The caller is
+ * A text-based block's "open in a new tab", the same affordance a media
+ * block gets from a real URL, built from the text already in the block's own
+ * state. A `data:` URL would be simpler (no object to release), but Chrome
+ * refuses to navigate a new tab to one from `window.open` even on a real
+ * click. An object URL is not subject to that restriction. The caller is
  * responsible for revoking it once the tab has had a chance to load it.
  */
 function textBlobUrl(text: string): string {
@@ -201,8 +201,8 @@ function MediaRow({ state }: { state: MediaState }) {
   return (
     <span className="flex min-w-0 items-center gap-2">
       {type === "image" ? (
-        // A media block's URI is arbitrary — any host, or a local file behind
-        // the media protocol — so a fixed remotePatterns allowlist can't
+        // A media block's URI is arbitrary, any host or a local file behind
+        // the media protocol, so a fixed remotePatterns allowlist can't
         // serve it.
         // `max-height` alone leaves an intrinsically small image (an icon-size
         // svg, say) at its natural size instead of filling the row; a fixed
@@ -244,7 +244,7 @@ function MediaRow({ state }: { state: MediaState }) {
         />
       ) : null}
       {type === "text" ? (
-        // No fixed height or overflow of its own: the row's own clip (see
+        // No fixed height or overflow of its own. The row's own clip (see
         // BlockRow) is what caps this and drives the "truncated" marker,
         // same as a text or tool block's content. A fixed box here would
         // silently hide overflow the row-level clip never sees, so the
@@ -318,7 +318,7 @@ function MediaPreview({ state }: { state: MediaState }) {
 
 export const blockViews: Record<string, BlockView> = {
   [TEXT_KIND]: {
-    // A text block is content, not a label: it renders as markdown, so an
+    // A text block is content, not a label. It renders as markdown, so an
     // agent's prose, a table or a fenced code block reads as itself rather
     // than as its source characters.
     Row: ({ block }) => (
@@ -446,7 +446,7 @@ export const fallbackView: BlockView = {
 
 /**
  * A block whose data does not satisfy its kind. Views parse strictly, so one
- * malformed block would otherwise throw through the whole page — and the store
+ * malformed block would otherwise throw through the whole page. The store
  * only validates kinds it knows about, so this state is reachable.
  *
  * Its fields come from the raw data rather than parsed state, which is what
@@ -472,7 +472,7 @@ function invalidView(message: string): BlockView {
 const resolved = new WeakMap<Block, BlockView>();
 
 /**
- * The view a block renders through: its kind's, unless its state fails that
+ * The view a block renders through. Its kind's, unless its state fails that
  * kind's schema.
  */
 export function viewFor(block: Block): BlockView {

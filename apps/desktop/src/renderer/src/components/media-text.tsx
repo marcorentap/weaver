@@ -10,7 +10,7 @@ type Load =
 
 /**
  * A text file's contents, fetched lazily. Text blocks are the one media type
- * with nothing to hand a DOM element: the bytes have to be read before there
+ * with nothing to hand a DOM element. The bytes have to be read before there
  * is anything to show, so the row starts empty and fills in.
  */
 export function MediaText({
@@ -23,7 +23,7 @@ export function MediaText({
   /** Render structure instead of the literal characters. */
   markdown?: boolean;
   /** Highlight.js grammar name, from `languageForPath` on the original URI's
-   * path — `src` itself is the proxied `weaver-media://` fetch URL, which
+   * path. `src` itself is the proxied `weaver-media://` fetch URL, which
    * has no file extension of its own to read. */
   language?: string | null;
   className?: string;
@@ -35,7 +35,7 @@ export function MediaText({
 
     void (async () => {
       try {
-        // Reset inside the fetch, not on the way into the effect: the previous
+        // Reset inside the fetch, not on the way into the effect. The previous
         // file stays on screen until the new one is actually being read.
         setLoad({ status: "loading" });
         const response = await fetch(src, { signal: abort.signal });
@@ -65,7 +65,7 @@ export function MediaText({
     );
   }
 
-  // Overflow is the caller's call: inline rows clip, previews scroll.
+  // Overflow is the caller's call. Inline rows clip, previews scroll.
   if (markdown) {
     return (
       <MarkdownText text={load.text} className={cn("border p-2", className)} />

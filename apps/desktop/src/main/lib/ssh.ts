@@ -2,18 +2,19 @@ import { spawn } from "node:child_process";
 
 /**
  * Shared `ssh://` plumbing for the agent's `read`/`write`/`edit` tools. Auth,
- * host keys and `~/.ssh/config` aliases are entirely the operator's concern —
- * set up externally, same as a person would use `ssh` from a terminal — so
- * this only shells out to the `ssh` binary and reads or writes what it does.
+ * host keys and `~/.ssh/config` aliases are entirely the operator's concern:
+ * they are set up externally, same as a person would use `ssh` from a
+ * terminal. This only shells out to the `ssh` binary and reads or writes
+ * what it does.
  */
 
 /** Single-quotes a value for the POSIX shell `ssh` hands the remote command
- *  to — the only quoting `ssh`'s argv-to-command-string join needs. */
+ *  to. That is the only quoting `ssh`'s argv-to-command-string join needs. */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-/** The path component of an `ssh://` URI, decoded — every caller needs one,
+/** The path component of an `ssh://` URI, decoded. Every caller needs one,
  *  and a URI with none is not pointed at anything. */
 export function sshPath(url: URL): string {
   if (url.pathname.length <= 1) {
@@ -24,9 +25,9 @@ export function sshPath(url: URL): string {
 
 /**
  * Runs `remoteCommand` over `ssh` and returns what it printed on stdout.
- * `stdin`, if given, is written to the remote command's stdin and closed —
- * how `write`/`edit` get file content there without embedding it in the
- * command line.
+ * `stdin`, if given, is written to the remote command's stdin and closed.
+ * That is how `write`/`edit` get file content there without embedding it in
+ * the command line.
  */
 export async function runSsh(
   url: URL,

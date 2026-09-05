@@ -1,12 +1,12 @@
 /**
  * An absolute provider URL for `path` under `endpoint`, or null when
  * `endpoint` is not a usable base URL. Shared by everything that talks to a
- * provider — the agent proxy, the settings check — so "what counts as a
- * valid endpoint" is answered in exactly one place, and the browser can ask
- * the same question before it ever sends a request.
+ * provider, such as the agent proxy and the settings check, so "what counts
+ * as a valid endpoint" is answered in exactly one place, and the browser can
+ * ask the same question before it ever sends a request.
  *
- * Only http(s) is accepted: a `file:` or `data:` base parses fine as a URL
- * yet is never a chat-completions provider.
+ * Only http(s) is accepted. A `file:` or `data:` base parses fine as a URL,
+ * but it is never a chat-completions provider.
  */
 export function providerUrl(endpoint: string, path: string): string | null {
   const trimmed = endpoint.trim();

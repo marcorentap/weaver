@@ -1,10 +1,10 @@
 /**
- * Web search via DuckDuckGo's no-JS HTML frontend — no API key, no
- * dependency on an auth broker or credential store. Modeled on omp's
+ * Web search via DuckDuckGo's no-JS HTML frontend. No API key, no dependency
+ * on an auth broker or credential store. Modeled on omp's
  * `DuckDuckGoProvider` (packages/coding-agent/src/web/search/providers/duckduckgo.ts
  * in github.com/can1357/oh-my-pi), trimmed to what a single stateless request
- * needs: locale/pagination handling that provider carries for its own
- * multi-provider fallback chain is not worth reproducing here.
+ * needs. The locale and pagination handling that provider carries for its
+ * own multi-provider fallback chain is not worth reproducing here.
  */
 
 const DUCKDUCKGO_HTML_URL = "https://html.duckduckgo.com/html/";
@@ -116,7 +116,7 @@ function isAnomalyResponse(html: string): boolean {
 /**
  * Run a DuckDuckGo web search and return parsed results. Throws with a
  * user-facing message on transport failure, HTTP error, or bot-detection
- * block — callers surface that as the tool's failure text.
+ * block. Callers surface that as the tool's failure text.
  */
 export async function searchDuckDuckGo(
   query: string,

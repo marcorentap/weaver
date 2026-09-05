@@ -7,13 +7,12 @@ import { runSsh, shellQuote, sshPath } from "./ssh.js";
 const SCHEMES = new Set(["file:", "http:", "https:", "ssh:"]);
 
 /** Default read cap, and the ceiling an explicit `byteLength` is clamped
- *  to — plenty for a tool result, not enough to flood the model with a
- *  whole log file. */
+ *  to. Plenty for a tool result; a whole log file would flood the model. */
 const MAX_BYTES = 256 * 1024;
 
 function parseSource(source: string): URL | null {
   // A bare filesystem path is legal input and is not a URI, so this only
-  // treats `source` as one when it actually looks like one — otherwise
+  // treats `source` as one when it actually looks like one. Otherwise
   // `new URL` on a relative path like "src/foo.ts" throws or, worse, on an
   // absolute one like "/etc/hosts" silently resolves against `file://`.
   if (!source.includes("://")) return null;
@@ -40,8 +39,8 @@ function resolveBackend(source: string, cwd: string): Backend {
   return { kind: "http", url };
 }
 
-/** Reads exactly `[start, start + length)`, or fewer bytes at real EOF —
- *  never more, so a caller can tell "hit the end of the file" apart from
+/** Reads exactly `[start, start + length)`, or fewer bytes at real EOF.
+ *  Never more, so a caller can tell "hit the end of the file" apart from
  *  "there is more after what I asked for" just by comparing lengths. */
 async function readLocalRange(path: string, start: number, length: number): Promise<Buffer> {
   const handle = await open(path, "r");
@@ -63,7 +62,7 @@ async function readHttpRange(url: URL, start: number, length: number): Promise<B
   const buf = Buffer.from(await res.arrayBuffer());
   // A server that ignores `Range` sends the whole body from byte 0 with a
   // plain 200; slice locally rather than trust the header was honoured. A
-  // huge such resource is still downloaded whole either way — a pre-existing
+  // huge such resource is still downloaded whole either way. A pre-existing
   // limitation of reading arbitrary URLs, not one this adds.
   return res.status === 206 ? buf : buf.subarray(start, start + length);
 }
@@ -97,9 +96,9 @@ export type ReadRange = {
   /** Max lines to read. */
   limit?: number;
   /** 0-indexed byte to start at. Content where lines are not a useful
-   *  unit — a single huge line, e.g. minified JS or one long JSON blob —
-   *  needs this and `byteLength` instead of `offset`/`limit`. Mutually
-   *  exclusive with `offset`/`limit`. */
+   *  unit, such as a single huge line of minified JS or one long JSON
+   *  blob, needs this and `byteLength` instead of `offset`/`limit`.
+   *  Mutually exclusive with `offset`/`limit`. */
   byteOffset?: number;
   /** Max bytes to read starting at `byteOffset`; clamped to `MAX_BYTES`. */
   byteLength?: number;
@@ -107,7 +106,7 @@ export type ReadRange = {
 
 export type ReadSourceResult = {
   content: string;
-  /** Whether there is more content past what `content` holds — past
+  /** Whether there is more content past what `content` holds: past
    *  `endLine`/`totalLines` in line mode, past `byteEnd` in byte mode. */
   truncated: boolean;
   /** Set in line mode (the default): `offset`/`limit` windowed onto lines
@@ -121,11 +120,11 @@ export type ReadSourceResult = {
 };
 
 /**
- * Reads `source` — a bare filesystem path, or a `file://`, `http(s)://` or
- * `ssh://` URI — windowed either by line (`offset`/`limit`, the default) or
- * by byte (`byteOffset`/`byteLength`, for content a line boundary can't
- * usefully cut). `cwd` anchors a bare relative path; every URI form is
- * self-contained.
+ * Reads `source`: a bare filesystem path, or a `file://`, `http(s)://` or
+ * `ssh://` URI. The read is windowed either by line (`offset`/`limit`, the
+ * default) or by byte (`byteOffset`/`byteLength`, for content a line
+ * boundary can't usefully cut). `cwd` anchors a bare relative path; every
+ * URI form is self-contained.
  */
 export async function readSource(
   source: string,

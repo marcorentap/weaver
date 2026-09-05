@@ -18,7 +18,7 @@ export const textKind = defineKind({
 /**
  * A block whose entire content is its children, so its own state is empty.
  * Nesting lives on `Block.children`, not in state, because every kind may
- * nest — not just this one.
+ * nest, not just this one.
  */
 export const groupState = z.object({});
 export type GroupState = z.infer<typeof groupState>;

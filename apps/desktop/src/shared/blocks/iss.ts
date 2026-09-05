@@ -9,7 +9,7 @@ export const issLocationState = z.object({
   longitude: z.number().nullable(),
   /** Epoch ms the position itself is timestamped at, per the API. */
   timestamp: z.number().nullable(),
-  /** Epoch ms of the last successful fetch — distinct from `timestamp`. */
+  /** Epoch ms of the last successful fetch, distinct from `timestamp`. */
   fetchedAt: z.number().nullable(),
   /** Message from the last failed fetch, if any; cleared on success. */
   error: z.string().nullable(),

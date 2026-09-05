@@ -92,11 +92,11 @@ function containerOf(rows: Row[], row: Row | undefined): BlockId | null {
 
 /**
  * Where a new block goes for the gap before `rows[gap]` (`gap === rows.length`
- * means after the last row): right after the row above the gap, in that
- * row's own chain. So inserting right after a group's last child nests the
- * new block there too rather than popping back out to top-level, and
+ * means after the last row). It lands right after the row above the gap, in
+ * that row's own chain. So inserting right after a group's last child nests
+ * the new block there too rather than popping back out to top-level, and
  * inserting after an unfolded group appends after the whole group rather
- * than into it. With no row above — the gap at the very top — it becomes the
+ * than into it. With no row above, the gap at the very top, it becomes the
  * first block of whatever chain the row below belongs to.
  */
 function computeInsertion(rows: Row[], gap: number): Position {
@@ -108,8 +108,8 @@ function computeInsertion(rows: Row[], gap: number): Position {
 }
 
 /** A hover-revealed icon between rows (and at the very top/bottom of the
- *  list) that inserts a new block at that exact gap. Zero height in flow —
- *  the button overlays the seam between rows instead of pushing them
+ *  list) that inserts a new block at that exact gap. Zero height in flow.
+ *  The button overlays the seam between rows instead of pushing them
  *  apart, so nothing shifts just because a gap exists. */
 function InsertGap({ onClick }: { onClick: () => void }) {
   return (
@@ -126,10 +126,10 @@ function InsertGap({ onClick }: { onClick: () => void }) {
   );
 }
 
-/** Label color by who produced a block: a person typing it (`user` kind), or
- *  an inference run appending it after the block that asked — a reply's own
- *  prose, or a tool call it made along the way. Anything else (a metric, a
- *  media block someone added by hand) stays uncolored. */
+/** Label color by who produced a block. A person typing it (`user` kind),
+ *  or an inference run appending it after the block that asked, a reply's
+ *  own prose or a tool call it made along the way. Anything else (a
+ *  metric, a media block someone added by hand) stays uncolored. */
 function originClass(block: Block): string {
   if (block.label === "error") return "text-destructive";
   if (block.kind === USER_KIND) return "text-blue-400";
@@ -140,7 +140,7 @@ function originClass(block: Block): string {
 }
 
 /** What "Copy content" (`y`) means for a kind, or null for a kind with no
- *  single string worth copying — e.g. a timer's config or an ISS block's
+ *  single string worth copying, e.g. a timer's config or an ISS block's
  *  coordinates, which "Copy ID" already covers by way of the block itself. */
 function copyableContent(block: Block): { label: string; value: string } | null {
   switch (block.kind) {
@@ -186,17 +186,17 @@ function BlockRow({
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
   shown: boolean;
-  /** Click anywhere on the row: select it and open its actions, like `enter`. */
+  /** Click anywhere on the row to select it and open its actions, like `enter`. */
   onSelect: () => void;
-  /** Click the chevron: fold or unfold, without opening actions. */
+  /** Click the chevron to fold or unfold, without opening actions. */
   onToggle: () => void;
-  /** Click the "more lines" marker: unhide the rest of this row. */
+  /** Click the "more lines" marker to unhide the rest of this row. */
   onShow: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  /** Lines the clip is currently hiding, measured rather than guessed —
-   *  markdown, images and fetched text all settle after the first render. */
+  /** Lines the clip is currently hiding, measured rather than guessed.
+   *  Markdown, images and fetched text all settle after the first render. */
   const [clipped, setClipped] = useState(0);
   const view = viewFor(row.block);
 
@@ -217,7 +217,7 @@ function BlockRow({
     };
     measure();
     // The clip's own box never changes size, so the content inside it is what
-    // has to be watched: a media block's text arrives long after mount.
+    // has to be watched. A media block's text arrives long after mount.
     if (!inner) return;
     const observer = new ResizeObserver(measure);
     observer.observe(inner);
@@ -302,11 +302,11 @@ function BlockRow({
 /**
  * A kind's full-size presentation, as its own mode.
  *
- * If the preview contains a player, it takes DOM focus: the keymap only
+ * If the preview contains a player, it takes DOM focus. The keymap only
  * preventDefaults keys a layer binds, so space, arrows and volume keys reach
  * the element natively. Chat's own arrows are unreachable anyway while this
- * modal layer is on top — which is why focus is scoped to here and inline row
- * players are left unfocused.
+ * modal layer is on top, which is why focus is scoped to here and inline
+ * row players are left unfocused.
  */
 function PreviewModal({
   block,
@@ -315,10 +315,10 @@ function PreviewModal({
   children,
 }: {
   block: Block;
-  /** Computes the underlying file's URL, if the kind exposes one — lazy so a
+  /** Computes the underlying file's URL, if the kind exposes one. Lazy, so a
    * kind whose "file" is really an object URL (built fresh from a block's
    * own text, not a real address) only creates one when actually opened,
-   * instead of leaking one on every re-render this modal stays open for. */
+   * instead of leaking one on every render this modal stays open for. */
   raw: (() => string) | undefined;
   onClose: () => void;
   children: ReactNode;
@@ -333,7 +333,7 @@ function PreviewModal({
     setPlayer(true);
   }, []);
 
-  /** One line of vim-style scroll, in pixels — a reasonable step at the
+  /** One line of vim-style scroll, in pixels. A reasonable step at the
    * rail's text-xs scale rather than a measured line height, since the
    * scrollable element varies (a `<pre>` for code, a markdown `<div>`). */
   const scrollBy = (lines: number) => {
@@ -353,7 +353,7 @@ function PreviewModal({
               run: () => {
                 const url = raw();
                 window.open(url, "_blank", "noopener,noreferrer");
-                // Object URLs only: give the new tab a moment to load the
+                // Object URLs only. Give the new tab a moment to load the
                 // blob before releasing it. A real URL has nothing to
                 // revoke.
                 if (url.startsWith("blob:")) {
@@ -363,8 +363,8 @@ function PreviewModal({
             },
           ]
         : []),
-      // No-ops when nothing in the preview scrolls (an image, a player) —
-      // player already owns arrow keys, so j/k stay clear for that case too.
+      // No-ops when nothing in the preview scrolls (an image, a player).
+      // The player already owns arrow keys, so j/k stay clear too.
       {
         keys: ["j"],
         help: { keys: "j / k", label: "Scroll" },
@@ -405,7 +405,7 @@ function PreviewModal({
   );
 }
 
-/** Closes over a view's `raw` getter without a non-null assertion: the
+/** Closes over a view's `raw` getter without a non-null assertion. The
  * `view.raw` truthy check and the call both happen inside one function,
  * where TypeScript narrows it, instead of across a JSX ternary and a
  * separately-created arrow function where it cannot. */
@@ -427,7 +427,7 @@ function ChatView({
   session: { id: string; name: string } | null;
   initialGraph: BlockGraph;
   /** Re-fetches the sessions list (and the current session's own name)
-   *  after a mutation that changes them in place without navigating — a
+   *  after a mutation that changes them in place without navigating, a
    *  rename. Create/delete already navigate to a different `?session=`,
    *  which `ChatPage`'s own effect picks up and reloads for on its own, so
    *  those two never need to call this. */
@@ -437,7 +437,7 @@ function ChatView({
   const [, startTransition] = useTransition();
   const [cursor, setCursor] = useState(0);
   /** Whether the cursor sat on the last row as of the last completed
-   *  render, and how many rows there were then — so an append (a streaming
+   *  render, and how many rows there were then. An append (a streaming
    *  inference reply, a hook's own result) can tell "was following the
    *  tail" from "was parked somewhere else" and only auto-advance the
    *  former. */
@@ -451,7 +451,7 @@ function ChatView({
     () => new Set(),
   );
   /** Rows whose clipped content has been unhidden, and the override that
-   *  unhides every row at once — `ctrl+o`. */
+   *  unhides every row at once, `ctrl+o`. */
   const [shown, setShown] = useState<ReadonlySet<BlockId>>(() => new Set());
   const [showEverything, setShowEverything] = useState(false);
   const [popup, setPopup] = useState<Popup>(null);
@@ -461,7 +461,7 @@ function ChatView({
    *  label are; `pendingKind` is the kind picked in the step after. */
   const [creating, setCreating] = useState<Position | null>(null);
   const [pendingKind, setPendingKind] = useState<string | null>(null);
-  /** A block to select once it appears in `rows` — it may not exist there
+  /** A block to select once it appears in `rows`. It may not exist there
    *  the same render it lands, if its container was not already expanded.
    *  `openActions` distinguishes "just created, show its actions" (create
    *  flow) from "just moved, only follow the cursor" (move/nest keys). */
@@ -471,14 +471,14 @@ function ChatView({
   const { settings, hydrated } = useSettings();
 
   // ---- Live graph state --------------------------------------------------
-  // The client owns the graph from here on: a hook (a timer's tick, an ISS
-  // fetch, an inference run — this file has no idea which) mutates it and
+  // The client owns the graph from here on. A hook (a timer's tick, an ISS
+  // fetch, an inference run, this file has no idea which) mutates it and
   // notifies subscribers immediately, so it lands on screen the instant it
   // resolves, not on whatever cadence a poll happened to run at. The engine
   // itself lives in a module-scope registry keyed by session id, not in
-  // `useState`: this component (and everything under `/chat`) unmounts on a
-  // plain tab switch, and a `useState` engine — along with any run still
-  // streaming into it — would go with it. `initialGraph` only seeds a
+  // `useState`. This component (and everything under `/chat`) unmounts on a
+  // plain tab switch, and a `useState` engine, along with any run still
+  // streaming into it, would go with it. `initialGraph` only seeds a
   // session's engine the first time it is asked for; every later mount
   // reattaches to whatever the registry already has.
   const engine = getLiveGraph(session?.id ?? "none", initialGraph);
@@ -490,8 +490,8 @@ function ChatView({
   const liveNodes = chatNodes(graph);
 
   // One real `setInterval` per block asking for one, at its own configured
-  // interval — this is what makes an update land within a millisecond of
-  // when it fires, instead of at the next poll. Entirely kind-agnostic:
+  // interval. This is what makes an update land within a millisecond of
+  // when it fires, instead of at the next poll. Entirely kind-agnostic.
   // `scheduledHooks` just asks every block's kind whether it wants this,
   // the same way for all of them. Restarts (all of them, cheap for a
   // handful) whenever any schedule actually changes.
@@ -515,7 +515,7 @@ function ChatView({
   }, [scheduleSignature, engine]);
 
   // ---- Persistence: autosave + manual save -------------------------------
-  // A fixed 3s cadence, not a debounce: a timer ticking every 2s would keep
+  // A fixed 3s cadence, not a debounce. A timer ticking every 2s would keep
   // resetting a debounce and never actually save. `performSaveRef` lets that
   // interval stay mounted for the component's life while always calling the
   // latest closure (current `session`, current engine).
@@ -546,8 +546,8 @@ function ChatView({
   }, [engine]);
 
   const rows = flatten(liveNodes, expanded);
-  // Follows a block to its new row the instant it shows up in `rows` —
-  // immediately for a top-level block, one render later for a nested one,
+  // Follows a block to its new row the instant it shows up in `rows`.
+  // Immediately for a top-level block, one render later for a nested one,
   // since expanding its container also happens during this same "adjust
   // state while rendering" pass. Guarded by clearing `pendingFocus` once
   // applied, so this cannot loop.
@@ -564,8 +564,8 @@ function ChatView({
   const row = rows[index];
   const view = row ? viewFor(row.block) : null;
 
-  // The selection spans the anchor to the live cursor, inclusive of both —
-  // clamped in case a block vanished (deleted, container collapsed) since
+  // The selection spans the anchor to the live cursor, inclusive of both.
+  // Clamped in case a block vanished (deleted, container collapsed) since
   // the anchor was dropped.
   const selectionRange: [number, number] | null =
     visualAnchor === null
@@ -580,11 +580,11 @@ function ChatView({
       ? [row]
       : [];
 
-  // Rides the tail as it grows: a block appending (streaming inference, a
+  // Rides the tail as it grows. A block appending (streaming inference, a
   // hook's own result) while the cursor sat on the last row moves the
   // cursor along to the new last row, rather than stranding it on what is
   // now a mid-list row. Refs, not render-phase reads, since the compiler
-  // requires render to stay pure — both effects run after commit instead.
+  // requires render to stay pure. Both effects run after commit instead.
   useEffect(() => {
     if (rows.length > lastRowCountRef.current && wasAtEndRef.current) {
       setCursor(rows.length - 1);
@@ -598,7 +598,7 @@ function ChatView({
   /** Whether the gutter column is live at all (hidden before hydration so the
    *  stored preference never flashes in with the wrong mode). */
   const gutter = hydrated && settings.lineNumber !== "off";
-  /** Number for a row: absolute is its 1-based position; relative is its
+  /** Number for a row. Absolute is its 1-based position; relative is its
    *  distance from the cursor, except the selected row, which reads its own
    *  1-based position instead of the useless anchor `0`. */
   const lineNumber = (i: number): number | null =>
@@ -613,7 +613,7 @@ function ChatView({
     setCursor(Math.min(Math.max(index + delta, 0), rows.length - 1));
   };
 
-  /** Jumps to the 1-based line number shown in the gutter — vim's `G`,
+  /** Jumps to the 1-based line number shown in the gutter, vim's `G`,
    *  clamped to the row range instead of no-oping past either end. */
   const jump = (line: number) => {
     if (rows.length === 0) return;
@@ -650,7 +650,7 @@ function ChatView({
     setPopup({ kind: "createKind" });
   };
 
-  /** Starts the "new user block" flow for the gap before `rows[gap]` — same
+  /** Starts the "new user block" flow for the gap before `rows[gap]`. Same
    *  gap semantics as `beginCreate`, fixed to `USER_KIND` and skipping the
    *  kind picker, since `i`/`I` mean "write a message", not "pick a kind". */
   const beginCreateUser = (gap: number) => {
@@ -659,12 +659,12 @@ function ChatView({
     setPopup({ kind: "createUser" });
   };
 
-  /** The chain a container holds, in order — the top-level chain for null. */
+  /** The chain a container holds, in order. The top-level chain for null. */
   const siblingsOf = (containerId: BlockId | null) =>
     containerId === null ? topLevelBlockIds(graph) : childIds(graph, containerId);
 
   /** Relinks `id` at `at` locally and on the server, then follows it to its
-   *  new row. The single path behind `J`/`K` and `>`/`<`: every structural
+   *  new row. The single path behind `J`/`K` and `>`/`<`. Every structural
    *  edit is the same operation with a different target position. */
   const relocate = (id: BlockId, at: Position) => {
     if (!session) return;
@@ -686,7 +686,7 @@ function ChatView({
     const target = at + direction;
     if (at === -1 || target < 0 || target >= siblings.length) return;
     // Down means landing after the next sibling; up means landing before the
-    // previous one, which is "after the one before that" — or first in the
+    // previous one, which is "after the one before it", or first in the
     // chain when there is nothing before it.
     const afterId =
       direction === 1 ? (siblings[target] as BlockId) : (siblings[target - 1] ?? null);
@@ -722,12 +722,11 @@ function ChatView({
   };
 
   /**
-   * The global "run inference" action: any block, not just one of a
-   * particular kind, can anchor a run. The engine owns the actual prompt
-   * assembly, streaming, and result blocks (`lib/live-graph`'s
-   * `runInference`) — kept there rather than here so a run survives this
-   * component unmounting mid-stream, e.g. a tab switch away from chat and
-   * back.
+   * The global "run inference" action. Any block can anchor a run, of any
+   * kind. The engine owns the actual prompt assembly, streaming, and result
+   * blocks (`lib/live-graph`'s `runInference`). It lives there rather than
+   * here so a run survives this component unmounting mid-stream, e.g. a tab
+   * switch away from chat and back.
    */
   function runInference(id: BlockId): Promise<void> {
     if (!session) return Promise.resolve();
@@ -837,8 +836,8 @@ function ChatView({
         help: { keys: "e", label: "Edit primary field" },
         run: () => {
           if (!row) return;
-          // A kind's first field is the one worth a direct key for — a
-          // media block's URI, a text block's text — everything else still
+          // A kind's first field is the one worth a direct key, a media
+          // block's URI or a text block's text. Everything else still
           // reaches the rest through the actions menu.
           const field = view?.fields?.(row.block)[0];
           if (field) openField(field);
@@ -895,7 +894,7 @@ function ChatView({
     setPopup(null);
   };
 
-  /** Calls a callable directly from the configure menu — `argText` is
+  /** Calls a callable directly from the configure menu. `argText` is
    *  optional JSON, parsed here so a malformed argument surfaces before the
    *  hook ever runs instead of failing inside it. */
   const runCallHook = (hook: string, argText: string) => {
@@ -960,8 +959,9 @@ function ChatView({
   };
 
   /** Persists the `i`/`I` flow's message as a `user` block, then immediately
-   *  runs inference on it once it is visible — the whole point of typing a
-   *  message rather than opening its actions to pick something to do. */
+   *  runs inference on it once it is visible. That is the whole point of
+   *  typing a message rather than opening its actions to pick something
+   *  to do. */
   const createUserBlock = async (text: string) => {
     if (!session || !creating) return;
     setSaving(true);
@@ -1001,7 +1001,7 @@ function ChatView({
     setPopup(null);
   };
 
-  /** Persists a new session, then switches to it — mirrors the recent-
+  /** Persists a new session, then switches to it. Mirrors the recent-
    *  sessions `run` below, just against a graph that did not exist yet.
    *  Navigating to the new `?session=` is what makes `ChatPage` reload the
    *  sessions list too, so nothing here needs to refetch it directly. */
@@ -1024,7 +1024,7 @@ function ChatView({
     navigate(`/chat?session=${encodeURIComponent(result.id)}`);
   };
 
-  /** Renames the open session in place — its id, and so the URL, never
+  /** Renames the open session in place. Its id, and so the URL, never
    *  changes, so nothing navigates. The sessions list (and this session's
    *  own displayed name) would otherwise go stale, so this refetches it
    *  directly instead. */
@@ -1051,9 +1051,9 @@ function ChatView({
   };
 
   /**
-   * The enter menu: whatever the kind declares (preview, editable fields,
-   * configure) first, then the actions every block has (copy id, delete)
-   * last — so a kind's own affordances read before the generic ones.
+   * The enter menu. Whatever the kind declares (preview, editable fields,
+   * configure) comes first, then the actions every block has (copy id,
+   * delete) last, so a kind's own affordances read before the generic ones.
    */
   const kind = row ? kinds[row.block.kind] : undefined;
 
@@ -1123,8 +1123,8 @@ function ChatView({
             run: () => {
               setPopup(null);
               const id = row.block.id;
-              // Optimistic: drops the row immediately, then persists the
-              // delete — everything nested inside it goes too, on both sides.
+              // Optimistic. Drops the row immediately, then persists the
+              // delete. Everything nested inside it goes too, on both sides.
               engine.deleteBlock(id);
               if (session) {
                 const graphId = session.id;
@@ -1141,8 +1141,8 @@ function ChatView({
    * The visual-selection menu (`v` then `enter`): copy every selected
    * block's content, joined, delete the whole range, or group it under a
    * new block. A kind's own actions (preview, configure, run inference)
-   * stay single-block only, since "run inference on N blocks at once" has
-   * no obvious single meaning yet.
+   * stay single-block only. "Run inference on N blocks at once" has no
+   * obvious single meaning yet.
    */
   const selectionActions: KeyMenuItem[] =
     selectedRows.length > 0
@@ -1169,7 +1169,7 @@ function ChatView({
               setPopup(null);
               setVisualAnchor(null);
               const ids = selectedRows.map((entry) => entry.block.id);
-              // Optimistic, same as a single delete — each id's own nested
+              // Optimistic, same as a single delete. Each id's own nested
               // contents go with it, and an id an ancestor in this same
               // selection already dropped is just a no-op.
               for (const id of ids) engine.deleteBlock(id);
@@ -1197,14 +1197,14 @@ function ChatView({
                 kind: GROUP_KIND,
                 label: "group",
                 // `run` only executes on the key press that triggers this
-                // menu action, never during render — the purity rule can't
+                // menu action, never during render. The purity rule can't
                 // see that the closure it's called in is deferred.
                 // eslint-disable-next-line react-hooks/purity
                 createdAt: Date.now(),
                 data: {},
               };
-              // Optimistic, same as delete: the group lands locally first,
-              // then each selected block relocates into it in order — an
+              // Optimistic, same as delete. The group lands locally first,
+              // then each selected block relocates into it in order. An
               // id an ancestor in this same selection already carried
               // along is just a redundant, harmless move.
               engine.addBlock(
@@ -1240,7 +1240,7 @@ function ChatView({
   /**
    * The configure menu: a block's callables (hooks it exposes, invocable
    * directly) and callbacks (its own references to another block's hook,
-   * declared by its kind's `callbacks` — a timer's target, say).
+   * declared by its kind's `callbacks`, a timer's target, say).
    */
   const configureItems: KeyMenuItem[] =
     row && kind
@@ -1297,7 +1297,7 @@ function ChatView({
         ]
       : [];
 
-  /** Only kinds with a schema-valid blank state show up here — see
+  /** Only kinds with a schema-valid blank state show up here. See
    *  `BlockKind.defaults`. */
   const createKindItems: KeyMenuItem[] = Object.values(kinds)
     .filter((candidate) => candidate.defaults !== null)
@@ -1337,7 +1337,7 @@ function ChatView({
             run: () => {
               setPopup(null);
               const graphId = session.id;
-              // Same fire-and-forget shape as deleting a block: optimistic
+              // Same fire-and-forget shape as deleting a block, optimistic
               // enough that there is nothing left to observe once gone.
               // Drops the cached engine too, so a session id somehow
               // reused later starts clean rather than resuming whatever
@@ -1579,10 +1579,10 @@ function ChatView({
 
 /**
  * Data loading for `/chat`, replacing the old server component's
- * `getStore()` read on the main process's behalf: on mount, and whenever the
+ * `getStore()` read on the main process's behalf. On mount, and whenever the
  * `?session=` query param changes, loads that session's graph (or the most
- * recent one, absent a param) over IPC. `ChatView` is keyed by session id —
- * same as the original server-rendered page keying its client component —
+ * recent one, absent a param) over IPC. `ChatView` is keyed by session id,
+ * same as the original server-rendered page keying its client component,
  * so switching sessions resets `ChatView`'s own local state (cursor,
  * expanded rows, popups) instead of carrying it over into a different
  * graph entirely.
@@ -1599,7 +1599,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     // This is exactly the "fetch data from an external system on mount"
-    // case effects are for — `setResult` only runs after the IPC round
+    // case effects are for. `setResult` only runs after the IPC round
     // trip resolves, never synchronously within the effect body, so there
     // is no cascading-render risk the rule is guarding against.
     // eslint-disable-next-line react-hooks/set-state-in-effect

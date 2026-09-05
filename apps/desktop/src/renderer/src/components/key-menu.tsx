@@ -14,7 +14,7 @@ export type KeyMenuItem = {
 };
 
 /**
- * A keyboard-only popup: the modal mode entered from a page's normal mode.
+ * A keyboard-only popup, the modal layer a page's normal mode enters.
  * It owns no focus management, since every key goes through the keymap stack
  * rather than the DOM's focus ring.
  */

@@ -2,11 +2,11 @@ import { z } from "zod";
 import { defineKind } from "@repo/core";
 
 /**
- * Fires a named hook on another block at a fixed interval — `targetId`/
- * `hook` is the "callback" primitive (a reference to another block's
- * callable), and `schedule` below is the "timer" primitive (asking to have
- * one of your own hooks invoked on an interval). Both are generic: nothing
- * about the runtime driving either one needs to know this kind exists.
+ * Fires a named hook on another block at a fixed interval. `targetId`/`hook`
+ * is the "callback" piece, a reference to another block's callable, and
+ * `schedule` below is the "timer" piece, a request to have one of your own
+ * hooks invoked on an interval. Both are generic. Nothing about the runtime
+ * driving either one needs to know this kind exists.
  */
 export const TIMER_KIND = "timer";
 
@@ -21,7 +21,7 @@ export const timerState = z.object({
    *  to call it with no argument. Defaults to "" so timers persisted before
    *  this field existed keep parsing. */
   arg: z.string().default(""),
-  /** Fires so far, for visibility in the row — the timer's own heartbeat. */
+  /** Fires so far, for visibility in the row. The timer's own heartbeat. */
   ticks: z.number().int().nonnegative(),
   /** Epoch ms of the last fire, or null before the first one. */
   lastTickAt: z.number().nullable(),
@@ -39,7 +39,7 @@ export const timerKind = defineKind({
   ],
   hooks: {
     /** The runtime's own tick, per `schedule` above. Nothing stops another
-     *  block from calling it directly too — that just calls its target
+     *  block from calling it directly too. That just calls its target
      *  early. */
     tick: async (state, ctx) => {
       const arg = state.arg.trim() ? JSON.parse(state.arg) : undefined;

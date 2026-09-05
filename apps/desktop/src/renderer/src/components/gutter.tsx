@@ -2,8 +2,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * The number column along a block row's left edge. Kept as its own element so
- * the gutter can grow later — icon toggles, fold state, breakpoints — without
- * touching the row layout itself.
+ * the gutter can grow later, with icon toggles, fold state or breakpoints,
+ * without touching the row layout itself.
  */
 export function Gutter({
   line,
@@ -15,7 +15,7 @@ export function Gutter({
   line: number | null;
   /** Whether to render at all; used before the stored setting is hydrated. */
   show: boolean;
-  /** The selected row: brightened, regardless of which number it shows. */
+  /** The selected row, brightened regardless of which number it shows. */
   current: boolean;
   className?: string;
 }) {

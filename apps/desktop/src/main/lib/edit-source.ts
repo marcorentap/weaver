@@ -10,14 +10,14 @@ export type EditReplacement = {
 
 export type EditSourceResult = {
   /** Unified diff between the file's previous and new content. Empty
-   *  `oldText === newText` edits still round-trip through this — the diff
+   *  `oldText === newText` edits still round-trip through this; the diff
    *  just has no hunks. */
   diff: string;
 };
 
 /**
  * Applies `edits` to `original`, all matched against the original text (not
- * incrementally against each other's result) — same contract as the SDK's
+ * incrementally against each other's result). Same contract as the SDK's
  * own `edit` tool this replaces. Throws if an `oldText` is missing, appears
  * more than once, or overlaps another edit's range.
  */
@@ -38,7 +38,7 @@ function applyEdits(original: string, edits: EditReplacement[]): string {
     }
     if (original.indexOf(edit.oldText, first + 1) !== -1) {
       throw new Error(
-        `edits[${index}].oldText matches more than once — make it unique: ${JSON.stringify(edit.oldText.slice(0, 120))}`,
+        `edits[${index}].oldText matches more than once. Make it unique: ${JSON.stringify(edit.oldText.slice(0, 120))}`,
       );
     }
     return {
@@ -55,7 +55,7 @@ function applyEdits(original: string, edits: EditReplacement[]): string {
     const current = sorted[i];
     if (previous && current && current.start < previous.end) {
       throw new Error(
-        `edits[${current.index}] overlaps edits[${previous.index}] — merge them into one edit`,
+        `edits[${current.index}] overlaps edits[${previous.index}]. Merge them into one edit`,
       );
     }
   }
@@ -70,8 +70,8 @@ function applyEdits(original: string, edits: EditReplacement[]): string {
 }
 
 /**
- * Applies `edits` to the file at `target` — a bare filesystem path, a
- * `file://` URI, or an `ssh://[user@]host[:port]/path` URI — and returns a
+ * Applies `edits` to the file at `target`: a bare filesystem path, a
+ * `file://` URI, or an `ssh://[user@]host[:port]/path` URI. Returns a
  * unified diff of the change. `cwd` anchors a bare relative path.
  */
 export async function editSource(

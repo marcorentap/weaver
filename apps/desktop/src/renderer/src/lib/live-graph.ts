@@ -30,10 +30,10 @@ export type LiveGraphSnapshot = {
   dirty: boolean;
   /** Epoch ms of the last successful save, or null before the first one. */
   savedAt: number | null;
-  /** Blocks with a hook or an inference run currently in flight — a run's
-   *  only visible state while it is still running, since both a hook's and
-   *  an inference run's own state update land all at once when they
-   *  resolve. */
+  /** Blocks with a hook or an inference run currently in flight. That is a
+   *  run's only visible state while it is still running, since both a
+   *  hook's and an inference run's own state update land all at once when
+   *  they resolve. */
   running: ReadonlySet<BlockId>;
 };
 
@@ -42,22 +42,22 @@ export type LiveGraph = {
   getSnapshot: () => LiveGraphSnapshot;
   /**
    * Run a block's named hook and commit whatever state comes back. Entirely
-   * kind-agnostic: it looks up `block.kind` in the registry and calls
-   * whatever hook was asked for — it has no idea what a "timer" or an
+   * kind-agnostic. It looks up `block.kind` in the registry and calls
+   * whatever hook was asked for. It has no idea what a "timer" or an
    * "ISS location" is, and never needs to.
    */
   runHook: (id: BlockId, hook: string, arg?: unknown) => Promise<void>;
   /**
-   * The global "run inference" action: any block, not just one of a
+   * The global "run inference" action. Any block, not just one of a
    * particular kind, can anchor a run. Context is everything above `id`
-   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`) —
-   * so a block someone just typed becomes the last user turn. Results land
+   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`).
+   * A block someone just typed becomes the last user turn. Results land
    * as siblings appended right after `id`, chained one after the next in
-   * the order they streamed in, never nested under it — a re-run adds
+   * the order they streamed in, never nested under it. A re-run adds
    * another reply rather than replacing the last one.
    *
    * Lives on the engine, not a component, so the fetch stream survives the
-   * view that started it unmounting (switching tabs and back) — it keeps
+   * view that started it unmounting (switching tabs and back). It keeps
    * appending into this graph regardless of who, if anyone, is watching.
    */
   runInference: (
@@ -69,8 +69,8 @@ export type LiveGraph = {
   updateField: (id: BlockId, name: string, value: string | number) => void;
   /** Link an already-persisted new block into the tree at `at`. */
   addBlock: (block: Block, at: Position) => void;
-  /** Relink a block, and everything nested under it, at `at` — the whole of
-   *  "moving" a block, reorder and nesting alike. */
+  /** Relink a block, and everything nested under it, at `at`. That is the
+   *  whole of "moving" a block, reorder and nesting alike. */
   moveBlock: (id: BlockId, at: Position) => void;
   /** Drop a block and everything nested under it, optimistically. */
   deleteBlock: (id: BlockId) => void;
@@ -80,14 +80,14 @@ export type LiveGraph = {
 };
 
 /**
- * A block graph that lives entirely in the browser once created: a hook (a
- * timer's tick, an ISS fetch — the engine doesn't know or care which) mutates
+ * A block graph that lives entirely in the browser once created. A hook (a
+ * timer's tick, an ISS fetch, the engine doesn't know or care which) mutates
  * it directly and notifies subscribers immediately, so an update lands on
  * screen the instant it resolves rather than at the next poll or
  * revalidation.
  *
  * Deliberately plain, non-React state, built with `useSyncExternalStore` in
- * mind (same shape as `lib/settings`'s module-level store) — mutation and
+ * mind (same shape as `lib/settings`'s module-level store). Mutation and
  * `Date.now()` are exactly what a live graph needs, and keeping both out of
  * any component's own render path is what keeps a page using this
  * compatible with the React Compiler, which assumes render is pure.
@@ -128,7 +128,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     const kind = kinds[block.kind];
     if (!kind) return;
     // A hook already running on this block finishes on its own; a second
-    // trigger — a stray key repeat, an overlapping timer tick — is a no-op
+    // trigger, a stray key repeat or an overlapping timer tick, is a no-op
     // rather than a second run racing the first over the same children.
     if (snapshot.running.has(id)) return;
 
@@ -147,7 +147,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         }
       },
       addBlock: (childKind, data, label, parentId = id) => {
-        // Reads the live snapshot, not `ctx.graph`: a hook that cleared its
+        // Reads the live snapshot, not `ctx.graph`. A hook that cleared its
         // children first must append to what that left behind.
         const graph = snapshot.graph;
         const newId = crypto.randomUUID();
@@ -187,14 +187,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     } finally {
       setRunning(id, false);
     }
-    // No liveness check here on purpose: React StrictMode's dev-only
+    // No liveness check here on purpose. React StrictMode's dev-only
     // mount→cleanup→mount replays a component's effects once without ever
     // recreating this engine (it is cached in the live-graph registry, not
     // component state), so a "destroyed on cleanup" flag would go
     // permanently true on that first fake unmount and silently swallow
     // every real update for the rest of the session. A result landing
     // after the view holding this engine is gone just updates an object
-    // nothing reads anymore — harmless.
+    // nothing reads anymore. Harmless.
     const current = snapshot.graph.blocks[id];
     if (!current) return; // Deleted while the hook was in flight.
     commit(
@@ -241,10 +241,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       afterId = newId;
       return newId;
     };
-    // The block a run's `text_delta` chunks are currently landing in — null
+    // The block a run's `text_delta` chunks are currently landing in. Null
     // between messages, so the first delta of a new one starts a fresh
-    // block instead of gluing onto whatever came before it (a tool result,
-    // a displayed block, or an earlier reply in the same run).
+    // block instead of gluing onto whatever came before it, such as a tool
+    // result, a displayed block, or an earlier reply in the same run.
     let streamingId: BlockId | null = null;
     let streamingText = "";
     const appendDelta = (delta: string) => {
@@ -271,18 +271,18 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     };
     // Pre-flight failures land as an appended error block too, and never
-    // set `running` — there is nothing in flight to show a spinner for.
+    // set `running`, because there is nothing in flight to show a spinner for.
     if (!endpoint || !apiKey || !model) {
       append(
         TEXT_KIND,
-        { text: "missing endpoint, API key, or model — check settings" },
+        { text: "missing endpoint, API key, or model. Check settings" },
         "error",
       );
       return;
     }
     const prompt = snapshotBlock(snapshot.graph, id, kinds);
     if (!prompt.trim()) {
-      append(TEXT_KIND, { text: "block is empty — nothing to send" }, "error");
+      append(TEXT_KIND, { text: "block is empty. Nothing to send" }, "error");
       return;
     }
     const context = snapshotAbove(snapshot.graph, id, kinds);
@@ -296,11 +296,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           if (event.type === "text_delta") {
             appendDelta(event.text);
           } else if (event.type === "text") {
-            // Deltas already streamed this message in: the block already
-            // holds it, so this only ends the stream rather than appending
-            // a duplicate. No deltas arrived (a non-streaming provider, or
-            // this text came with no preceding delta at all) falls back to
-            // appending it whole, exactly as before deltas existed.
+            // Deltas already streamed this message in, so the block already holds
+            // it; this only ends the stream rather than appending a duplicate.
+            // If no deltas arrived (a non-streaming provider, or text that
+            // came with no preceding delta at all), append the message whole,
+            // exactly as before deltas existed.
             if (streamingId !== null) {
               streamingId = null;
               streamingText = "";
@@ -400,7 +400,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
 
 /**
  * Every block currently asking for a hook of its own to be invoked on a
- * timer, per its kind's `schedule`. Kind-agnostic on purpose: a caller
+ * timer, per its kind's `schedule`. Kind-agnostic on purpose. A caller
  * reconciling this against real `setInterval`s never needs to know "timer"
  * exists as a concept, let alone which kind implements it.
  */

@@ -14,8 +14,8 @@ import { cn } from "@/lib/utils";
 /**
  * A setting's shape decides how it is displayed and edited:
  * - `option` cycles through a fixed list with `h`/`l` or the chevrons.
- * - `number` also cycles by `step` with `h`/`l`, and — like `string` — can be
- *   typed directly: `enter` swaps the value for a text box, `enter` again
+ * - `number` also cycles by `step` with `h`/`l`, and like `string` can be
+ *   typed directly. `enter` swaps the value for a text box, `enter` again
  *   commits it, `esc` discards the draft and returns to navigation.
  */
 type SettingDef =
@@ -24,7 +24,7 @@ type SettingDef =
       key: string;
       label: string;
       description: string;
-      /** A section heading rendered above this entry — only the first
+      /** A section heading rendered above this entry. Only the first
        *  entry of a group sets it. */
       section?: string;
       options: readonly { value: string; label: string }[];
@@ -55,12 +55,12 @@ type SettingDef =
        *  stays open with the draft intact, so nothing is silently dropped
        *  and nothing invalid is ever stored. */
       validate?: (value: string) => string | null;
-      /** Part of the provider credentials: committing it re-runs the live
+      /** Part of the provider credentials. Committing it re-runs the live
        *  reachability check. */
       provider?: boolean;
-      /** Masked when not focused for editing — an API key. */
+      /** Masked when not focused for editing, an API key. */
       secret?: boolean;
-      /** Shown, in gray, in place of an empty value — an example rather
+      /** Shown, in gray, in place of an empty value, an example rather
        *  than a default. */
       placeholder?: string;
     };
@@ -79,7 +79,7 @@ function displayValue(def: SettingDef): string {
   }
 }
 
-/** `h`/`l` and the chevrons: only `option` and `number` settings respond. */
+/** Only `option` and `number` settings respond to `h`/`l` or the chevrons. */
 function cycle(def: SettingDef, direction: 1 | -1) {
   if (def.kind === "option") {
     const values = def.options.map((option) => option.value);
@@ -240,7 +240,7 @@ export default function SettingsPage() {
     }
     const invalid = def.kind === "string" ? (def.validate?.(draft) ?? null) : null;
     if (invalid) {
-      // Stays open with the draft intact: the value is the user's, and
+      // Stays open with the draft intact. The value is the user's, and
       // discarding what they typed to tell them it was wrong is hostile.
       setFieldError(invalid);
       return;

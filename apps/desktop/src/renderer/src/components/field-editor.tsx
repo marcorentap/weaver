@@ -4,8 +4,8 @@ import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 
 /**
- * Edits one field a kind declared. The input owns its keys — the keymap
- * ignores events from text entry — so enter and escape are handled here and
+ * Edits one field a kind declared. The input owns its keys. The keymap
+ * ignores events from text entry, so enter and escape are handled here and
  * only documented in help.
  */
 export function FieldEditor({
@@ -20,8 +20,8 @@ export function FieldEditor({
 }: {
   id: string;
   title: string;
-  /** Extra header context, distinct from `title` — which field this is
-   *  editing, say. Omit when the title alone already says everything (a
+  /** Extra header context, distinct from `title`, naming which field this is
+   *  editing. Omit when the title alone already says everything (a
    *  "New session" dialog doesn't need "name" tacked on beside it). */
   meta?: string;
   field: BlockField;
@@ -63,7 +63,7 @@ export function FieldEditor({
         {field.multiline ? (
           <textarea
             // Content, so enter belongs to the text and saving moves to
-            // ctrl/cmd+enter — the same trade every message box makes.
+            // ctrl/cmd+enter. The same trade every message box makes.
             autoFocus
             rows={16}
             value={value}

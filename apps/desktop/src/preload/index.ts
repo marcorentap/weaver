@@ -15,7 +15,7 @@ import type { Position } from "@repo/core";
 
 /**
  * The only Node-capable surface exposed to the renderer. Every method here
- * is a thin, typed wrapper over `ipcRenderer` — the renderer itself runs
+ * is a thin, typed wrapper over `ipcRenderer`. The renderer itself runs
  * with `contextIsolation`/no direct Node access, matching how the old
  * Next.js build kept the SQLite store and process-spawning tools out of the
  * browser bundle.

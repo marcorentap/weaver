@@ -7,7 +7,7 @@ import { timerKind } from "./timer.js";
 import { toolKind } from "./tool.js";
 
 /**
- * Custom block kinds. A kind is defined by the schema of its state: the unique
+ * Custom block kinds. A kind is defined by the schema of its state, the unique
  * set of data needed to reconstruct that block. The schema is exported so the
  * renderer parses through the same definition instead of re-declaring fields.
  */

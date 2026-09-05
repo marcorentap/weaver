@@ -3,8 +3,8 @@ import { cn } from "@/lib/utils";
 
 /**
  * Shared chrome for every keyboard popup: help, menus, field edits, previews.
- * Focus is never trapped here — keys are dispatched by the keymap stack, not
- * by the DOM focus ring — except where a popup renders a real input.
+ * Focus is never trapped here, except where a popup renders a real input.
+ * Keys are dispatched by the keymap stack, not by the DOM focus ring.
  */
 export function ModalFrame({
   label,
@@ -32,7 +32,7 @@ export function ModalFrame({
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
-      // `overscroll-contain` on a scroll container of its own: without it a
+      // `overscroll-contain` on a scroll container of its own. Without it a
       // wheel past the end of the popup keeps going into the page behind.
       className="fixed inset-0 z-50 flex items-center justify-center overflow-hidden overscroll-contain bg-background/70 p-4"
     >

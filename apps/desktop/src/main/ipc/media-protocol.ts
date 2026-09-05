@@ -12,10 +12,10 @@ import { isPendingMedia } from "../lib/pending-media.js";
 
 /**
  * Privileges the `weaver-media://` scheme needs registered before
- * `app.whenReady()` — `standard`/`secure` so `<img>`/`<video>`/`<audio>` treat
- * it like `https:`, `stream` so a ranged local file can be served as it's
- * read rather than buffered whole, `supportFetchAPI`/`corsEnabled` so a plain
- * `fetch()` in the renderer can read remote text through it too.
+ * `app.whenReady()`. `standard`/`secure` let `<img>`/`<video>`/`<audio>`
+ * treat it like `https:`; `stream` lets a ranged local file be served as
+ * it's read rather than buffered whole; `supportFetchAPI`/`corsEnabled`
+ * let a plain `fetch()` in the renderer read remote text through it too.
  */
 export const MEDIA_PROTOCOL_PRIVILEGES: CustomScheme = {
   scheme: MEDIA_PROTOCOL,
@@ -31,9 +31,9 @@ export const MEDIA_PROTOCOL_PRIVILEGES: CustomScheme = {
 };
 
 /**
- * Serves media the renderer cannot fetch itself: `file://` bytes, which a
- * renderer page may not read, and remote text, which `fetch` may not read
- * without CORS headers on the origin.
+ * Serves media the renderer cannot fetch itself. `file://` bytes a renderer
+ * page may not read, and remote text `fetch` may not read without CORS
+ * headers on the origin.
  *
  * What may be served is either something a media block already points at, a
  * file inside the project directory, or a URI the display tool has just
@@ -61,7 +61,7 @@ function inProject(path: string): boolean {
   return target === root || target.startsWith(`${root}/`);
 }
 
-/** `bytes=start-end`, the only form browsers send for media. */
+/** Parses `bytes=start-end`, the only range form browsers send for media. */
 function parseRange(
   header: string | null,
   size: number,
@@ -78,7 +78,7 @@ function parseRange(
   return { start, end };
 }
 
-/** A text viewer needs a screenful, not a whole log server. */
+/** A text viewer needs a screenful, not a whole log file. */
 const TEXT_LIMIT = 256 * 1024;
 
 /** Remote text, capped: the upstream length header is not to be trusted. */
@@ -118,7 +118,7 @@ async function proxyText(url: URL, mime: string): Promise<Response> {
 }
 
 /** The stored `uri` a `weaver-media://local/<encodeURIComponent(uri)>`
- *  request names — the last path segment, decoded. */
+ *  request names. It is the last path segment, decoded. */
 function requestedUri(url: URL): string {
   const segments = url.pathname.split("/").filter((segment) => segment.length > 0);
   const last = segments[segments.length - 1] ?? "";

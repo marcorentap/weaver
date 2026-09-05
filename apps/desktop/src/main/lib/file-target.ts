@@ -5,7 +5,7 @@ import { runSsh, shellQuote, sshPath } from "./ssh.js";
 
 /**
  * Where `write`/`edit` point at: a real filesystem, unlike `read`, which
- * also fetches URLs — writing to an arbitrary `http(s)://` URL has no
+ * also fetches URLs. Writing to an arbitrary `http(s)://` URL has no
  * general meaning, so that scheme is rejected here rather than accepted and
  * silently doing nothing useful.
  */
@@ -15,15 +15,14 @@ export type FileTarget =
 
 const SCHEMES = new Set(["file:", "ssh:"]);
 
-/** A whole file's worth, capped — large enough for any real source file,
- *  small enough that hitting it means this is the wrong tool for that
- *  file (a data dump, a binary) rather than a source edit. */
+/** A whole file's worth, capped. Large enough for any real source file;
+ *  hitting it means the file is a data dump or binary, not a source edit. */
 const MAX_BYTES = 10 * 1024 * 1024;
 
 /**
- * Resolves `target` — a bare filesystem path (relative to `cwd`, or
- * absolute), a `file://` URI, or an `ssh://[user@]host[:port]/path` URI —
- * to where `write`/`edit` should act. Throws on anything else, including
+ * Resolves `target` to where `write`/`edit` should act: a bare filesystem
+ * path (relative to `cwd`, or absolute), a `file://` URI, or an
+ * `ssh://[user@]host[:port]/path` URI. Throws on anything else, including
  * `http(s)://`.
  */
 export function resolveFileTarget(target: string, cwd: string): FileTarget {
@@ -41,7 +40,7 @@ export function resolveFileTarget(target: string, cwd: string): FileTarget {
   }
   if (!SCHEMES.has(url.protocol)) {
     throw new Error(
-      `unsupported scheme "${url.protocol}" — pass a filesystem path, file://, or ssh:// URI`,
+      `unsupported scheme "${url.protocol}". Pass a filesystem path, file://, or ssh:// URI`,
     );
   }
   return url.protocol === "file:"
@@ -54,7 +53,7 @@ export function targetLabel(target: FileTarget): string {
   return target.kind === "local" ? target.path : target.url.toString();
 }
 
-/** Reads the whole file at `target`, capped at `MAX_BYTES` — `edit` matches
+/** Reads the whole file at `target`, capped at `MAX_BYTES`. `edit` matches
  *  `oldText` against the real, complete file, so this never silently
  *  truncates; it throws instead, past the cap. */
 export async function readWhole(target: FileTarget): Promise<string> {
@@ -62,7 +61,7 @@ export async function readWhole(target: FileTarget): Promise<string> {
     const info = await stat(target.path);
     if (info.size > MAX_BYTES) {
       throw new Error(
-        `${target.path} is ${info.size} bytes — too large to edit safely (limit ${MAX_BYTES})`,
+        `${target.path} is ${info.size} bytes. Too large to edit safely (limit ${MAX_BYTES})`,
       );
     }
     return await readFile(target.path, "utf8");
@@ -71,7 +70,7 @@ export async function readWhole(target: FileTarget): Promise<string> {
   const buf = await runSsh(target.url, `cat -- ${path}`);
   if (buf.length > MAX_BYTES) {
     throw new Error(
-      `${targetLabel(target)} is ${buf.length} bytes — too large to edit safely (limit ${MAX_BYTES})`,
+      `${targetLabel(target)} is ${buf.length} bytes. Too large to edit safely (limit ${MAX_BYTES})`,
     );
   }
   return buf.toString("utf8");

@@ -13,18 +13,18 @@ export default defineConfig({
   main: {
     plugins: [
       // `@repo/core`/`@repo/store` ship raw `.ts` source (no build step of
-      // their own — see the monorepo's "no-build" convention), so they
+      // their own; see the monorepo's "no-build" convention), so they
       // must be bundled/transpiled here rather than externalized like a
-      // normal `node_modules` package: Node cannot `require()` a `.ts` file
+      // normal `node_modules` package. Node cannot `require()` a `.ts` file
       // directly, unlike Next/Turbopack, which transpiles them in one pass.
       externalizeDepsPlugin({ exclude: ["@repo/core", "@repo/store"] }),
       // `agent/system-prompt.md` is read at run time via `readFileSync`, not
-      // imported as a module — copied next to the bundled `index.js` so
+      // imported as a module. It is copied next to the bundled `index.js` so
       // `__dirname`-relative reads keep working whether this is `electron-vite
       // dev`'s out-of-source build or a packaged app.
       viteStaticCopy({
         // electron-vite's main build runs as Vite's SSR build environment
-        // (named "ssr", not the default "client") — without this the
+        // (named "ssr", not the default "client"). Without this the
         // plugin's build hook never fires and nothing is copied.
         environment: "ssr",
         targets: [
@@ -93,9 +93,9 @@ export default defineConfig({
       }),
       react(),
       // katex.min.css addresses its font files with bare relative
-      // `url(fonts/...)`, which is CSS Next's own pipeline resolved for
-      // free — Vite leaves an unresolved `url()` untouched, so the actual
-      // font files need to land next to the built CSS by hand.
+      // `url(fonts/...)`, which CSS Next's own pipeline resolves for free.
+      // Vite leaves an unresolved `url()` untouched, so the actual font
+      // files need to land next to the built CSS by hand.
       viteStaticCopy({
         targets: [
           {

@@ -22,7 +22,7 @@ const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkMath];
 /**
  * Fenced code is highlighted by the same highlight.js grammars a read tool's
  * own preview uses; math nodes `remark-math` produced render as real KaTeX
- * markup, not literal `$...$` — its stylesheet is imported once in
+ * markup, not literal `$...$`. Its stylesheet is imported once in
  * `globals.css`, ahead of Tailwind's own import.
  */
 const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
@@ -42,7 +42,7 @@ function Pre({
       {...props}
       className={cn(
         className,
-        // Plain class marker, not a Tailwind utility: globals.css uses it
+        // Plain class marker, not a Tailwind utility. globals.css uses it
         // to strip the inline-code background back off the `<code>` this
         // wraps (see the `code` renderer below).
         "md-fenced-block",
@@ -55,7 +55,7 @@ function Pre({
 
 /**
  * react-markdown drops every URL whose scheme is not http, https, mailto or
- * tel, which would silently blank an image the harness can actually serve: a
+ * tel, which would silently blank an image the harness can actually serve. A
  * local file is exactly what an agent has to show. `file:` is let through and
  * resolved by `mediaSrc`; everything else keeps the default filter, so
  * `javascript:` stays dead.
@@ -64,9 +64,9 @@ const urlTransform = (url: string) =>
   url.startsWith("file:") ? url : defaultUrlTransform(url);
 
 /**
- * Markdown keeps the rail's type scale — everything is `text-xs`, so structure
+ * Markdown keeps the rail's type scale. Everything is `text-xs`, so structure
  * comes from weight, rules and indentation rather than from heading sizes.
- * Raw HTML in the source is not rendered: react-markdown drops it unless
+ * Raw HTML in the source is not rendered. react-markdown drops it unless
  * rehype-raw is added, and the text can come from a file or a model.
  */
 const MARKDOWN: Components = {
@@ -89,7 +89,7 @@ const MARKDOWN: Components = {
   ),
   // Always styled as inline code; globals.css strips this back off for a
   // fenced block's `<code>` (marked via `Pre`'s `md-fenced-block` class),
-  // since a `className`-presence check isn't reliable there — a fenced
+  // since a `className`-presence check isn't reliable there. A fenced
   // block with no language `rehype-highlight` can identify gets no class
   // at all, so it fell through as "inline" and kept the gray background
   // this was meant to remove.
@@ -104,8 +104,8 @@ const MARKDOWN: Components = {
   img: ({ src, ...props }) => (
     // A `file://` image, and any cross-origin one, is only loadable through
     // the media route, so an embedded image resolves the same way a media
-    // block's URI does. Anything else — a site-relative path, a data URI —
-    // is left for the browser to resolve.
+    // block's URI does. Anything else, a site-relative or data URI, is left
+    // for the browser to resolve.
     <img
       {...props}
       src={

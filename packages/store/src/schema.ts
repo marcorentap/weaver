@@ -9,15 +9,15 @@
  *   information lives in `created_at` / `modified_at` rather than in the id.
  * - `block.kind` has no CHECK constraint. Kinds are open by design, so the
  *   database must accept a kind it has never seen.
- * - Structure is two nullable self-references per block: `next_id` is the
+* - Structure is two nullable self-references per block: `next_id` is the
  *   following block at the same level, `children_id` the first block nested
  *   inside it. Order is therefore stored, not derived, and one row change
- *   moves a block — but the tree invariants (one root, no loops, nothing
- *   orphaned) are not expressible in SQL, so writes are validated in JS
+ *   moves a block. The tree invariants, one root, no loops, nothing
+ *   orphaned, are not expressible in SQL, so writes are validated in JS
  *   against `assertTree` before commit.
- * - Neither link is a foreign key: a write arrives as a set of rows whose
- *   links point at each other, and immediate FK checks would reject whichever
- *   row happened to land first.
+ * - Neither link is a foreign key. A write arrives as a set of rows whose
+ *   links point at each other, and immediate FK checks would reject
+ *   whichever row happened to land first.
  */
 export const SCHEMA_VERSION = 5;
 

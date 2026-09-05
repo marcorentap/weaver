@@ -14,10 +14,10 @@ import type {
 const EMPTY_GRAPH: BlockGraph = { blocks: {}, root: null };
 
 /**
- * Structural edits are load → apply a core tree operation → write the result
- * back, because moving one block rewrites its neighbors' links too: the tree
- * is only ever valid as a whole, so a write of anything less than the whole
- * graph would have to reproduce that surgery by hand.
+ * Structural edits load the graph, apply a core tree operation, and write
+ * the result back. Moving one block rewrites its neighbors' links too: the
+ * tree is only ever valid as a whole, so a write of anything less than the
+ * whole graph would have to reproduce that surgery by hand.
  */
 function rewrite(
   graphId: string,
@@ -35,7 +35,7 @@ function rewrite(
   return { error: null };
 }
 
-/** Deletes a block and everything nested under it — a container's contents
+/** Deletes a block and everything nested under it. A container's contents
  *  exist only inside it, so they go with it rather than being cut loose. */
 function deleteChatBlock(graphId: string, id: string): MutationResult {
   return rewrite(graphId, (graph) => removeBlock(graph, id));
@@ -44,7 +44,7 @@ function deleteChatBlock(graphId: string, id: string): MutationResult {
 /**
  * Writes one field of a block's state. The write is validated against the
  * kind's schema inside the store, so a bad value is rejected rather than
- * persisted — its message is returned for the editor to show.
+ * persisted. Its message is returned for the editor to show.
  */
 function updateBlockField(
   graphId: string,
@@ -66,8 +66,8 @@ function updateBlockField(
 }
 
 /**
- * Creates one block from an already-built `BlockInput` — the client picks the
- * kind, id and label, this places it at `at` and persists the resulting tree.
+ * Creates one block from an already-built `BlockInput`. The client picks the
+ * kind, id and label; this places it at `at` and persists the resulting tree.
  */
 function createChatBlock(
   graphId: string,
@@ -88,8 +88,8 @@ function createChatBlock(
   return rewrite(graphId, (graph) => insertBlock(graph, block, at));
 }
 
-/** Relinks a block at `at`, taking whatever is nested under it along — the
- *  whole of the `J`/`K` reorder and `>`/`<` nest keys. */
+/** Relinks a block at `at`, taking whatever is nested under it along. This
+ *  covers the whole of the `J`/`K` reorder and `>`/`<` nest keys. */
 function moveChatBlock(
   graphId: string,
   blockId: string,
@@ -98,9 +98,9 @@ function moveChatBlock(
   return rewrite(graphId, (graph) => moveBlock(graph, blockId, at));
 }
 
-/** Creates a new, empty session (graph) — the id it returns, not the name,
+/** Creates a new, empty session (graph). The id it returns, not the name,
  *  is what callers should navigate with. Names are display-only and need
- *  not be unique: the id is what identifies a session. */
+ *  not be unique. */
 function createChatSession(name: string): CreateSessionResult {
   const store = getStore();
   try {
@@ -110,8 +110,8 @@ function createChatSession(name: string): CreateSessionResult {
   }
 }
 
-/** Renames a session in place — same graph, same blocks, new (not
- *  necessarily unique) name. */
+/** Renames a session in place with a new (not necessarily unique) name.
+ *  The graph and blocks are unchanged. */
 function renameChatSession(graphId: string, name: string): MutationResult {
   try {
     getStore().renameGraph(graphId, name);
@@ -121,7 +121,7 @@ function renameChatSession(graphId: string, name: string): MutationResult {
   return { error: null };
 }
 
-/** Deletes a session (graph) and every block in it, outright — there is no
+/** Deletes a session (graph) and every block in it, outright. There is no
  *  undo, same as deleting a block. */
 function deleteChatSession(graphId: string): MutationResult {
   try {
@@ -133,10 +133,10 @@ function deleteChatSession(graphId: string): MutationResult {
 }
 
 /**
- * Persists the client's whole live graph in one write — autosave and the
- * manual `s` → `s` shortcut both call this. The client is the source of
- * truth once a session is loaded (hook ticks land there first, at whatever
- * cadence a timer names), so this is a plain "flush what I already have",
+ * Persists the client's whole live graph in one write. Autosave and the
+ * manual `s` shortcut both call this. Once a session is loaded the client
+ * is the source of truth, since hook ticks land there first at whatever
+ * cadence a timer names, so this is a plain "flush what I already have",
  * not a merge.
  */
 function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
@@ -149,9 +149,10 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
 }
 
 /**
- * Loads a session's graph plus the session list — the data the chat view
- * needs on mount. A session is a graph; "recent" is its last write. `session`
- * resolves an explicit id or falls back to the most recently modified one.
+ * Loads a session's graph plus the session list, the data the chat view
+ * needs on mount. A session is a graph; "recent" is its last write.
+ * `session` resolves an explicit id or falls back to the most recently
+ * modified one.
  */
 function loadGraph(session?: string): LoadGraphResult {
   const store = getStore();

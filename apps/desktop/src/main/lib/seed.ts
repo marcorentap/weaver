@@ -11,10 +11,10 @@ import { TIMER_KIND } from "../../shared/blocks/timer.js";
 const t0 = Date.parse("2026-08-31T09:00:00.000Z");
 
 /**
- * The seed is authored as the tree it renders as — order is position in the
- * list, nesting is nesting — and flattened into linked blocks below. Real
- * ids are minted at insert time, so a block another block has to name (a
- * timer's target) carries a readable `key` instead.
+ * The seed is authored as the tree it renders as, with order as position in
+ * the list and nesting as nesting, then flattened into linked blocks below.
+ * Real ids are minted at insert time, so a block another block has to call
+ * (a timer's target) carries a readable `key` instead.
  */
 type SeedNode = {
   kind: string;
@@ -64,7 +64,7 @@ const tree: SeedNode[] = [
     ],
   },
 
-  // Nesting two levels deep, with a custom kind at the leaves.
+  // Nesting two levels deep with a custom kind at the leaves.
   {
     kind: GROUP_KIND,
     label: "repo",
@@ -174,9 +174,9 @@ const tree: SeedNode[] = [
     },
   },
 
-  // A timer calling another block's hook on an interval — one block driving
-  // another, with no link between them: the tree is containment and order,
-  // never wiring.
+  // A timer calling another block's hook on an interval: one block driving
+  // another, with no link between them, because the tree is containment and
+  // order, never wiring.
   {
     kind: ISS_LOCATION_KIND,
     label: "ISS location",
@@ -242,7 +242,7 @@ export function seedBlocks(): BlockInput[] {
     nodes.forEach((node, at) => {
       let data = node.data;
       // A timer's `targetId` is authored above as the target's seed key, not
-      // a real id — resolved here the way links are.
+      // a real id, and resolved here the way links are.
       if (node.kind === TIMER_KIND && typeof data?.targetId === "string") {
         const target = byKey.get(data.targetId);
         if (!target) {

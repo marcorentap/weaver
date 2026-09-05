@@ -43,14 +43,14 @@ const AGENT_DIR = "/tmp/weaver-agent";
 const NOT_DISPLAYABLE = new Set<string>([TOOL_KIND]);
 
 /**
- * Appended to the SDK's own system prompt (see `resourceLoader` below):
- * everything here is what's specific to running as one block in a weaver
+ * Appended to the SDK's own system prompt (see `resourceLoader` below).
+ * Everything here is what's specific to running as one block in a weaver
  * graph rather than as a general-purpose repo-editing CLI agent. Kept as its
  * own committed file rather than an inline string so it reads and diffs like
  * prose, not code.
  *
  * Bundled main-process code is a single flattened `out/main/index.js`, so
- * `__dirname` at run time is `out/main` — the same directory
+ * `__dirname` at run time is `out/main`, the same directory
  * `vite-plugin-static-copy` (see electron.vite.config.ts) copies
  * `agent/system-prompt.md` into.
  */
@@ -61,7 +61,7 @@ const WEAVER_SYSTEM_PROMPT = readFileSync(
 
 /**
  * The agent SDK types its event payloads as `any`, so everything crossing
- * that boundary is parsed rather than asserted — a shape change upstream
+ * that boundary is parsed rather than asserted. A shape change upstream
  * should degrade to an empty string, not to a wrong read of a wrong field.
  */
 const contentParts = z.object({
@@ -77,8 +77,8 @@ const contentParts = z.object({
     .optional(),
 });
 
-/** The kinds an agent may display, each with the JSON Schema of its state —
- *  derived from the kind registry, so registering a kind is all it takes to
+/** The kinds an agent may display, each with the JSON Schema of its state.
+ *  Derived from the kind registry, so registering a kind is all it takes to
  *  make it something the model can produce. */
 function displayableKinds(): { kind: string; schema: unknown }[] {
   return Object.values(kinds).flatMap((kind) => {
@@ -94,7 +94,8 @@ function displayableKinds(): { kind: string; schema: unknown }[] {
 }
 
 /** Text of a tool result, joined. Image content is named rather than
- *  inlined: the bytes are already on disk and the browser has the path. */
+ *  inlined because the bytes are already on disk and the browser has the
+ *  path. */
 function resultText(result: unknown): string {
   const parsed = contentParts.safeParse(result);
   if (!parsed.success) return "";
@@ -110,7 +111,7 @@ function resultText(result: unknown): string {
 
 /**
  * Assistant prose from a finished message. `message_end` fires for the user
- * turn and for every tool result too, so the role is checked first: without
+ * turn and for every tool result too, so the role is checked first. Without
  * that, a run echoes its own prompt back as a block and repeats each tool's
  * output twice. Tool calls become their own blocks and thinking is dropped,
  * so only spoken text is left.
@@ -182,9 +183,9 @@ async function runAgent(
 
     /**
      * The one tool the harness adds: it turns anything the agent wants to
-     * show into a real block. Its parameters are deliberately generic —
-     * a kind plus that kind's own state — so "what an agent can display"
-     * is exactly "which kinds exist", with no tool per kind to maintain.
+     * show into a real block. Its parameters are deliberately generic: a
+     * kind plus that kind's own state, so "what an agent can display" is
+     * exactly "which kinds exist", with no tool per kind to maintain.
      */
     const display = defineTool({
       name: "display",
@@ -195,7 +196,7 @@ async function runAgent(
         ...displayable.map(
           (entry) => `- ${entry.kind}: ${JSON.stringify(entry.schema)}`,
         ),
-        'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. A local file needs an absolute file:// URI, e.g. {"uri":"file:///home/me/diagram.png"}.',
+        'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. A local file needs an absolute file:// URI, such as {"uri":"file:///home/me/diagram.png"}.',
         "Text: renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images all work; an image needs an http(s) or absolute file:// URL.",
         "A `Text` block is already visible. Don't restate its content in your reply. Summarizing is fine.",
       ].join("\n"),
@@ -211,9 +212,9 @@ async function runAgent(
           content: [{ type: "text" as const, text }],
           details: {},
         });
-        // Thrown, not returned: the agent loop turns a throw into a
-        // failed tool result, which is what makes a rejected display
-        // show up as a failed call instead of vanishing.
+        // Thrown, not returned. The agent loop turns a throw into a failed
+        // tool result, so a rejected display shows up as a failed call
+        // instead of vanishing.
         const refuse = (text: string): never => {
           throw new Error(text);
         };
@@ -226,7 +227,7 @@ async function runAgent(
           );
         }
         // `data` is an object in the schema, but a model handed a
-        // schemaless parameter often sends the JSON as a string; both
+        // schemaless parameter often sends the JSON as a string. Both
         // mean the same thing, so both are accepted.
         const raw =
           typeof params.data === "string"
@@ -268,13 +269,13 @@ async function runAgent(
       },
     });
 
-    /** DuckDuckGo web search — no API key, so it's part of the default
+    /** DuckDuckGo web search. No API key, so it is part of the default
      *  tool set below same as everything else. */
     const webSearch = defineTool({
       name: "web_search",
       label: "Web Search",
       description:
-        "Use this when you need current information you don't already have. Returns titles, URLs, and snippets via DuckDuckGo. No API key required.",
+        "Use this when you need current information you don't already have. Returns titles, URLs, and snippets via DuckDuckGo, no API key.",
       parameters: Type.Object({
         query: Type.String({ description: "Search query" }),
         limit: Type.Optional(
@@ -320,8 +321,8 @@ async function runAgent(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      // Appended, not a replacement: the SDK's own prompt already lists
-      // the enabled tools and default guidelines from `tools` below: this
+      // Appended, not a replacement. The SDK's own prompt already lists
+      // the enabled tools and default guidelines from `tools` below; this
       // only adds what is specific to running as a weaver block instead
       // of a repo-editing CLI agent.
       appendSystemPrompt: [WEAVER_SYSTEM_PROMPT],
@@ -329,22 +330,22 @@ async function runAgent(
     await resourceLoader.reload();
 
     /**
-     * Replaces the SDK's own `read` (bare filesystem paths only): same
-     * name and same `path`/`offset`/`limit` shape, but `path` may also
-     * be a `file://`, `http(s)://` or `ssh://` URI. The tool registry
-     * resolves a custom tool over a built-in one of the same name, so
-     * naming this `read` is what makes the replacement automatic rather
-     * than a second tool to choose between.
+     * Replaces the SDK's own `read` (bare filesystem paths only) with the
+     * same name and `path`/`offset`/`limit` shape, but `path` may also be a
+     * `file://`, `http(s)://` or `ssh://` URI. The tool registry resolves a
+     * custom tool over a built-in one of the same name, so naming this
+     * `read` makes the replacement automatic rather than a second tool to
+     * choose between.
      */
     const read = defineTool({
       name: "read",
       label: "Read",
       description: [
         "Use this to check what's actually in a file, or to visit or fetch a webpage, instead of guessing. Windows the result by line or by byte.",
-        "`path` may be a filesystem path (relative to the project root, or absolute), or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
+        "`path` is a filesystem path (relative to the project root, or absolute) or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
         "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
         "Default is line mode: `offset`/`limit` window onto 1-indexed lines.",
-        "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line a line boundary can't usefully cut, e.g. minified JS or a single long JSON blob. Pass one pair or the other, never both.",
+        "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both.",
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
@@ -396,10 +397,10 @@ async function runAgent(
     });
 
     /**
-     * Replaces the SDK's own `write`: same name and `path`/`content`
-     * shape, but `path` may also be a `file://` or `ssh://` URI (no
-     * `http(s)://` — writing to an arbitrary URL has no general
-     * meaning, unlike reading one).
+     * Replaces the SDK's own `write` with the same name and
+     * `path`/`content` shape, but `path` may also be a `file://` or
+     * `ssh://` URI. `http(s)://` is left out: writing to an arbitrary URL
+     * has no general meaning, unlike reading one.
      */
     const write = defineTool({
       name: "write",
@@ -437,14 +438,14 @@ async function runAgent(
     });
 
     /**
-     * Replaces the SDK's own `edit`: same name and `path`/`edits[]`
-     * shape (each edit an exact, unique `oldText`/`newText` pair,
-     * matched against the original file rather than incrementally), but
-     * `path` may also be a `file://` or `ssh://` URI. The tool's output
-     * is a unified diff rather than a success message, so the block
-     * this call produces renders the change instead of just naming it —
-     * `toolLanguage` in shared/blocks/tool.ts always highlights an `edit`
-     * call's output as one, regardless of the file it touched.
+     * Replaces the SDK's own `edit` with the same name and `path`/`edits[]`
+     * shape (each edit an exact, unique `oldText`/`newText` pair, matched
+     * against the original file rather than incrementally), but `path` may
+     * also be a `file://` or `ssh://` URI. The tool's output is a unified
+     * diff rather than a success message, so the block this call produces
+     * renders the change instead of just naming it. `toolLanguage` in
+     * shared/blocks/tool.ts always highlights an `edit` call's output as a
+     * diff, regardless of the file it touched.
      */
     const edit = defineTool({
       name: "edit",
@@ -511,7 +512,7 @@ async function runAgent(
     runs.set(runId, { abort: () => void session.abort() });
 
     // Arguments arrive with the call and the result with its end, so they
-    // are paired by id: a tool block shows what was asked as well as what
+    // are paired by id. A tool block shows what was asked as well as what
     // came back.
     const pendingArgs = new Map<string, string>();
     const unsubscribe = session.subscribe((sessionEvent) => {
@@ -537,7 +538,7 @@ async function runAgent(
         const args = pendingArgs.get(sessionEvent.toolCallId) ?? "";
         pendingArgs.delete(sessionEvent.toolCallId);
         // A successful `display` already emitted its block, so recording
-        // the call as well would say nothing new — but a rejected one has
+        // the call as well would say nothing new. A rejected one has
         // nothing to show, and a silent failure is worse than a visible
         // one.
         if (sessionEvent.toolName === display.name && !sessionEvent.isError) return;
@@ -590,12 +591,12 @@ const modelsResponse = z.object({
 
 /**
  * Answers "do these credentials actually work?" so settings can say so the
- * moment they are typed, instead of leaving the first failure to a confused
- * agent block later.
+ * moment they are typed, instead of leaving the first failure to surface
+ * during an agent run.
  *
  * `GET /models` is the probe: every OpenAI-completions provider serves it,
  * it needs the same bearer token a completion does, and it costs nothing.
- * The verdict is always `{ ok, message }` — a failed probe is still a
+ * The verdict is always `{ ok, message }`. A failed probe is still a
  * successful check, and collapsing the two would make the caller handle
  * transport errors twice.
  */
@@ -611,7 +612,7 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
   if (!url) {
     return {
       ok: false,
-      message: "not a valid URL — it needs a scheme and host",
+      message: "not a valid URL. It needs a scheme and host",
     };
   }
   if (!body.apiKey) {
@@ -659,7 +660,7 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
       ok: false,
       message:
         upstream.status === 401 || upstream.status === 403
-          ? `HTTP ${upstream.status} — API key rejected`
+          ? `HTTP ${upstream.status}. API key rejected`
           : `HTTP ${upstream.status}`,
     };
   }
