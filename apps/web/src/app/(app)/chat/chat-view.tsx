@@ -1385,8 +1385,8 @@ export function ChatView({
       {popup?.kind === "field" ? (
         <FieldEditor
           id="edit"
-          title={row ? `Edit ${row.block.label}` : "Edit"}
-          meta={popup.field.label}
+          title={`Edit ${popup.field.label}`}
+          meta={row?.block.label}
           field={popup.field}
           error={error}
           saving={saving}
