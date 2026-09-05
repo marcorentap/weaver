@@ -24,7 +24,7 @@ files:
   - "!**/*.tsbuildinfo"
 linux:
   target:
-    - AppImage
+    - deb
   category: Development
 mac:
   target:
