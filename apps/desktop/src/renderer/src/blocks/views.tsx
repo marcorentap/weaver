@@ -14,6 +14,7 @@ import {
   mediaName,
   mediaSrc,
   mediaState,
+  parseMediaUri,
 } from "./media";
 import { USER_KIND, userState } from "@shared/blocks/user.js";
 import type { ToolState } from "@shared/blocks/tool.js";
@@ -313,11 +314,20 @@ export const blockViews: Record<string, BlockView> = {
     Preview: ({ block }) => (
       <MediaPreview state={mediaState.parse(block.data)} />
     ),
-    // The embed URL `mediaSrc` builds for a YouTube video is only good for
-    // an iframe; "open in new tab" should land on the actual watch page.
+    // "Open in new tab" goes through `shell.openExternal`, the OS browser,
+    // so it should get an address the browser can load on its own. An
+    // http(s) URI is that address as written; the `weaver-media://` proxy
+    // `mediaSrc` builds is there because a renderer `<img>` or `<pre>`
+    // cannot read cross-origin text or `file://` bytes, constraints the OS
+    // browser does not share. The YouTube embed URL is likewise for the
+    // iframe only, not the watch page.
     raw: (block) => {
       const uri = mediaState.parse(block.data).uri;
-      return mediaInfo(uri).type === "youtube" ? uri : mediaSrc(uri);
+      const url = parseMediaUri(uri);
+      return url &&
+        (url.protocol === "http:" || url.protocol === "https:")
+        ? uri
+        : mediaSrc(uri);
     },
   },
 
