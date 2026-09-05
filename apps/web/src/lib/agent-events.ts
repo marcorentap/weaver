@@ -13,6 +13,12 @@ import { z } from "zod";
 export const agentEvent = z.discriminatedUnion("type", [
   /** An assistant message — the agent's own words, not a tool's output. */
   z.object({ type: z.literal("text"), text: z.string() }),
+  /** One incremental chunk of an assistant message while it is still being
+   *  generated, in generation order. A `text` event still follows once the
+   *  message is complete — its `text` is the authoritative full message,
+   *  used verbatim when no deltas arrived (a run that used no streaming) and
+   *  as the streaming block's finish signal otherwise. */
+  z.object({ type: z.literal("text_delta"), text: z.string() }),
   /** A finished tool call, with whatever it printed. */
   z.object({
     type: z.literal("tool"),

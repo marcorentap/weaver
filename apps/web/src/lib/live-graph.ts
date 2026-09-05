@@ -239,6 +239,36 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       };
       commit(insertBlock(snapshot.graph, child, { parentId, afterId }), true);
       afterId = newId;
+      return newId;
+    };
+    // The block a run's `text_delta` chunks are currently landing in — null
+    // between messages, so the first delta of a new one starts a fresh
+    // block instead of gluing onto whatever came before it (a tool result,
+    // a displayed block, or an earlier reply in the same run).
+    let streamingId: BlockId | null = null;
+    let streamingText = "";
+    const appendDelta = (delta: string) => {
+      streamingText += delta;
+      if (streamingId === null) {
+        streamingId = append(TEXT_KIND, { text: streamingText }, "assistant");
+        return;
+      }
+      const current = snapshot.graph.blocks[streamingId];
+      if (!current) return; // Deleted mid-stream.
+      commit(
+        {
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [streamingId]: {
+              ...current,
+              data: { text: streamingText },
+              modifiedAt: Date.now(),
+            },
+          },
+        },
+        true,
+      );
     };
     // Pre-flight failures land as an appended error block too, and never
     // set `running` — there is nothing in flight to show a spinner for.
@@ -263,9 +293,23 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       await streamInference(
         { endpoint, apiKey, model, context, prompt, tools },
         (event) => {
-          if (event.type === "text") {
-            append(TEXT_KIND, { text: event.text }, "assistant");
+          if (event.type === "text_delta") {
+            appendDelta(event.text);
+          } else if (event.type === "text") {
+            // Deltas already streamed this message in: the block already
+            // holds it, so this only ends the stream rather than appending
+            // a duplicate. No deltas arrived (a non-streaming provider, or
+            // this text came with no preceding delta at all) falls back to
+            // appending it whole, exactly as before deltas existed.
+            if (streamingId !== null) {
+              streamingId = null;
+              streamingText = "";
+            } else {
+              append(TEXT_KIND, { text: event.text }, "assistant");
+            }
           } else if (event.type === "tool") {
+            streamingId = null;
+            streamingText = "";
             append(
               TOOL_KIND,
               {
@@ -277,6 +321,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               event.name,
             );
           } else if (event.type === "block") {
+            streamingId = null;
+            streamingText = "";
             const target = kinds[event.kind];
             if (!target) return;
             try {

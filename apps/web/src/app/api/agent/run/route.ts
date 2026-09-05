@@ -388,6 +388,15 @@ export async function POST(request: Request): Promise<Response> {
             pendingArgs.set(event.toolCallId, JSON.stringify(event.args ?? {}));
             return;
           }
+          // Token-by-token streaming of the assistant's own words; the
+          // `text` event at `message_end` below is still the authoritative
+          // full message, so nothing here is deduplicated against it.
+          if (event.type === "message_update") {
+            if (event.assistantMessageEvent.type === "text_delta") {
+              emit({ type: "text_delta", text: event.assistantMessageEvent.delta });
+            }
+            return;
+          }
           if (event.type === "message_end") {
             const text = messageText(event.message);
             if (text) emit({ type: "text", text });
