@@ -44,7 +44,7 @@ function youtubeVideoId(url: URL): string | null {
   if (host !== "youtube.com") return null;
   if (url.pathname === "/watch") return url.searchParams.get("v");
   const embed = url.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/);
-  return embed ? embed[1] : null;
+  return embed ? (embed[1] ?? null) : null;
 }
 
 const EXTENSIONS: Record<string, { type: MediaType; mime: string }> = {
