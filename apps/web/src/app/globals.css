@@ -207,6 +207,30 @@
   font-weight: 600;
 }
 
+/* Every scrollable region gets this instead of the platform's default
+   scrollbar, so a scroll track reads as part of the UI rather than a native
+   overlay clashing with the greyscale theme. `scrollbar-none` (below) opts
+   a region out entirely — its class selector outranks this universal one,
+   so the two never fight over the same element. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--muted-foreground);
+}
+
 /* Scrolls, but shows nothing: the shell is a fixed frame, and a gutter that
    appears and disappears with content reflows the columns beside it. */
 @utility scrollbar-none {
