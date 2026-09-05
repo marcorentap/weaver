@@ -218,6 +218,13 @@
   padding: 0;
 }
 
+/* KaTeX's own `.katex-display` margin (1em top and bottom) is tuned for
+   full-size prose, not the rail's `text-xs` scale, and reads as barely any
+   space next to the `mt-2` every other block element uses. */
+.katex-display {
+  margin: 0.75rem 0;
+}
+
 /* Every scrollable region gets this instead of the platform's default
    scrollbar, so a scroll track reads as part of the UI rather than a native
    overlay clashing with the greyscale theme. `scrollbar-none` (below) opts
