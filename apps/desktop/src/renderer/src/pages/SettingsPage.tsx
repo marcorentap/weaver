@@ -179,14 +179,14 @@ export default function SettingsPage() {
       kind: "string",
       key: "aiEndpoint",
       label: "Endpoint",
-      description: "OpenAI-completions base URL an agent block calls.",
+      description: "OpenAI-completions base URL used for inference.",
       section: "AI provider",
       value: settings.aiEndpoint,
       onChange: setAiEndpoint,
       placeholder: "https://api.openai.com/v1",
       provider: true,
-      // Same check the proxy route runs, so a URL accepted here is one an
-      // agent block can actually call.
+      // Same check the proxy route runs, so a URL accepted here is one
+      // inference can actually call.
       validate: (value) =>
         !value.trim() || providerUrl(value, "models")
           ? null
