@@ -6,26 +6,28 @@ import Markdown, {
 } from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
+import rehypeKatex from "rehype-katex";
 import { mediaSrc, parseMediaUri } from "@/blocks/media";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
 /**
  * Module-level so the pipeline is not rebuilt on every render. `remark-breaks`
- * keeps a single newline a line break: a block's text is as often typed by
- * hand as generated, and markdown's paragraph folding would silently glue
- * hand-written lines together.
+ * turns a bare newline into `<br>`, matching a chat message's own line breaks
+ * instead of CommonMark's "needs two"; `remark-math` picks `$...$` and
+ * `$$...$$` out as math nodes for `rehype-katex` to render below.
  */
-const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkMath];
 
 /**
  * Fenced code is highlighted by the same highlight.js grammars a read tool's
- * output uses, into `hljs-*` spans that globals.css colours. A fence with no
- * language, or one nobody has a grammar for, is left as plain text: guessing
- * is worse than not colouring.
+ * own preview uses; math nodes `remark-math` produced render as real KaTeX
+ * markup, not literal `$...$` — its stylesheet is imported once in
+ * `globals.css`, ahead of Tailwind's own import.
  */
-const REHYPE_PLUGINS = [rehypeHighlight];
+const REHYPE_PLUGINS = [rehypeHighlight, rehypeKatex];
 
 /**
  * A fenced block, wrapped or scrolled per the word wrap setting. It is its own
