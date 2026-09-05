@@ -237,6 +237,13 @@ function MediaRow({ state }: { state: MediaState }) {
           />
         </span>
       ) : null}
+      {type === "youtube" ? (
+        <iframe
+          src={src}
+          title={mediaName(state.uri)}
+          className="pointer-events-none h-48 w-72 shrink-0 border"
+        />
+      ) : null}
       {type === "text" ? (
         <MediaText
           src={src}
@@ -277,6 +284,17 @@ function MediaPreview({ state }: { state: MediaState }) {
   }
   if (type === "pdf") {
     return <iframe src={src} title="pdf" className="h-[70vh] w-full" />;
+  }
+  if (type === "youtube") {
+    return (
+      <iframe
+        src={src}
+        title={mediaName(state.uri)}
+        allow="autoplay; encrypted-media; picture-in-picture"
+        allowFullScreen
+        className="h-[70vh] w-full"
+      />
+    );
   }
   if (type === "text") {
     return (

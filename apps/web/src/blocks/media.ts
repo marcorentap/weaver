@@ -15,6 +15,7 @@ export type MediaType =
   | "audio"
   | "pdf"
   | "text"
+  | "youtube"
   | "unknown";
 
 /** Schemes worth supporting: the web, and the machine the harness runs on. */
@@ -29,6 +30,21 @@ export function parseMediaUri(uri: string): URL | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The video id out of any of YouTube's URL shapes: a watch link, a shortened
+ * `youtu.be` link, an `/embed/` link already, or a Shorts link. `null` for
+ * anything else, including a YouTube URL that isn't actually a video (the
+ * channel or search page, say).
+ */
+function youtubeVideoId(url: URL): string | null {
+  const host = url.hostname.replace(/^(www|m)\./, "");
+  if (host === "youtu.be") return url.pathname.slice(1) || null;
+  if (host !== "youtube.com") return null;
+  if (url.pathname === "/watch") return url.searchParams.get("v");
+  const embed = url.pathname.match(/^\/(?:embed|shorts)\/([^/]+)/);
+  return embed ? embed[1] : null;
 }
 
 const EXTENSIONS: Record<string, { type: MediaType; mime: string }> = {
@@ -77,6 +93,7 @@ export function mediaName(uri: string): string {
 export function mediaInfo(uri: string): { type: MediaType; mime: string } {
   const url = parseMediaUri(uri);
   if (!url) return UNKNOWN;
+  if (youtubeVideoId(url)) return { type: "youtube", mime: "text/html" };
   const name = url.pathname.toLowerCase();
   const dot = name.lastIndexOf(".");
   if (dot === -1) return UNKNOWN;
@@ -94,6 +111,8 @@ export function mediaInfo(uri: string): { type: MediaType; mime: string } {
 export function mediaSrc(uri: string): string {
   const url = parseMediaUri(uri);
   if (!url) return uri;
+  const id = youtubeVideoId(url);
+  if (id) return `https://www.youtube.com/embed/${id}`;
   return url.protocol === "file:" || mediaInfo(uri).type === "text"
     ? `/api/media?uri=${encodeURIComponent(uri)}`
     : uri;
