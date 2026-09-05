@@ -1,0 +1,24 @@
+appId: com.marcorentap.weaver
+productName: Weaver
+directories:
+  buildResources: resources
+  output: release
+files:
+  - out/**/*
+  - package.json
+asarUnpack:
+  # node:sqlite's native binding and ssh's child_process spawn both need
+  # real files on disk, not asar's virtual filesystem.
+  - "**/node_modules/@repo/store/**"
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+mac:
+  target:
+    - dmg
+  category: public.app-category.developer-tools
+win:
+  target:
+    - nsis

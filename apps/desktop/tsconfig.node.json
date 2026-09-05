@@ -1,0 +1,12 @@
+{
+  "extends": "@repo/typescript-config/base.json",
+  "compilerOptions": {
+    "incremental": true,
+    "types": ["electron-vite/node"],
+    "paths": {
+      "@shared/*": ["./src/shared/*"],
+      "@repo/*": ["../../packages/*/src"]
+    }
+  },
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts"]
+}

@@ -1,0 +1,110 @@
+import { resolve } from "node:path";
+import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import react from "@vitejs/plugin-react";
+import babel from "vite-plugin-babel";
+import { viteStaticCopy } from "vite-plugin-static-copy";
+import tailwindcss from "@tailwindcss/postcss";
+
+const reactCompilerConfig = {
+  target: "19",
+};
+
+export default defineConfig({
+  main: {
+    plugins: [
+      // `@repo/core`/`@repo/store` ship raw `.ts` source (no build step of
+      // their own — see the monorepo's "no-build" convention), so they
+      // must be bundled/transpiled here rather than externalized like a
+      // normal `node_modules` package: Node cannot `require()` a `.ts` file
+      // directly, unlike Next/Turbopack, which transpiles them in one pass.
+      externalizeDepsPlugin({ exclude: ["@repo/core", "@repo/store"] }),
+      // `agent/system-prompt.md` is read at run time via `readFileSync`, not
+      // imported as a module — copied next to the bundled `index.js` so
+      // `__dirname`-relative reads keep working whether this is `electron-vite
+      // dev`'s out-of-source build or a packaged app.
+      viteStaticCopy({
+        // electron-vite's main build runs as Vite's SSR build environment
+        // (named "ssr", not the default "client") — without this the
+        // plugin's build hook never fires and nothing is copied.
+        environment: "ssr",
+        targets: [
+          {
+            src: resolve("src/main/agent/system-prompt.md"),
+            dest: "agent",
+            rename: { stripBase: true },
+          },
+        ],
+      }),
+    ],
+    resolve: {
+      alias: {
+        "@shared": resolve("src/shared"),
+      },
+    },
+    build: {
+      rollupOptions: {
+        input: { index: resolve("src/main/index.ts") },
+        output: { format: "es" },
+      },
+    },
+  },
+  preload: {
+    plugins: [externalizeDepsPlugin()],
+    resolve: {
+      alias: {
+        "@shared": resolve("src/shared"),
+      },
+    },
+    build: {
+      rollupOptions: {
+        output: { format: "es" },
+      },
+    },
+  },
+  renderer: {
+    root: resolve("src/renderer"),
+    resolve: {
+      alias: {
+        "@": resolve("src/renderer/src"),
+        "@shared": resolve("src/shared"),
+      },
+    },
+    css: {
+      postcss: {
+        plugins: [tailwindcss()],
+      },
+    },
+    build: {
+      rollupOptions: {
+        input: { index: resolve("src/renderer/index.html") },
+      },
+    },
+    plugins: [
+      // Rows re-render on every cursor move; the compiler's memoization is
+      // what keeps that from re-parsing every block's state and every
+      // markdown file (ported from apps/web's `reactCompiler: true`, which
+      // has no Vite-native equivalent).
+      babel({
+        filter: /\.[jt]sx?$/,
+        babelConfig: {
+          presets: ["@babel/preset-typescript"],
+          plugins: [["babel-plugin-react-compiler", reactCompilerConfig]],
+        },
+      }),
+      react(),
+      // katex.min.css addresses its font files with bare relative
+      // `url(fonts/...)`, which is CSS Next's own pipeline resolved for
+      // free — Vite leaves an unresolved `url()` untouched, so the actual
+      // font files need to land next to the built CSS by hand.
+      viteStaticCopy({
+        targets: [
+          {
+            src: resolve("node_modules/katex/dist/fonts/*"),
+            dest: "assets/fonts",
+            rename: { stripBase: true },
+          },
+        ],
+      }),
+    ],
+  },
+});

@@ -9,3 +9,7 @@ allowBuilds:
   protobufjs: false
   sharp: false
   unrs-resolver: false
+  # Electron's postinstall downloads its prebuilt binary; esbuild's fetches
+  # its native platform binary. Both are required for apps/desktop to run.
+  electron: true
+  esbuild: true

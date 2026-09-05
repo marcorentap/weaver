@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en" class="h-full antialiased dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' weaver-media:; img-src 'self' data: weaver-media: https: http:; media-src 'self' weaver-media: https: http:; frame-src 'self' weaver-media: https: http:; connect-src 'self' weaver-media: https: http:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com;"
+    />
+    <title>Weaver</title>
+  </head>
+  <body class="flex h-full flex-col overflow-hidden font-mono text-xs">
+    <div id="root" class="flex h-full flex-col overflow-hidden"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
