@@ -2,13 +2,19 @@ import type { BlockData } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
-import { MEDIA_KIND, USER_KIND } from "@plugins/rich-media";
+import { MEDIA_KIND } from "@plugins/rich-media";
 
-const t0 = Date.parse("2026-08-31T09:00:00.000Z");
+const t0 = Date.parse("2026-09-06T00:00:00.000Z");
 
 /**
  * The seed is authored as the tree it renders as, with order as position in
  * the list and nesting as nesting, then flattened into linked blocks below.
+ *
+ * It is a user-facing tour of the graph, not context for a model: blocks say
+ * what a block is, then show it with concrete examples, from a snippet of
+ * markdown to a nested group and inline media of every kind. The rich-media
+ * plugin supplies the media and code-file examples below; those kinds are
+ * bundled, so a fresh install always has them.
  */
 type SeedNode = {
   kind: string;
@@ -20,73 +26,100 @@ type SeedNode = {
 const tree: SeedNode[] = [
   {
     kind: TEXT_KIND,
-    label: "system",
-    data: { text: "You are a graphical agent harness." },
+    label: "intro",
+    data: {
+      text: "This is your Weaver graph. The chat is a tree of blocks, and every block is context. The tour that follows shows what a graph can hold, top to bottom, and it ends with a prompt you can run inference on.",
+    },
   },
+
   {
     kind: TEXT_KIND,
-    label: "env",
-    data: { text: "cwd=/home/marcorentap/projects/weaver" },
+    label: "text",
+    data: {
+      text: "Most blocks are Text, a chunk of markdown rendered in place. The block you're reading is one. A denser block, like this:",
+    },
   },
 
-  // Group nesting text blocks.
+  {
+    kind: TEXT_KIND,
+    label: "markdown",
+    data: {
+      text: [
+        "# A heading",
+        "",
+        "A paragraph with **bold**, *emphasis*, and `inline code`.",
+        "",
+        "> A blockquote.",
+        "",
+        "- a bullet list",
+        "- another item",
+      ].join("\n"),
+    },
+  },
+
+  {
+    kind: TEXT_KIND,
+    label: "group",
+    data: {
+      text: "A Group block has no prose of its own; its children are its content. Nesting is how one block holds a whole branch. Like this:",
+    },
+  },
+
   {
     kind: GROUP_KIND,
-    label: "tools",
+    label: "nesting",
     children: [
       {
         kind: TEXT_KIND,
-        label: "read",
-        data: { text: "read(path) -> string" },
+        label: "one",
+        data: { text: "a nested block" },
       },
       {
         kind: TEXT_KIND,
-        label: "write",
-        data: { text: "write(path, content) -> void" },
-      },
-      {
-        kind: TEXT_KIND,
-        label: "grep",
-        data: { text: "grep(pattern, path) -> match[]" },
+        label: "two",
+        data: { text: "another, still a child of the group" },
       },
     ],
   },
 
-  // Nesting two levels deep with a custom kind at the leaves.
   {
-    kind: GROUP_KIND,
-    label: "repo",
-    children: [
-      {
-        kind: TEXT_KIND,
-        label: "map",
-        data: { text: "apps/desktop, packages/core, packages/store" },
-      },
-      {
-        kind: GROUP_KIND,
-        label: "files",
-        children: [
-          {
-            kind: MEDIA_KIND,
-            label: "fs.js",
-            data: {
-              uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/fs.js",
-            },
-          },
-          {
-            kind: MEDIA_KIND,
-            label: "path.js",
-            data: {
-              uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/path.js",
-            },
-          },
-        ],
-      },
-    ],
+    kind: TEXT_KIND,
+    label: "code",
+    data: {
+      text: "A media block pulls a real file in, either its text inline or its media player. Source files land as highlighted code, like this:",
+    },
   },
 
-  // Media, addressed by URI: one per detected type. Everything is fetched over
-  // https, so the repo carries no sample binaries.
+  {
+    kind: MEDIA_KIND,
+    label: "fs.js",
+    data: {
+      uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/fs.js",
+    },
+  },
+  {
+    kind: MEDIA_KIND,
+    label: "path.js",
+    data: {
+      uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/lib/path.js",
+    },
+  },
+  {
+    kind: MEDIA_KIND,
+    label: "readme.md",
+    data: {
+      uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/README.md",
+    },
+  },
+
+  {
+    kind: TEXT_KIND,
+    label: "media",
+    data: {
+      text: "The same kind plays images, video, audio, and PDFs inline. One per type, like this:",
+    },
+  },
+
   {
     kind: MEDIA_KIND,
     label: "example.svg",
@@ -130,18 +163,6 @@ const tree: SeedNode[] = [
   },
   {
     kind: MEDIA_KIND,
-    label: "rfc2119.txt",
-    data: { uri: "https://www.rfc-editor.org/rfc/rfc2119.txt" },
-  },
-  {
-    kind: MEDIA_KIND,
-    label: "readme.md",
-    data: {
-      uri: "https://raw.githubusercontent.com/nodejs/node/6f41e415639b5ec3dd816e44945cc73b4d7651e3/README.md",
-    },
-  },
-  {
-    kind: MEDIA_KIND,
     label: "bunny.ogv",
     data: {
       // Unlisted extension, so this is the fallback row and preview.
@@ -149,12 +170,27 @@ const tree: SeedNode[] = [
     },
   },
 
-  // appended right after it, using everything above as context.
   {
-    kind: USER_KIND,
-    label: "user",
+    kind: TEXT_KIND,
+    label: "kinds",
     data: {
-      text: "In one sentence, summarize what this graph of context blocks describes.",
+      text: "A kind sets how a block looks and what it carries. Text, Group, and these media kinds are shipped with the app. Everything else, and every tool an agent can call, comes from plugins. Plugins live in a directory the app scans at startup; add a directory and its kinds and tools appear, no rebuild.",
+    },
+  },
+
+  {
+    kind: TEXT_KIND,
+    label: "infer",
+    data: {
+      text: "To run inference, move the cursor onto a block and trigger the action. The model reads every block above it as context and appends its reply as new blocks below. The next block is a ready prompt:",
+    },
+  },
+
+  {
+    kind: TEXT_KIND,
+    label: "run",
+    data: {
+      text: "In a few sentences, describe what this graph demonstrates: which kinds it shows and what nesting does.",
     },
   },
 ];
