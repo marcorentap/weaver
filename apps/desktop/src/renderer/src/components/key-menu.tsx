@@ -105,7 +105,10 @@ export function KeyMenu({
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {item.detail ? (
-                    <span className="shrink-0 text-muted-foreground">
+                    // A short id or a long value, both a gray preview on the
+                    // right. Truncates rather than outgrowing its row, so a
+                    // media block's huge text reads as a preview, not a flood.
+                    <span className="max-w-[55%] truncate text-muted-foreground">
                       {item.detail}
                     </span>
                   ) : null}

@@ -84,7 +84,7 @@ export function FieldEditor({
           />
         ) : (
           <input
-            // The only place in the app where typing beats modal keys.
+            // Short fields (a session name, a hook argument): a single input.
             autoFocus
             value={value}
             disabled={saving}
