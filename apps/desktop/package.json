@@ -2,6 +2,7 @@
   "name": "@apps/desktop",
   "version": "0.1.0",
   "description": "Weaver desktop app",
+  "license": "MIT",
   "author": {
     "name": "Marc Owen Rentap",
     "email": "17574533+marcorentap@users.noreply.github.com"
