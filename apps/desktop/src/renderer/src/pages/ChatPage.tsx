@@ -90,6 +90,18 @@ function containerOf(rows: Row[], row: Row | undefined): BlockId | null {
   return row.parent === null ? null : (rows[row.parent]?.block.id ?? null);
 }
 
+/** The block a run anchored at `id` is currently appending after: the last
+ *  block in its `next` chain, or `id` itself before anything has streamed
+ *  in yet. This is where the run's flashing "appending here" border goes. */
+function runningTail(graph: BlockGraph, id: BlockId): BlockId {
+  let cur = id;
+  for (;;) {
+    const next = graph.blocks[cur]?.next;
+    if (next === null || next === undefined) return cur;
+    cur = next;
+  }
+}
+
 /**
  * Where a new block goes for the gap before `rows[gap]` (`gap === rows.length`
  * means after the last row). It lands right after the row above the gap, in
@@ -166,6 +178,7 @@ function BlockRow({
   inSelection,
   line,
   running,
+  flashing,
   gutter,
   shown,
   onSelect,
@@ -181,6 +194,9 @@ function BlockRow({
   line: number | null;
   /** Whether this block has a hook in flight right now. */
   running: boolean;
+  /** Whether a running inference appends its next block right after this
+   *  row. Flashes the bottom border. */
+  flashing: boolean;
   /** Whether the gutter column is enabled at all (hidden pre-hydration). */
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
@@ -246,7 +262,7 @@ function BlockRow({
       aria-expanded={row.nested > 0 ? row.expanded : undefined}
       onClick={onSelect}
       className={cn(
-        "flex cursor-pointer items-start gap-3 border-l-2 py-1 pl-1 pr-3",
+        "relative flex cursor-pointer items-start gap-3 border-l-2 py-1 pl-1 pr-3",
         selected
           ? "border-foreground/60 bg-muted"
           : inSelection
@@ -254,6 +270,9 @@ function BlockRow({
             : "border-transparent",
       )}
     >
+      {flashing ? (
+        <div className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 animate-pulse bg-foreground/60" />
+      ) : null}
       <Gutter line={line} show={gutter} current={selected} />
       <span
         // Indent eats into this column, so it is wide enough for a couple of
@@ -567,6 +586,8 @@ function ChatView({
   }, [engine]);
 
   const rows = flatten(liveNodes, expanded);
+  const runningTailIds = new Set<BlockId>();
+  for (const id of running) runningTailIds.add(runningTail(graph, id));
   // Follows a block to its new row the instant it shows up in `rows`.
   // Immediately for a top-level block, one render later for a nested one,
   // since expanding its container also happens during this same "adjust
@@ -1484,6 +1505,7 @@ function ChatView({
                 }
                 line={lineNumber(i)}
                 running={running.has(entry.block.id)}
+                flashing={runningTailIds.has(entry.block.id)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>
