@@ -219,7 +219,7 @@ async function runAgent(
         ...displayable.map(
           (entry) => `- ${entry.kind}: ${JSON.stringify(entry.schema)}`,
         ),
-        'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. A local file needs an absolute file:// URI, such as {"uri":"file:///home/me/diagram.png"}.',
+        'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn\'t recognize, renders as a plain "no preview" placeholder instead of the actual file, so don\'t use this kind for extensionless paths. If the only copy you have is extensionless (a download, a temp file, an attachment), write or copy it to a path that ends in the right extension first, then point this block at that copy. A local file needs an absolute file:// URI, such as {"uri":"file:///home/me/diagram.png"}.',
         "Text: renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images all work; an image needs an http(s) or absolute file:// URL.",
         "A `Text` block is already visible. Don't restate its content in your reply. Summarizing is fine.",
       ].join("\n"),
