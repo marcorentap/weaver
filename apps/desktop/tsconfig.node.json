@@ -3,9 +3,11 @@
   "compilerOptions": {
     "incremental": true,
     "types": ["electron-vite/node"],
+    "allowImportingTsExtensions": true,
     "paths": {
       "@shared/*": ["./src/shared/*"],
-      "@repo/*": ["../../packages/*/src"]
+      "@repo/*": ["../../packages/*/src"],
+      "@plugins/*": ["../../plugins/*/src"]
     }
   },
   "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts"]

@@ -10,6 +10,10 @@ import {
 import { useKeyLayer } from "@/lib/keymap";
 import { providerUrl } from "@/lib/provider";
 import { cn } from "@/lib/utils";
+import type {
+  PluginListResult,
+  PluginSettingFieldWire,
+} from "@shared/ipc-contract.js";
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -139,7 +143,6 @@ export default function SettingsPage() {
     setAiEndpoint,
     setAiApiKey,
     setAiDefaultModel,
-    setSearxngUrl,
   } = useSettings();
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
@@ -152,7 +155,111 @@ export default function SettingsPage() {
     message: string;
     models?: string[];
   } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+const inputRef = useRef<HTMLInputElement>(null);
+
+  /** Loaded plugins and their setting values, fetched over IPC so the
+   *  Settings page reflects the plugins actually loaded, not a hardcoded
+   *  set. */
+  const [pluginList, setPluginList] = useState<PluginListResult | null>(null);
+  const [pluginValues, setPluginValues] = useState<
+    Record<string, Record<string, string>>
+  >({});
+
+  useEffect(() => {
+    void (async () => {
+      const result = await window.api.plugins.list();
+      setPluginList(result);
+      const values: Record<string, Record<string, string>> = {};
+      for (const plugin of result.plugins) {
+        const raw = await window.api.settings.get(`weaver.plugins.${plugin.id}`);
+        try {
+          const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+          if (
+            typeof parsed === "object" &&
+            parsed !== null &&
+            !Array.isArray(parsed)
+          ) {
+            values[plugin.id] = Object.fromEntries(
+              Object.entries(parsed).map(([key, value]) => [
+                key,
+                typeof value === "string" || typeof value === "number"
+                  ? String(value)
+                  : "",
+              ]),
+            );
+          }
+        } catch {
+          // Corrupt plugin settings are ignored, same as app settings.
+        }
+        values[plugin.id] ??= {};
+      }
+      setPluginValues(values);
+    })();
+  }, []);
+
+  /** Persist one plugin setting field and update the local copy. */
+  const setPluginField = (
+    pluginId: string,
+    key: string,
+    value: string,
+  ) => {
+    const next = { ...pluginValues[pluginId], [key]: value };
+    setPluginValues({ ...pluginValues, [pluginId]: next });
+    void window.api.settings.set(
+      `weaver.plugins.${pluginId}`,
+      JSON.stringify(next),
+    );
+  };
+
+  /** A plugin setting field becomes one editable row, under the plugin's
+   *  own section. */
+  function pluginSettingDef(
+    plugin: PluginListResult["plugins"][number],
+    field: PluginSettingFieldWire,
+    pluginId: string,
+  ): SettingDef {
+    const value = pluginValues[pluginId]?.[field.key] ?? "";
+    const section = plugin.name;
+    if (field.kind === "number") {
+      return {
+        kind: "number",
+        key: field.key,
+        label: field.label,
+        description: field.description,
+        section,
+        value: value === "" ? 0 : Number(value),
+        step: field.step ?? 1,
+        min: field.min,
+        max: field.max,
+        onChange: (next) =>
+          setPluginField(pluginId, field.key, String(next)),
+      };
+    }
+    if (field.kind === "option") {
+      return {
+        kind: "option",
+        key: field.key,
+        label: field.label,
+        description: field.description,
+        section,
+        options: field.options ?? [],
+        value,
+        editable: field.editable,
+        onChange: (next) => setPluginField(pluginId, field.key, next),
+      };
+    }
+    return {
+      kind: "string",
+      key: field.key,
+      label: field.label,
+      description: field.description,
+      section,
+      value,
+      onChange: (next) => setPluginField(pluginId, field.key, next),
+      placeholder: field.placeholder,
+      secret: field.secret,
+    };
+  }
 
   const defs: SettingDef[] = [
     {
@@ -225,22 +332,32 @@ export default function SettingsPage() {
         return null;
       },
     },
-    {
+    ];
+
+  // Plugin contributions come last: a "Plugins" section for the directory
+  // setting, then one section per loaded plugin for its own settings. Each
+  // plugin's fields and their values are what the main process reported at
+  // startup, so sections track the plugins actually loaded.
+  if (pluginList) {
+    defs.push({
       kind: "string",
-      key: "searxngUrl",
-      label: "SearXNG URL",
+      key: "plugins.dir",
+      label: "Plugins directory",
       description:
-        "Base URL of a SearXNG instance used for web search. Blank disables the tool.",
-      section: "Search",
-      value: settings.searxngUrl,
-      onChange: setSearxngUrl,
-      placeholder: "http://searxng-host:8085",
-      validate: (value) =>
-        !value.trim() || providerUrl(value, "search")
-          ? null
-          : "needs a scheme and host, e.g. http://searxng-host:8085",
-    },
-  ];
+        "Directory holding plugin subdirectories (blocks/, tools/). Plugins here load at startup, no rebuild.",
+      section: "Plugins",
+      value: pluginList.dir,
+      onChange: (value) => {
+        void window.api.settings.set("weaver.plugins.dir", value);
+        setPluginList({ ...pluginList, dir: value });
+      },
+    });
+    for (const plugin of pluginList.plugins) {
+      for (const field of plugin.settings ?? []) {
+        defs.push(pluginSettingDef(plugin, field, plugin.id));
+      }
+    }
+  }
 
   const index = Math.min(cursor, Math.max(defs.length - 1, 0));
   const def = defs[index];

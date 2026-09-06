@@ -1,10 +1,10 @@
 /**
- * File extension to grammar. Shared by `CodeBlock` (which highlighting to
- * apply) and the media kind (which extensions are plain text at all, as
- * opposed to something with no text viewer). An extension not listed here
- * has no known grammar; `CodeBlock` still renders it as plain preformatted
- * text rather than guessing, because a wrong guess colours a log file like
- * Perl.
+ * File extension to grammar. Shared by the renderer's `CodeBlock` (which
+ * highlighting to apply) and the media kind (which extensions are plain text
+ * at all, as opposed to something with no text viewer). An extension not
+ * listed here has no known grammar; `CodeBlock` still renders it as plain
+ * preformatted text rather than guessing, because a wrong guess colours a
+ * log file like Perl.
  */
 export const LANGUAGES: Record<string, string> = {
   ts: "typescript",

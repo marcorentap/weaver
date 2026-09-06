@@ -8,6 +8,7 @@ import type {
   CreateSessionResult,
   LoadGraphResult,
   MutationResult,
+  PluginListResult,
   WeaverApi,
 } from "../shared/ipc-contract.js";
 import type { BlockInput } from "@repo/store";
@@ -59,6 +60,10 @@ const api: WeaverApi = {
       ipcRenderer.invoke("settings:get", key) as Promise<string | null>,
     set: (key: string, value: string) =>
       ipcRenderer.invoke("settings:set", key, value) as Promise<void>,
+  },
+  plugins: {
+    list: () =>
+      ipcRenderer.invoke("plugins:list") as Promise<PluginListResult>,
   },
   agent: {
     check: (endpoint, apiKey) =>

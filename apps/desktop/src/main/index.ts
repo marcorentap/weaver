@@ -4,6 +4,8 @@ import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-pr
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
+import { registerPluginHandlers } from "./ipc/plugins.js";
+import { ensurePluginsLoaded } from "./lib/plugins.js";
 
 // Electron falls back to `package.json`'s `name` ("@apps/desktop") for the
 // app name when nothing sets one explicitly, and on Linux that value is
@@ -55,11 +57,16 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   registerMediaProtocol();
+  // Load plugins before any window opens so the store validates block
+  // writes against the full kind registry and the first run mounts the
+  // loaded plugin tools from the start.
+  await ensurePluginsLoaded();
   registerChatHandlers();
   registerAgentHandlers();
   registerSettingsHandlers();
+  registerPluginHandlers();
 
   createWindow();
 

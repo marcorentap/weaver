@@ -8,15 +8,15 @@ import {
   mediaState,
   parseMediaUri,
   youtubeVideoId,
-} from "@shared/blocks/media.js";
-import type { MediaState, MediaType } from "@shared/blocks/media.js";
+} from "@plugins/rich-media";
+import type { MediaState, MediaType } from "@plugins/rich-media";
 
 // Everything else about a media block, its kind constant, schema, uri
-// parsing, and type/mime sniffing, is shared with the main process (see
-// `@shared/blocks/media.ts`), which needs the same logic for the media
-// protocol handler and the store's seed/validation. `mediaSrc` alone stays
-// here. It is the one piece of "what does a media URI resolve to" that only
-// makes sense in a page that can load a `weaver-media://` URL.
+// parsing, and type/mime sniffing, ships with the rich-media plugin, which
+// the main process imports for the media protocol handler and the store's
+// seed/validation. `mediaSrc` alone stays here. It is the one piece of "what
+// does a media URI resolve to" that only makes sense in a page that can load
+// a `weaver-media://` URL.
 export {
   MEDIA_KIND,
   MEDIA_SCHEME_HINT,

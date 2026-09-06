@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineKind } from "@repo/core";
-import { languageForPath } from "../languages.js";
+import { languageForPath } from "../../languages.ts";
 
 /**
  * One tool call an agent made. An agent run does not produce a single string

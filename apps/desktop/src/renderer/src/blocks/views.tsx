@@ -16,9 +16,8 @@ import {
   mediaState,
   parseMediaUri,
 } from "./media";
-import { USER_KIND, userState } from "@shared/blocks/user.js";
-import type { ToolState } from "@shared/blocks/tool.js";
-import { TOOL_KIND, toolLanguage, toolState } from "@shared/blocks/tool.js";
+import { TOOL_KIND, toolLanguage, toolState, USER_KIND, userState } from "@plugins/rich-media";
+import type { ToolState } from "@plugins/rich-media";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -309,7 +308,12 @@ export const blockViews: Record<string, BlockView> = {
   [MEDIA_KIND]: {
     Row: ({ block }) => <MediaRow state={mediaState.parse(block.data)} />,
     fields: (block) => [
-      { name: "uri", label: "URI", value: mediaState.parse(block.data).uri },
+      {
+        name: "uri",
+        label: "URI",
+        value: mediaState.parse(block.data).uri,
+        multiline: true,
+      },
     ],
     Preview: ({ block }) => (
       <MediaPreview state={mediaState.parse(block.data)} />
@@ -350,8 +354,8 @@ export const blockViews: Record<string, BlockView> = {
     fields: (block) => {
       const state = toolState.parse(block.data);
       return [
-        { name: "name", label: "tool", value: state.name },
-        { name: "args", label: "args", value: state.args },
+        { name: "name", label: "tool", value: state.name, multiline: true },
+        { name: "args", label: "args", value: state.args, multiline: true },
         {
           name: "output",
           label: "output",

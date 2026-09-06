@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { protocol, type CustomScheme } from "electron";
-import { MEDIA_KIND, mediaInfo, parseMediaUri } from "../../shared/blocks/media.js";
+import { MEDIA_KIND, mediaInfo, parseMediaUri } from "@plugins/rich-media";
 import { MEDIA_PROTOCOL } from "../../shared/ipc-contract.js";
 import { projectRoot } from "../lib/project.js";
 import { getStore } from "../lib/store.js";

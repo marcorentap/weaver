@@ -12,12 +12,20 @@ const reactCompilerConfig = {
 export default defineConfig({
   main: {
     plugins: [
-      // `@repo/core`/`@repo/store` ship raw `.ts` source (no build step of
+      // `@repo/*` and `@plugins/*` ship raw `.ts` source (no build step of
       // their own; see the monorepo's "no-build" convention), so they
       // must be bundled/transpiled here rather than externalized like a
       // normal `node_modules` package. Node cannot `require()` a `.ts` file
       // directly, unlike Next/Turbopack, which transpiles them in one pass.
-      externalizeDepsPlugin({ exclude: ["@repo/core", "@repo/store"] }),
+      externalizeDepsPlugin({
+        exclude: [
+          "@repo/core",
+          "@repo/plugins",
+          "@repo/store",
+          "@plugins/agent-seerxng",
+          "@plugins/rich-media",
+        ],
+      }),
       // `agent/system-prompt.md` is read at run time via `readFileSync`, not
       // imported as a module. It is copied next to the bundled `index.js` so
       // `__dirname`-relative reads keep working whether this is `electron-vite

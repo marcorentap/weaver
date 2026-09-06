@@ -1,6 +1,7 @@
 packages:
   - "apps/*"
   - "packages/*"
+  - "plugins/*"
 allowBuilds:
   # Both arrive with the agent SDK; neither postinstall is needed here —
   # @google/genai only fetches optional native bits for providers we never

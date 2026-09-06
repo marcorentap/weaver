@@ -29,8 +29,7 @@ import { chatNodes } from "@/lib/graph-view";
 import { scheduledHooks } from "@/lib/live-graph";
 import { getLiveGraph, dropLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
-import { USER_KIND } from "@shared/blocks/user.js";
-import { TOOL_KIND, toolState } from "@shared/blocks/tool.js";
+import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
 import { MEDIA_KIND, mediaState } from "@/blocks/media";
 
 /** Which modal popup, if any, sits above chat's normal mode. */
@@ -866,18 +865,6 @@ function ChatView({
         run: () => beginCreateUser(row ? index : 0),
       },
       {
-        keys: ["e"],
-        help: { keys: "e", label: "Edit primary field" },
-        run: () => {
-          if (!row) return;
-          // A kind's first field is the one worth a direct key, a media
-          // block's URI or a text block's text. Everything else still
-          // reaches the rest through the actions menu.
-          const field = view?.fields?.(row.block)[0];
-          if (field) openField(field);
-        },
-      },
-      {
         keys: ["G"],
         help: { keys: "G / <n>G", label: "Jump to last block / line <n>" },
         run: (count) => jump(count ?? rows.length),
@@ -1140,7 +1127,11 @@ function ChatView({
               void runInference(row.block.id);
             },
           },
-          ...(view.fields?.(row.block) ?? []).map((field) => ({
+          ...(view.fields?.(row.block) ?? []).map((field, i) => ({
+            // The first field is the kind's primary one, a block of URI or
+            // a text block's text, so it earns the `e` key; the rest are
+            // reached with arrow keys and enter.
+            ...(i === 0 ? { key: "e" as const } : {}),
             label: `Edit ${field.label}`,
             // A blank field shows what it falls back to, not an empty column.
             detail: field.value || field.placeholder,

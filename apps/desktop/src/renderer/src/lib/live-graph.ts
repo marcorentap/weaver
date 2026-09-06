@@ -21,7 +21,7 @@ import {
 // would drag the whole persistence layer into the renderer bundle.
 import type { BlockInput } from "@repo/store";
 import { kinds } from "@shared/blocks/kinds.js";
-import { TOOL_KIND } from "@shared/blocks/tool.js";
+import { TOOL_KIND } from "@plugins/rich-media";
 import { streamInference } from "@/lib/inference";
 
 export type LiveGraphSnapshot = {

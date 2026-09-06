@@ -36,15 +36,14 @@ type Settings = {
   /** Whether preformatted content, code and a tool's output, wraps instead
    *  of scrolling sideways. */
   wordWrap: WordWrapMode;
-  /** Base URL of an OpenAI-completions provider, e.g. "http://seer:4000/v1".
-   *  An agent block appends "/chat/completions" itself. */
+  /** Default URL of an OpenAI-completions provider, e.g.
+   *  "http://seer:4000/v1". An agent block appends "/chat/completions"
+   *  itself. */
   aiEndpoint: string;
   /** Bearer token sent to `aiEndpoint`. */
   aiApiKey: string;
   /** Model id an agent block uses when its own `model` field is blank. */
   aiDefaultModel: string;
-  /** Base URL of a SearXNG instance for web search. Blank disables it. */
-  searxngUrl: string;
 };
 
 const STORAGE_KEY = "weaver.settings";
@@ -55,7 +54,6 @@ const DEFAULTS: Settings = {
   aiEndpoint: "",
   aiApiKey: "",
   aiDefaultModel: "",
-  searxngUrl: "",
 };
 
 /** Snapshot of everything the provider exposes; `hydrated` flips once the
@@ -106,7 +104,6 @@ type SettingsContextValue = {
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
   setAiDefaultModel: (value: string) => void;
-  setSearxngUrl: (value: string) => void;
 };
 
 const context = createContext<SettingsContextValue | null>(null);
@@ -133,7 +130,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
             aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
             aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
-            searxngUrl: stored?.searxngUrl ?? DEFAULTS.searxngUrl,
           },
           hydrated: true,
         });
@@ -175,10 +171,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: string) => set("aiDefaultModel", value),
     [set],
   );
-  const setSearxngUrl = useCallback(
-    (value: string) => set("searxngUrl", value),
-    [set],
-  );
 
   const value = useMemo(
     () => ({
@@ -189,7 +181,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
-      setSearxngUrl,
     }),
     [
       settings,
@@ -199,7 +190,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
-      setSearxngUrl,
     ],
   );
 

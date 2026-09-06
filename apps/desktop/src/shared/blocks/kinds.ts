@@ -1,15 +1,14 @@
-import { coreKinds, kindRegistry } from "@repo/core";
-import { userKind } from "./user.js";
-import { mediaKind } from "./media.js";
-import { toolKind } from "./tool.js";
+import { coreKinds, kindRegistry, type KindRegistry } from "@repo/core";
+import richMedia from "@plugins/rich-media";
 
 /**
- * Custom block kinds: media, user, and tool, on top of the core set. Each
- * kind's schema lives with its view, so this file is only the registry.
+ * The graph's effective kind registry: the core kinds every graph ships with,
+ * plus every `BlockKind` the bundled plugins register. Plugins contribute
+ * kinds from their own `blocks/` directories; this file is only the merge
+ * point, so the main process validates against the same set the renderer
+ * renders.
  */
-export const kinds = kindRegistry([
+export const kinds: KindRegistry = kindRegistry([
   ...coreKinds,
-  mediaKind,
-  userKind,
-  toolKind,
+  ...(richMedia.kinds ?? []),
 ]);

@@ -1,6 +1,6 @@
 import type { Store } from "@repo/store";
 import { newId, openStore } from "@repo/store";
-import { kinds } from "../../shared/blocks/kinds.js";
+import { loadedPlugins } from "./plugins.js";
 import { seedBlocks } from "./seed.js";
 
 // Electron's main process is a long-lived Node process, not a per-request
@@ -47,6 +47,9 @@ export function getStore(): Store {
     cache.weaverStore = undefined;
   }
   // Passing the registry validates block state against its schema on write.
+  // The effective kinds come from the loaded plugins, so a kind a plugin
+  // contributes is validated the same as a core one.
+  const { kinds } = loadedPlugins();
   cache.weaverStore ??= { store: seeded(openStore({ kinds })), nonce };
   return cache.weaverStore.store as Store;
 }

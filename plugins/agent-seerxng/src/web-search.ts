@@ -1,9 +1,9 @@
 /**
  * Web search through a SearXNG instance's JSON API. SearXNG spreads queries
  * across several upstream engines, so one provider blocking the instance
- * stops being fatal, and it needs no API key. The renderer's "Search"
- * settings set the instance URL; a blank URL disables web search, and the
- * tool reports that clearly rather than failing silently.
+ * stops being fatal, and it needs no API key. The plugin's settings set the
+ * instance URL; a blank URL disables web search, and the tool reports that
+ * clearly rather than failing silently.
  */
 
 const DEFAULT_NUM_RESULTS = 8;

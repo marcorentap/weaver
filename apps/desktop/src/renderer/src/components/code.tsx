@@ -5,7 +5,7 @@ import { common, createLowlight } from "lowlight";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/lib/settings";
 
-export { languageForPath } from "@shared/languages.js";
+export { languageForPath } from "@plugins/rich-media";
 
 /**
  * highlight.js' common language set, about forty grammars, which is every

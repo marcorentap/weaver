@@ -46,6 +46,38 @@ export interface CheckResult {
   models?: string[];
 }
 
+/** One setting field a loaded plugin contributes, as it travels over IPC.
+ *  Functions like a custom `validate` are stripped; editing and basic shape
+ *  reasons still work from the remaining fields. */
+export type PluginSettingFieldWire = {
+  kind: "string" | "number" | "option";
+  key: string;
+  label: string;
+  description: string;
+  placeholder?: string;
+  secret?: boolean;
+  step?: number;
+  min?: number;
+  max?: number;
+  options?: readonly { value: string; label: string }[];
+  editable?: boolean;
+};
+
+/** A loaded plugin as the renderer sees it over `plugins:list`. */
+export interface PluginSummary {
+  id: string;
+  name: string;
+  description: string;
+  settings?: PluginSettingFieldWire[];
+}
+
+/** Result of `plugins:list`: the configured directory and every plugin
+ *  loaded from it, built-ins first. */
+export interface PluginListResult {
+  dir: string;
+  plugins: PluginSummary[];
+}
+
 /**
  * The renderer-facing API `contextBridge` exposes as `window.api`. Every
  * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair,
@@ -99,6 +131,10 @@ export interface WeaverApi {
       request: AgentRunRequest,
       onEvent: (event: AgentEvent) => void,
     ): () => void;
+  };
+  plugins: {
+    /** The configured plugin directory and every loaded plugin. */
+    list(): Promise<PluginListResult>;
   };
 }
 

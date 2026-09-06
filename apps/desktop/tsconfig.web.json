@@ -3,10 +3,12 @@
   "compilerOptions": {
     "incremental": true,
     "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
     "paths": {
       "@/*": ["./src/renderer/src/*"],
       "@shared/*": ["./src/shared/*"],
-      "@repo/*": ["../../packages/*/src"]
+      "@repo/*": ["../../packages/*/src"],
+      "@plugins/*": ["../../plugins/*/src"]
     }
   },
   "include": [

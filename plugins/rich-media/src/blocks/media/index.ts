@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { defineKind } from "@repo/core";
-import { languageForPath } from "../languages.js";
+import { languageForPath } from "../../languages.ts";
 
 /**
  * A media context block, one file, addressed by URI. What it *is* comes from

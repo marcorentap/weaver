@@ -11,8 +11,8 @@ import {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import { kinds } from "../../shared/blocks/kinds.js";
-import { TOOL_KIND } from "../../shared/blocks/tool.js";
+import type { ToolRunContext } from "@repo/plugins";
+import { MEDIA_KIND, TOOL_KIND } from "@plugins/rich-media";
 import {
   ALLOWED_TOOLS,
   agentRunRequest,
@@ -25,37 +25,41 @@ import { providerUrl } from "../lib/provider.js";
 import { readSource } from "../lib/read-source.js";
 import { writeSource } from "../lib/write-source.js";
 import { editSource } from "../lib/edit-source.js";
-import {
-  formatWebSearchResults,
-  searchSearXNG,
-  type WebSearchResult,
-} from "../lib/web-search.js";
+import { loadedPlugins } from "../lib/plugins.js";
 import { schemaMessage } from "../lib/schema-error.js";
 import { getStore } from "../lib/store.js";
-import { MEDIA_KIND } from "../../shared/blocks/media.js";
 import { registerPendingMedia } from "../lib/pending-media.js";
 
 /** Config directory handed to the agent. Sessions are in-memory and every
  *  discovery pass is disabled, so nothing is actually read from it. */
 const AGENT_DIR = "/tmp/weaver-agent";
 
-/** The SearXNG base URL from Settings > Search, or undefined when unset.
- *  Settings live as one JSON blob under `weaver.settings` in the store;
- *  reading it here keeps the tool decoupled from renderer state. */
-function storedSearxngUrl(): string | undefined {
-  const raw = getStore().getSetting("weaver.settings");
-  if (!raw) return undefined;
-  let parsed: unknown;
+/**
+ * A plugin's settings, one JSON blob per plugin id under a per-plugin store
+ * key. Plugins read their own config through `toolRunContext`, so they stay
+ * decoupled from the renderer and the app's settings shape.
+ */
+function pluginSettings(pluginId: string): Record<string, unknown> {
+  const raw = getStore().getSetting(`weaver.plugins.${pluginId}`);
+  if (!raw) return {};
   try {
-    parsed = JSON.parse(raw);
+    const parsed = JSON.parse(raw) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
-    return undefined;
+    return {};
   }
-  if (typeof parsed !== "object" || parsed === null) return undefined;
-  if (!("searxngUrl" in parsed)) return undefined;
-  const value: unknown = parsed.searxngUrl;
-  return typeof value === "string" && value.trim() ? value : undefined;
 }
+
+/** Handed to every plugin tool's `execute`: the store, behind the one getter
+ *  the framework exposes. */
+const toolRunContext: ToolRunContext = {
+  getSetting: (pluginId, key) => {
+    const value = pluginSettings(pluginId)[key];
+    return typeof value === "string" && value.trim() ? value : undefined;
+  },
+};
 
 /** A tool block is the harness's own record of a call rather than something
  *  to fabricate, so the `display` tool refuses to create one. */
@@ -96,11 +100,11 @@ const contentParts = z.object({
     .optional(),
 });
 
-/** The kinds an agent may display, each with the JSON Schema of its state.
- *  Derived from the kind registry, so registering a kind is all it takes to
- *  make it something the model can produce. */
+/** The kinds an agent can display, each with the JSON Schema of its state.
+ *  Derived from the kind registry, so a plugin registering a kind is all it
+ *  takes to make it something the model can produce. */
 function displayableKinds(): { kind: string; schema: unknown }[] {
-  return Object.values(kinds).flatMap((kind) => {
+  return Object.values(loadedPlugins().kinds).flatMap((kind) => {
     if (NOT_DISPLAYABLE.has(kind.kind)) return [];
     try {
       return [{ kind: kind.kind, schema: z.toJSONSchema(kind.schema) }];
@@ -237,7 +241,7 @@ async function runAgent(
         const refuse = (text: string): never => {
           throw new Error(text);
         };
-        const kind = kinds[params.kind];
+        const kind = loadedPlugins().kinds[params.kind];
         if (!kind || NOT_DISPLAYABLE.has(params.kind)) {
           refuse(
             `no such kind: ${params.kind}. Available: ${displayable
@@ -267,7 +271,7 @@ async function runAgent(
           // Validated here so the model is told what it got wrong while
           // it can still fix it, instead of the renderer rejecting the
           // block once the run is over.
-          kinds[params.kind]?.parse(state);
+          loadedPlugins().kinds[params.kind]?.parse(state);
         } catch (error) {
           refuse(schemaMessage(error));
         }
@@ -288,54 +292,30 @@ async function runAgent(
       },
     });
 
-    /** Web search through the SearXNG instance named in Settings > Search.
-     *  Aggregates upstream engines, so no single provider's rate limit stops
-     *  a run. */
-    const webSearch = defineTool({
-      name: "web_search",
-      label: "Web Search",
-      description:
-        "Use this when you need current information you don't already have. Returns titles, URLs, and snippets from the configured SearXNG instance.",
-      parameters: Type.Object({
-        query: Type.String({ description: "Search query" }),
-        limit: Type.Optional(
-          Type.Number({
-            description: "Max results to return (default 8, max 20)",
-          }),
-        ),
+    // Mount every tool the loaded plugins contribute. A plugin tool is a
+    // narrow descriptor (see `@repo/plugins`); this wraps it in the SDK's
+    // shape and hands a read-only settings context through, so a plugin
+    // reads its own config without knowing the app's store.
+    const mountedPluginTools = loadedPlugins().tools.map((tool) =>
+      defineTool({
+        name: tool.name,
+        label: tool.label,
+        description: Array.isArray(tool.description)
+          ? tool.description.join("\n")
+          : tool.description,
+        parameters: tool.parameters as Parameters<typeof defineTool>[0]["parameters"],
+        execute: async (_toolCallId, args) => {
+          const result = await tool.execute(
+            args as Record<string, unknown>,
+            toolRunContext,
+          );
+          return {
+            content: [{ type: "text" as const, text: result.content }],
+            details: result.details,
+          };
+        },
       }),
-      execute: async (_toolCallId, params) => {
-        // The SearXNG instance comes from Settings > Search, read straight
-        // from the store so the tool is decoupled from what the renderer
-        // happens to have. Blank means no search engine is set up.
-        const searxngUrl = storedSearxngUrl();
-        if (!searxngUrl) {
-          throw new Error(
-            "no SearXNG instance set: open Settings > Search > SearXNG URL and point it at an instance, e.g. http://searxng-host:8085",
-          );
-        }
-        let results: WebSearchResult[];
-        try {
-          results = await searchSearXNG(searxngUrl, params.query, {
-            limit: params.limit,
-          });
-        } catch (error) {
-          throw new Error(
-            error instanceof Error ? error.message : String(error),
-            { cause: error },
-          );
-        }
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: formatWebSearchResults(params.query, results),
-            },
-          ],
-          details: {},
-        };
-      },
-    });
+    );
 
     const cwd = projectRoot();
 
@@ -472,9 +452,9 @@ async function runAgent(
      * against the original file rather than incrementally), but `path` may
      * also be a `file://` or `ssh://` URI. The tool's output is a unified
      * diff rather than a success message, so the block this call produces
-     * renders the change instead of just naming it. `toolLanguage` in
-     * shared/blocks/tool.ts always highlights an `edit` call's output as a
-     * diff, regardless of the file it touched.
+     * renders the change instead of just naming it. `toolLanguage` in the
+     * rich-media plugin always highlights an `edit` call's output as a diff,
+     * regardless of the file it touched.
      */
     const edit = defineTool({
       name: "edit",
@@ -535,7 +515,7 @@ async function runAgent(
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
       tools: [...tools, display.name],
-      customTools: [display, webSearch, read, write, edit],
+      customTools: [display, ...mountedPluginTools, read, write, edit],
     });
 
     runs.set(runId, { abort: () => void session.abort() });

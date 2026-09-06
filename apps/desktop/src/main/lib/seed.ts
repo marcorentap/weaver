@@ -2,8 +2,7 @@ import type { BlockData } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import { newId } from "@repo/store";
 import { GROUP_KIND, TEXT_KIND } from "@repo/core";
-import { USER_KIND } from "../../shared/blocks/user.js";
-import { MEDIA_KIND } from "../../shared/blocks/media.js";
+import { MEDIA_KIND, USER_KIND } from "@plugins/rich-media";
 
 const t0 = Date.parse("2026-08-31T09:00:00.000Z");
 
