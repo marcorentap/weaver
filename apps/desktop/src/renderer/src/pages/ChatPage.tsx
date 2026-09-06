@@ -285,7 +285,13 @@ function BlockRow({
           // rows sit 8px taller than the rest.
           <span className="-my-1 size-6 shrink-0" />
         )}
-        <span className={cn("min-w-0 truncate font-medium", originClass(row.block))}>
+        <span
+          className={cn(
+            "min-w-0 truncate font-medium",
+            originClass(row.block),
+            running && "animate-pulse",
+          )}
+        >
           {row.block.label}
         </span>
       </span>

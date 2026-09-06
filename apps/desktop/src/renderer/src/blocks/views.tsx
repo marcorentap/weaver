@@ -58,17 +58,12 @@ export type BlockView = {
   raw?: (block: Block) => string;
 };
 
-function UserRow({ text, running }: { text: string; running: boolean }) {
+function UserRow({ text }: { text: string }) {
   return (
     <span className="flex min-w-0 flex-1 items-start gap-2">
       <span className="min-w-0 flex-1 whitespace-pre-wrap">
         {text || "(empty)"}
       </span>
-      {running ? (
-        <span className="shrink-0 animate-pulse text-muted-foreground">
-          running…
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -336,8 +331,8 @@ export const blockViews: Record<string, BlockView> = {
   },
 
   [USER_KIND]: {
-    Row: ({ block, running }) => (
-      <UserRow text={userState.parse(block.data).text} running={running} />
+    Row: ({ block }) => (
+      <UserRow text={userState.parse(block.data).text} />
     ),
     fields: (block) => [
       {
