@@ -26,6 +26,10 @@ linux:
   target:
     - deb
   category: Development
+  # Must match the "weaver.desktop" filename used by setDesktopName()
+  # (src/main/index.ts), case included, or taskbar grouping breaks.
+  desktop:
+    StartupWMClass: weaver
 mac:
   target:
     - dmg
