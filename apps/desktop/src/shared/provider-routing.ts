@@ -5,7 +5,7 @@
  * only step needed to support one: `SettingsPage.tsx` renders `fields`
  * generically off `detectProvider`, and the main process reads the same
  * field keys back out of `providerSettings` (see `main/ipc/agent.ts`'s
- * `openRouterTuning`) to build that provider's own request tuning.
+ * `providerTuning`) to build that provider's own request tuning.
  *
  * Shared between the renderer (settings UI) and the main process (request
  * building), so both read one definition instead of drifting apart.
@@ -71,7 +71,40 @@ const OPENROUTER: ProviderDef = {
   ],
 };
 
-const PROVIDERS: readonly ProviderDef[] = [OPENROUTER];
+const SAIL: ProviderDef = {
+  id: "sail",
+  name: "Sail",
+  hosts: ["api.sailresearch.com"],
+  fields: [
+    {
+      key: "thinkingLevel",
+      label: "Reasoning effort",
+      description: "Reasoning effort. Support varies by model.",
+      options: [
+        { value: "", label: "Default" },
+        { value: "off", label: "Off" },
+        { value: "minimal", label: "Minimal" },
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+        { value: "xhigh", label: "Extra high" },
+      ],
+    },
+    {
+      key: "completionWindow",
+      label: "Completion window",
+      description:
+        "Trade latency for lower token cost. Not every model supports every window; see docs.sailresearch.com/pricing.",
+      options: [
+        { value: "", label: "Default (ASAP)" },
+        { value: "balanced", label: "Balanced" },
+        { value: "flex", label: "Flex" },
+      ],
+    },
+  ],
+};
+
+const PROVIDERS: readonly ProviderDef[] = [OPENROUTER, SAIL];
 
 /** The provider `endpoint`'s hostname belongs to, or null when it is blank,
  *  unparseable, or matches none registered above. */

@@ -186,43 +186,80 @@ const THINKING_LEVELS = [
   "xhigh",
 ] as const;
 
-/** Turns the renderer's `providerId`/`providerSettings` into OpenRouter's
- *  request shape: `only`/`sort` become the `provider` routing object; a
- *  thinking level marks the model reasoning-capable and sets the session's
- *  thinking level. Any other provider, or none set, is a no-op. */
-function openRouterTuning(
+/** Sail's completion-window values; anything else means its own default
+ *  ("asap"). */
+const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
+
+/** Turns the renderer's `providerId`/`providerSettings` into that
+ *  provider's request tuning. OpenRouter's `only`/`sort` become the
+ *  `provider` routing object; its reasoning effort needs
+ *  `thinkingFormat: "openrouter"`. Sail's reasoning effort needs no
+ *  compat override (pi-ai's default `reasoning_effort` already matches),
+ *  but it 400s on `store: false`, which pi-ai sends unless told
+ *  otherwise, so Sail always gets `supportsStore: false`. Sail's
+ *  completion window becomes `metadata.completion_window` via
+ *  `samplingParams`. A thinking level always marks the model
+ *  reasoning-capable and sets the session's thinking level. Any other
+ *  provider, or none set, is a no-op. */
+function providerTuning(
   providerId: string | undefined,
   providerSettings: Record<string, string> | undefined,
 ): {
-  compat?: { openRouterRouting?: OpenRouterRouting; thinkingFormat?: "openrouter" };
+  compat?: {
+    openRouterRouting?: OpenRouterRouting;
+    thinkingFormat?: "openrouter";
+    supportsStore?: boolean;
+  };
+  samplingParams?: Record<string, unknown>;
   reasoning: boolean;
   thinkingLevel?: (typeof THINKING_LEVELS)[number];
 } {
-  if (providerId !== "openrouter" || !providerSettings) return { reasoning: false };
-  const only = (providerSettings.only ?? "")
-    .split(",")
-    .map((slug) => slug.trim())
-    .filter(Boolean);
-  const sort = providerSettings.sort?.trim();
-  const routing: OpenRouterRouting = {};
-  if (only.length > 0) routing.only = only;
-  if (sort) routing.sort = sort;
-  const thinkingRaw = providerSettings.thinkingLevel?.trim();
+  const thinkingRaw = providerSettings?.thinkingLevel?.trim();
   const thinkingLevel = (THINKING_LEVELS as readonly string[]).includes(
     thinkingRaw ?? "",
   )
     ? (thinkingRaw as (typeof THINKING_LEVELS)[number])
     : undefined;
-  const hasRouting = Object.keys(routing).length > 0;
-  if (!hasRouting && !thinkingLevel) return { reasoning: false };
-  return {
-    compat: {
-      ...(hasRouting ? { openRouterRouting: routing } : {}),
-      ...(thinkingLevel ? { thinkingFormat: "openrouter" as const } : {}),
-    },
-    reasoning: Boolean(thinkingLevel),
-    thinkingLevel,
-  };
+
+  if (providerId === "openrouter") {
+    const only = (providerSettings?.only ?? "")
+      .split(",")
+      .map((slug) => slug.trim())
+      .filter(Boolean);
+    const sort = providerSettings?.sort?.trim();
+    const routing: OpenRouterRouting = {};
+    if (only.length > 0) routing.only = only;
+    if (sort) routing.sort = sort;
+    const hasRouting = Object.keys(routing).length > 0;
+    if (!hasRouting && !thinkingLevel) return { reasoning: false };
+    return {
+      compat: {
+        ...(hasRouting ? { openRouterRouting: routing } : {}),
+        ...(thinkingLevel ? { thinkingFormat: "openrouter" as const } : {}),
+      },
+      reasoning: Boolean(thinkingLevel),
+      thinkingLevel,
+    };
+  }
+
+  if (providerId === "sail") {
+    const windowRaw = providerSettings?.completionWindow?.trim();
+    const completionWindow = (
+      SAIL_COMPLETION_WINDOWS as readonly string[]
+    ).includes(windowRaw ?? "")
+      ? (windowRaw as (typeof SAIL_COMPLETION_WINDOWS)[number])
+      : undefined;
+    return {
+      compat: { supportsStore: false },
+      samplingParams: completionWindow
+        ? { metadata: { completion_window: completionWindow } }
+        : undefined,
+      reasoning: Boolean(thinkingLevel),
+      thinkingLevel,
+    };
+  }
+
+  return { reasoning: false };
 }
 
 async function runAgent(
@@ -254,7 +291,7 @@ async function runAgent(
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
-    const tuning = openRouterTuning(body.providerId, body.providerSettings);
+    const tuning = providerTuning(body.providerId, body.providerSettings);
     modelRuntime.registerProvider("weaver", {
       baseUrl: body.endpoint,
       apiKey: body.apiKey,
@@ -269,6 +306,7 @@ async function runAgent(
           contextWindow: 200000,
           maxTokens: 8192,
           compat: tuning.compat,
+          samplingParams: tuning.samplingParams,
         },
       ],
     });
