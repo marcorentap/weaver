@@ -8,7 +8,7 @@ import {
   useTransition,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, Lock, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
@@ -111,16 +111,33 @@ function computeInsertion(rows: Row[], gap: number): Position {
  *  list) that inserts a new block at that exact gap. Zero height in flow.
  *  The button overlays the seam between rows instead of pushing them
  *  apart, so nothing shifts just because a gap exists. */
-function InsertGap({ onClick }: { onClick: () => void }) {
+function InsertGap({
+  onClick,
+  locked,
+}: {
+  onClick: () => void;
+  /** True while this gap sits inside a run's still-streaming append span.
+   *  Shown disabled with a lock glyph, rather than hidden outright, so the
+   *  seam does not silently stop responding to a hover someone already
+   *  had their mouse over. */
+  locked?: boolean;
+}) {
   return (
     <div className="relative h-0">
       <button
         type="button"
-        onClick={onClick}
-        aria-label="Insert block here"
-        className="absolute right-3 top-0 z-10 -translate-y-1/2 rounded border border-white bg-background p-0.5 text-muted-foreground opacity-0 hover:text-foreground hover:opacity-100 focus-visible:opacity-100"
+        onClick={locked ? undefined : onClick}
+        disabled={locked}
+        aria-label={locked ? "Locked while streaming in" : "Insert block here"}
+        title={locked ? "locked while a reply is still streaming in" : undefined}
+        className={cn(
+          "absolute right-3 top-0 z-10 -translate-y-1/2 rounded border border-white bg-background p-0.5 text-muted-foreground opacity-0 focus-visible:opacity-100",
+          locked
+            ? "cursor-not-allowed hover:opacity-100"
+            : "hover:text-foreground hover:opacity-100",
+        )}
       >
-        <Plus className="size-3" />
+        {locked ? <Lock className="size-3" /> : <Plus className="size-3" />}
       </button>
     </div>
   );
@@ -167,6 +184,7 @@ function BlockRow({
   line,
   running,
   flashing,
+  locked,
   gutter,
   shown,
   onSelect,
@@ -185,6 +203,9 @@ function BlockRow({
   /** Whether a running inference appends its next block right after this
    *  row. Flashes the bottom border. */
   flashing: boolean;
+  /** Whether a still-running inference already appended this block, so
+   *  its edit/delete/configure affordances are unavailable right now. */
+  locked: boolean;
   /** Whether the gutter column is enabled at all (hidden pre-hydration). */
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
@@ -301,6 +322,12 @@ function BlockRow({
         >
           {row.block.label}
         </span>
+        {locked ? (
+          <Lock
+            className="size-3 shrink-0 text-muted-foreground"
+            aria-label="Locked while streaming in"
+          />
+        ) : null}
       </span>
       <span className="flex min-w-0 flex-1 flex-col items-start">
         <div
@@ -1545,6 +1572,7 @@ function ChatView({
                 line={lineNumber(i)}
                 running={running.has(entry.block.id)}
                 flashing={runningTailIds.has(entry.block.id)}
+                locked={lockedIds.has(entry.block.id)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>
@@ -1561,7 +1589,10 @@ function ChatView({
                   setOpen(entry.block.id, !entry.expanded);
                 }}
               />
-              <InsertGap onClick={() => beginCreate(i + 1)} />
+              <InsertGap
+                onClick={() => beginCreate(i + 1)}
+                locked={lockedIds.has(entry.block.id)}
+              />
             </Fragment>
           ))}
         </div>
