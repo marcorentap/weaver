@@ -311,7 +311,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "option",
       key: "lineNumber",
       label: "Line number",
-      description: "Show each block's position in the left gutter of chat.",
+      description: "Show each block's position in the gutter.",
       section: "Appearance",
       options: LINE_NUMBER_OPTIONS,
       value: settings.lineNumber,
@@ -321,8 +321,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "option",
       key: "wordWrap",
       label: "Word wrap",
-      description:
-        "Wrap long lines in code and tool output instead of scrolling sideways.",
+      description: "Wrap long lines instead of scrolling.",
       options: WORD_WRAP_OPTIONS,
       value: settings.wordWrap,
       onChange: (value) => setWordWrap(value as WordWrapMode),
@@ -331,7 +330,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "string",
       key: "aiEndpoint",
       label: "Endpoint",
-      description: "OpenAI-completions base URL used for inference.",
+      description: "OpenAI-completions base URL.",
       section: "AI provider",
       value: settings.aiEndpoint,
       onChange: setAiEndpoint,
@@ -348,7 +347,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "string",
       key: "aiApiKey",
       label: "API key",
-      description: "Bearer token sent to the endpoint above.",
+      description: "Bearer token for the endpoint.",
       value: settings.aiApiKey,
       onChange: setAiApiKey,
       secret: true,
@@ -359,7 +358,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "option",
       key: "aiDefaultModel",
       label: "Default model",
-      description: "Used when an agent block's own model field is blank.",
+      description: "Default when a block's own model is blank.",
       // The arrows cycle the provider's reported models. Enter types a
       // value by hand; it must be one of the available models once the
       // list has loaded, or a blank (provider default).
@@ -440,8 +439,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "string",
       key: "plugins.dir",
       label: "Plugins directory",
-      description:
-        "Directory holding plugin subdirectories (blocks/, tools/). Plugins here load at startup, no rebuild.",
+      description: "Directory holding plugin subdirectories.",
       section: "Plugins",
       value: pluginList.dir,
       onChange: (value) => {

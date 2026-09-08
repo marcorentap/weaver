@@ -40,14 +40,13 @@ const OPENROUTER: ProviderDef = {
     {
       key: "only",
       label: "Only providers",
-      description:
-        "Comma-separated provider slugs to restrict routing to, e.g. deepinfra,together. Blank allows any.",
+      description: "Comma-separated provider slugs. Blank allows any.",
       placeholder: "deepinfra,together",
     },
     {
       key: "sort",
       label: "Sort providers by",
-      description: "Routing preference among the providers allowed above.",
+      description: "Routing preference.",
       options: [
         { value: "", label: "Default" },
         { value: "price", label: "Price" },
@@ -58,8 +57,7 @@ const OPENROUTER: ProviderDef = {
     {
       key: "thinkingLevel",
       label: "Thinking level",
-      description:
-        "Reasoning effort a thinking-capable model spends before answering. Support and accepted values vary by model; some reject a value they don't support instead of ignoring it. Leave on Default to omit the field entirely.",
+      description: "Reasoning effort. Support varies by model.",
       options: [
         { value: "", label: "Default" },
         { value: "off", label: "Off" },
