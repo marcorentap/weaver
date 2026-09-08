@@ -634,10 +634,8 @@ const inputRef = useRef<HTMLInputElement>(null);
                 aria-selected={selected}
                 onClick={() => setCursor(i)}
                 className={cn(
-                  "cursor-pointer border-l-2 px-1 py-1",
-                  selected
-                    ? "border-foreground/60 bg-muted"
-                    : "border-transparent",
+                  "cursor-pointer px-1 py-1",
+                  selected && "bg-muted",
                 )}
               >
                 <MarkdownText text={entry.content} />
@@ -654,10 +652,8 @@ const inputRef = useRef<HTMLInputElement>(null);
                 aria-selected={selected}
                 onClick={() => setCursor(i)}
                 className={cn(
-                  "flex cursor-pointer items-center gap-3 border-l-2 py-1 pl-1 pr-3",
-                  selected
-                    ? "border-foreground/60 bg-muted"
-                    : "border-transparent",
+                  "flex cursor-pointer items-center gap-3 py-1 pl-1 pr-3",
+                  selected && "bg-muted",
                 )}
               >
                 <span className="min-w-0 flex-1">
@@ -787,7 +783,7 @@ const inputRef = useRef<HTMLInputElement>(null);
               {entry.kind === "string" &&
               entry.key === "aiDefaultModel" &&
               probe?.models?.length ? (
-                <div className="border-l-2 border-transparent py-1 pl-1 pr-3">
+                <div className="py-1 pl-1 pr-3">
                   <span className="block font-medium">Available models</span>
                   <div className="mt-1 max-h-40 overflow-auto rounded border border-border font-mono text-xs text-muted-foreground">
                     {probe.models.map((model) => (
