@@ -706,8 +706,13 @@ function ChatView({
 
   /** Starts the "new block" flow for the gap before `rows[gap]`. */
   const beginCreate = (gap: number) => {
+    const at = computeInsertion(rows, gap);
+    if (at.afterId && engine.isLocked(at.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      return;
+    }
     setError(null);
-    setCreating(computeInsertion(rows, gap));
+    setCreating(at);
     setPopup({ kind: "createKind" });
   };
 
@@ -715,8 +720,13 @@ function ChatView({
    *  gap semantics as `beginCreate`, fixed to `USER_KIND` and skipping the
    *  kind picker, since `i`/`I` mean "write a message", not "pick a kind". */
   const beginCreateUser = (gap: number) => {
+    const at = computeInsertion(rows, gap);
+    if (at.afterId && engine.isLocked(at.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      return;
+    }
     setError(null);
-    setCreating(computeInsertion(rows, gap));
+    setCreating(at);
     setPopup({ kind: "createUser" });
   };
 
