@@ -262,12 +262,12 @@ function BlockRow({
       aria-expanded={row.nested > 0 ? row.expanded : undefined}
       onClick={onSelect}
       className={cn(
-        "relative flex cursor-pointer items-start gap-3 border-l-2 py-1 pl-1 pr-3",
+        "relative flex cursor-pointer items-start gap-3 py-1 pl-1 pr-3",
         selected
-          ? "border-foreground/60 bg-muted"
+          ? "bg-muted"
           : inSelection
-            ? "border-foreground/30 bg-muted/40"
-            : "border-transparent",
+            ? "bg-muted/40"
+            : undefined,
       )}
     >
       {flashing ? (
