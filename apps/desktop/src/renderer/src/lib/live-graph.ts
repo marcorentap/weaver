@@ -35,6 +35,13 @@ export type LiveGraphSnapshot = {
    *  hook's and an inference run's own state update land all at once when
    *  they resolve. */
   running: ReadonlySet<BlockId>;
+  /** For each running inference, the block it is currently appending
+   *  after: the run's anchor until the first reply lands, then whichever
+   *  reply landed most recently. This is only ever a block the run itself
+   *  appended (or the anchor), never a pre-existing sibling further down
+   *  the chain, so it is tracked directly rather than derived by walking
+   *  `next` pointers, which would run off the end of the whole chain. */
+  appendTails: ReadonlyMap<BlockId, BlockId>;
 };
 
 export type LiveGraph = {
@@ -103,6 +110,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     dirty: false,
     savedAt: null,
     running: new Set(),
+    appendTails: new Map(),
   };
   const listeners = new Set<() => void>();
   /** Cancel handle per in-flight inference, so an abort can be aimed at a
@@ -123,6 +131,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     if (active) next.add(id);
     else next.delete(id);
     snapshot = { ...snapshot, running: next };
+    emit();
+  }
+
+  function setAppendTail(id: BlockId, tail: BlockId | null) {
+    const next = new Map(snapshot.appendTails);
+    if (tail === null) next.delete(id);
+    else next.set(id, tail);
+    snapshot = { ...snapshot, appendTails: next };
     emit();
   }
 
@@ -247,6 +263,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       };
       commit(insertBlock(snapshot.graph, child, { parentId, afterId }), true);
       afterId = newId;
+      setAppendTail(id, newId);
       return newId;
     };
     // The block a run's `text_delta` chunks are currently landing in. Null
@@ -296,6 +313,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     const context = snapshotAbove(snapshot.graph, id, kinds);
 
     setRunning(id, true);
+    setAppendTail(id, id);
     try {
       let failure: string | null = null;
       const { done, cancel } = streamInference(
@@ -356,6 +374,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     } finally {
       runningAborts.delete(id);
       setRunning(id, false);
+      setAppendTail(id, null);
     }
   }
 

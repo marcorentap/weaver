@@ -90,18 +90,6 @@ function containerOf(rows: Row[], row: Row | undefined): BlockId | null {
   return row.parent === null ? null : (rows[row.parent]?.block.id ?? null);
 }
 
-/** The block a run anchored at `id` is currently appending after: the last
- *  block in its `next` chain, or `id` itself before anything has streamed
- *  in yet. This is where the run's flashing "appending here" border goes. */
-function runningTail(graph: BlockGraph, id: BlockId): BlockId {
-  let cur = id;
-  for (;;) {
-    const next = graph.blocks[cur]?.next;
-    if (next === null || next === undefined) return cur;
-    cur = next;
-  }
-}
-
 /**
  * Where a new block goes for the gap before `rows[gap]` (`gap === rows.length`
  * means after the last row). It lands right after the row above the gap, in
@@ -522,7 +510,7 @@ function ChatView({
   // session's engine the first time it is asked for; every later mount
   // reattaches to whatever the registry already has.
   const engine = getLiveGraph(session?.id ?? "none", initialGraph);
-  const { graph, dirty, savedAt, running } = useSyncExternalStore(
+  const { graph, dirty, savedAt, running, appendTails } = useSyncExternalStore(
     engine.subscribe,
     engine.getSnapshot,
     engine.getSnapshot,
@@ -586,8 +574,7 @@ function ChatView({
   }, [engine]);
 
   const rows = flatten(liveNodes, expanded);
-  const runningTailIds = new Set<BlockId>();
-  for (const id of running) runningTailIds.add(runningTail(graph, id));
+  const runningTailIds = new Set<BlockId>(appendTails.values());
   // Follows a block to its new row the instant it shows up in `rows`.
   // Immediately for a top-level block, one render later for a nested one,
   // since expanding its container also happens during this same "adjust
