@@ -99,6 +99,8 @@ const contentParts = z.object({
       }),
     )
     .optional(),
+  stopReason: z.string().optional(),
+  errorMessage: z.string().optional(),
 });
 
 /** The kinds an agent can display, each with the JSON Schema of its state.
@@ -147,6 +149,24 @@ function messageText(message: unknown): string {
     .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
     .filter((text) => text.trim().length > 0)
     .join("\n\n");
+}
+
+/** A failed turn's own message, not a thrown error: the agent SDK encodes
+ *  a rejected request (bad routing, provider error, and so on) as a
+ *  normal `message_end` with `stopReason: "error"` and `errorMessage` set,
+ *  rather than throwing. Without reading this, that message's `content`
+ *  is typically empty and the run silently produces nothing. `"aborted"`
+ *  is excluded: that is Ctrl+C, not a failure. */
+function messageFailure(message: unknown): string | null {
+  const parsed = contentParts.safeParse(message);
+  if (
+    !parsed.success ||
+    parsed.data.role !== "assistant" ||
+    parsed.data.stopReason !== "error"
+  ) {
+    return null;
+  }
+  return parsed.data.errorMessage ?? "inference failed";
 }
 
 /** In-flight runs, keyed by `runId`, so `agent:run:cancel` can abort one
@@ -601,6 +621,11 @@ async function runAgent(
         return;
       }
       if (sessionEvent.type === "message_end") {
+        const failure = messageFailure(sessionEvent.message);
+        if (failure) {
+          emit({ type: "error", message: failure });
+          return;
+        }
         const text = messageText(sessionEvent.message);
         if (text) emit({ type: "text", text });
         return;
