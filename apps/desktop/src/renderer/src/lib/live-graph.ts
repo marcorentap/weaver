@@ -11,7 +11,7 @@ import {
   findParent,
   insertBlock,
   lastChildId,
-  moveBlock,
+  moveBlock as moveBlockCore,
   removeBlock,
   snapshotAbove,
   snapshotBlock,
@@ -79,17 +79,54 @@ export type LiveGraph = {
   updateLabel: (id: BlockId, label: string) => void;
   /** Abort the inference anchored at `id`, if one is in flight. */
   abortRun: (id: BlockId) => boolean;
-  /** Link an already-persisted new block into the tree at `at`. */
-  addBlock: (block: Block, at: Position) => void;
+  /** Link an already-persisted new block into the tree at `at`. No-ops,
+   *  returning false, if `at.afterId` is locked. */
+  addBlock: (block: Block, at: Position) => boolean;
   /** Relink a block, and everything nested under it, at `at`. That is the
-   *  whole of "moving" a block, reorder and nesting alike. */
-  moveBlock: (id: BlockId, at: Position) => void;
-  /** Drop a block and everything nested under it, optimistically. */
-  deleteBlock: (id: BlockId) => void;
+   *  whole of "moving" a block, reorder and nesting alike. No-ops,
+   *  returning false, if `id` or the `at.afterId` destination is locked. */
+  moveBlock: (id: BlockId, at: Position) => boolean;
+  /** Drop a block and everything nested under it, optimistically. No-ops,
+   *  returning false, if `id` is locked. */
+  deleteBlock: (id: BlockId) => boolean;
+  /** Whether `id` is a block a still-running inference has appended so
+   *  far (see `lockedBlockIds`). Every other mutating method above checks
+   *  this itself; callers never need to precompute it before calling in. */
+  isLocked: (id: BlockId) => boolean;
   toBlockInputs: () => BlockInput[];
   markSaved: () => void;
   markSaveFailed: () => void;
 };
+
+/**
+ * Every block a still-running inference has appended so far: from right
+ * after its anchor up to its current tail (`appendTails`). Content there
+ * is being written by the run itself, so this is the one place that
+ * decides what counts as locked. The engine's own mutating methods and
+ * any UI deciding whether to offer an edit both call this, rather than
+ * each re-deriving their own notion of "still streaming".
+ *
+ * An anchor whose tail is still itself has not appended anything yet, so
+ * it contributes nothing locked; walking from its `next` in that case
+ * would run off the end of the whole chain instead of stopping at the
+ * run's own content, since there is no run content yet to stop at.
+ */
+export function lockedBlockIds(
+  graph: BlockGraph,
+  appendTails: ReadonlyMap<BlockId, BlockId>,
+): Set<BlockId> {
+  const locked = new Set<BlockId>();
+  for (const [anchor, tail] of appendTails) {
+    if (tail === anchor) continue;
+    let cur = graph.blocks[anchor]?.next ?? null;
+    while (cur !== null) {
+      locked.add(cur);
+      if (cur === tail) break;
+      cur = graph.blocks[cur]?.next ?? null;
+    }
+  }
+  return locked;
+}
 
 /**
  * A block graph that lives entirely in the browser once created. A hook (a
@@ -394,7 +431,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     runHook,
     abortRun,
     runInference,
+    isLocked: (id) => lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id),
     updateField(id, name, value) {
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
       commit(
@@ -413,6 +452,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     updateLabel(id, label) {
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
       commit(
@@ -427,14 +467,27 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     addBlock(block, at) {
+      if (
+        at.afterId &&
+        lockedBlockIds(snapshot.graph, snapshot.appendTails).has(at.afterId)
+      )
+        return false;
       commit(insertBlock(snapshot.graph, block, at), true);
+      return true;
     },
     moveBlock(id, at) {
-      if (!snapshot.graph.blocks[id]) return;
-      commit(moveBlock(snapshot.graph, id, at), true);
+      if (!snapshot.graph.blocks[id]) return false;
+      const locked = lockedBlockIds(snapshot.graph, snapshot.appendTails);
+      if (locked.has(id) || (at.afterId && locked.has(at.afterId))) return false;
+      commit(moveBlockCore(snapshot.graph, id, at), true);
+      return true;
     },
     deleteBlock(id) {
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) {
+        return false;
+      }
       commit(removeBlock(snapshot.graph, id), true);
+      return true;
     },
     // A `Block` is already a valid `BlockInput`; the store ignores the extra
     // `modifiedAt`, which it owns.

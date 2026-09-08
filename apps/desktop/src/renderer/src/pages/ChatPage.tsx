@@ -26,7 +26,7 @@ import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
-import { scheduledHooks } from "@/lib/live-graph";
+import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
 import { getLiveGraph, dropLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
 import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
@@ -575,6 +575,11 @@ function ChatView({
 
   const rows = flatten(liveNodes, expanded);
   const runningTailIds = new Set<BlockId>(appendTails.values());
+  // Blocks a still-running inference has already written, per the shared
+  // engine-level definition (`live-graph.ts`'s `lockedBlockIds`); the
+  // engine itself rejects edits and deletes against these, this just
+  // decides what the menu offers so a rejected action never even shows.
+  const lockedIds = lockedBlockIds(graph, appendTails);
   // Follows a block to its new row the instant it shows up in `rows`.
   // Immediately for a top-level block, one render later for a nested one,
   // since expanding its container also happens during this same "adjust
@@ -697,7 +702,7 @@ function ChatView({
    *  edit is the same operation with a different target position. */
   const relocate = (id: BlockId, at: Position) => {
     if (!session) return;
-    engine.moveBlock(id, at);
+    if (!engine.moveBlock(id, at)) return;
     if (at.parentId) setOpen(at.parentId, true);
     setPendingFocus({ id, openActions: false });
     startTransition(() => {
@@ -982,6 +987,11 @@ function ChatView({
    *  it once it is visible (see the `pendingSelect` effect above). */
   const createBlock = async (label: string) => {
     if (!session || !creating || !pendingKind) return;
+    if (creating.afterId && engine.isLocked(creating.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      setPopup(null);
+      return;
+    }
     const kindDef = kinds[pendingKind];
     if (!kindDef) return;
     setSaving(true);
@@ -1028,6 +1038,11 @@ function ChatView({
    *  to do. */
   const createUserBlock = async (text: string) => {
     if (!session || !creating) return;
+    if (creating.afterId && engine.isLocked(creating.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      setPopup(null);
+      return;
+    }
     setSaving(true);
     const input: BlockInput = {
       id: crypto.randomUUID(),
@@ -1120,6 +1135,10 @@ function ChatView({
    * delete) last, so a kind's own affordances read before the generic ones.
    */
   const kind = row ? kinds[row.block.kind] : undefined;
+  // A block a running inference is still appending into can't be edited
+  // or deleted out from under it, so its own field/label edits, configure,
+  // and delete drop out of the menu entirely while it stays locked.
+  const locked = row ? lockedIds.has(row.block.id) : false;
 
   const actions: KeyMenuItem[] =
     row && view
@@ -1141,17 +1160,20 @@ function ChatView({
               void runInference(row.block.id);
             },
           },
-          ...(view.fields?.(row.block) ?? []).map((field, i) => ({
-            // The first field is the kind's primary one, a block of URI or
-            // a text block's text, so it earns the `e` key; the rest are
-            // reached with arrow keys and enter.
-            ...(i === 0 ? { key: "e" as const } : {}),
-            label: `Edit ${field.label}`,
-            // A blank field shows what it falls back to, not an empty column.
-            detail: field.value || field.placeholder,
-            run: () => openField(field),
-          })),
-          ...(kind && (kind.hooks.length > 0 || kind.callbacks.length > 0)
+          ...(locked
+            ? []
+            : (view.fields?.(row.block) ?? []).map((field, i) => ({
+                // The first field is the kind's primary one, a block of URI
+                // or a text block's text, so it earns the `e` key; the rest
+                // are reached with arrow keys and enter.
+                ...(i === 0 ? { key: "e" as const } : {}),
+                label: `Edit ${field.label}`,
+                // A blank field shows what it falls back to, not an empty
+                // column.
+                detail: field.value || field.placeholder,
+                run: () => openField(field),
+              }))),
+          ...(!locked && kind && (kind.hooks.length > 0 || kind.callbacks.length > 0)
             ? [
                 {
                   label: "Configure",
@@ -1175,15 +1197,19 @@ function ChatView({
                 ]
               : [];
           })(),
-          {
-            label: "Edit label",
-            key: "l",
-            detail: row.block.label,
-            run: () => {
-              setError(null);
-              setPopup({ kind: "labelField" });
-            },
-          },
+          ...(locked
+            ? []
+            : [
+                {
+                  label: "Edit label",
+                  key: "l",
+                  detail: row.block.label,
+                  run: () => {
+                    setError(null);
+                    setPopup({ kind: "labelField" });
+                  },
+                },
+              ]),
           {
             label: "Copy ID",
             key: "c",
@@ -1193,24 +1219,29 @@ function ChatView({
               setPopup(null);
             },
           },
-          {
-            label: `Delete ${row.block.label}`,
-            key: "d",
-            destructive: true,
-            run: () => {
-              setPopup(null);
-              const id = row.block.id;
-              // Optimistic. Drops the row immediately, then persists the
-              // delete. Everything nested inside it goes too, on both sides.
-              engine.deleteBlock(id);
-              if (session) {
-                const graphId = session.id;
-                startTransition(() => {
-                  void window.api.chat.deleteChatBlock(graphId, id);
-                });
-              }
-            },
-          },
+          ...(locked
+            ? []
+            : [
+                {
+                  label: `Delete ${row.block.label}`,
+                  key: "d",
+                  destructive: true,
+                  run: () => {
+                    setPopup(null);
+                    const id = row.block.id;
+                    // Optimistic. Drops the row immediately, then persists
+                    // the delete. Everything nested inside it goes too, on
+                    // both sides.
+                    if (!engine.deleteBlock(id)) return;
+                    if (session) {
+                      const graphId = session.id;
+                      startTransition(() => {
+                        void window.api.chat.deleteChatBlock(graphId, id);
+                      });
+                    }
+                  },
+                },
+              ]),
         ]
       : [];
 
@@ -1221,6 +1252,9 @@ function ChatView({
    * stay single-block only. "Run inference on N blocks at once" has no
    * obvious single meaning yet.
    */
+  const selectionLocked = selectedRows.some((entry) =>
+    lockedIds.has(entry.block.id),
+  );
   const selectionActions: KeyMenuItem[] =
     selectedRows.length > 0
       ? [
@@ -1238,79 +1272,97 @@ function ChatView({
               setVisualAnchor(null);
             },
           },
-          {
-            label: `Delete ${selectedRows.length} blocks`,
-            key: "d",
-            destructive: true,
-            run: () => {
-              setPopup(null);
-              setVisualAnchor(null);
-              const ids = selectedRows.map((entry) => entry.block.id);
-              // Optimistic, same as a single delete. Each id's own nested
-              // contents go with it, and an id an ancestor in this same
-              // selection already dropped is just a no-op.
-              for (const id of ids) engine.deleteBlock(id);
-              if (session) {
-                const graphId = session.id;
-                startTransition(() => {
-                  for (const id of ids) void window.api.chat.deleteChatBlock(graphId, id);
-                });
-              }
-            },
-          },
-          {
-            label: `Group ${selectedRows.length} blocks`,
-            key: "g",
-            run: () => {
-              if (!selectionRange || !session) return;
-              setPopup(null);
-              setVisualAnchor(null);
-              const ids = selectedRows.map((entry) => entry.block.id);
-              const at = computeInsertion(rows, selectionRange[0]);
-              const groupId = crypto.randomUUID();
-              const graphId = session.id;
-              const input: BlockInput = {
-                id: groupId,
-                kind: GROUP_KIND,
-                label: "group",
-                // `run` only executes on the key press that triggers this
-                // menu action, never during render. The purity rule can't
-                // see that the closure it's called in is deferred.
-                // eslint-disable-next-line react-hooks/purity
-                createdAt: Date.now(),
-                data: {},
-              };
-              // Optimistic, same as delete. The group lands locally first,
-              // then each selected block relocates into it in order. An
-              // id an ancestor in this same selection already carried
-              // along is just a redundant, harmless move.
-              engine.addBlock(
+          ...(selectionLocked
+            ? []
+            : [
                 {
-                  id: input.id,
-                  kind: input.kind,
-                  label: input.label,
-                  createdAt: input.createdAt,
-                  // eslint-disable-next-line react-hooks/purity -- same deferred-closure false positive as above
-                  modifiedAt: Date.now(),
-                  next: null,
-                  children: null,
-                  data: input.data ?? {},
+                  label: `Delete ${selectedRows.length} blocks`,
+                  key: "d",
+                  destructive: true,
+                  run: () => {
+                    setPopup(null);
+                    setVisualAnchor(null);
+                    const ids = selectedRows
+                      .map((entry) => entry.block.id)
+                      .filter((id) => engine.deleteBlock(id));
+                    // Optimistic, same as a single delete. Each id's own
+                    // nested contents go with it, and an id an ancestor in
+                    // this same selection already dropped is just a no-op.
+                    if (session && ids.length > 0) {
+                      const graphId = session.id;
+                      startTransition(() => {
+                        for (const id of ids)
+                          void window.api.chat.deleteChatBlock(graphId, id);
+                      });
+                    }
+                  },
                 },
-                at,
-              );
-              setOpen(groupId, true);
-              for (const id of ids) {
-                relocate(id, {
-                  parentId: groupId,
-                  afterId: lastChildId(engine.getSnapshot().graph, groupId),
-                });
-              }
-              setPendingFocus({ id: groupId, openActions: false });
-              startTransition(() => {
-                void window.api.chat.createChatBlock(graphId, input, at);
-              });
-            },
-          },
+              ]),
+          ...(selectionLocked
+            ? []
+            : [
+                {
+                  label: `Group ${selectedRows.length} blocks`,
+                  key: "g",
+                  run: () => {
+                    if (!selectionRange || !session) return;
+                    const at = computeInsertion(rows, selectionRange[0]);
+                    if (at.afterId && engine.isLocked(at.afterId)) {
+                      setError(
+                        "can't insert here while a reply is still streaming in",
+                      );
+                      return;
+                    }
+                    setPopup(null);
+                    setVisualAnchor(null);
+                    const ids = selectedRows.map((entry) => entry.block.id);
+                    const groupId = crypto.randomUUID();
+                    const graphId = session.id;
+                    const input: BlockInput = {
+                      id: groupId,
+                      kind: GROUP_KIND,
+                      label: "group",
+                      // `run` only executes on the key press that triggers
+                      // this menu action, never during render. The purity
+                      // rule can't see that the closure it's called in is
+                      // deferred.
+                      // eslint-disable-next-line react-hooks/purity
+                      createdAt: Date.now(),
+                      data: {},
+                    };
+                    // Optimistic, same as delete. The group lands locally
+                    // first, then each selected block relocates into it in
+                    // order. An id an ancestor in this same selection
+                    // already carried along is just a redundant, harmless
+                    // move.
+                    engine.addBlock(
+                      {
+                        id: input.id,
+                        kind: input.kind,
+                        label: input.label,
+                        createdAt: input.createdAt,
+                        // eslint-disable-next-line react-hooks/purity -- same deferred-closure false positive as above
+                        modifiedAt: Date.now(),
+                        next: null,
+                        children: null,
+                        data: input.data ?? {},
+                      },
+                      at,
+                    );
+                    setOpen(groupId, true);
+                    for (const id of ids) {
+                      relocate(id, {
+                        parentId: groupId,
+                        afterId: lastChildId(engine.getSnapshot().graph, groupId),
+                      });
+                    }
+                    setPendingFocus({ id: groupId, openActions: false });
+                    startTransition(() => {
+                      void window.api.chat.createChatBlock(graphId, input, at);
+                    });
+                  },
+                },
+              ]),
         ]
       : [];
 
