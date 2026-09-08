@@ -9,6 +9,7 @@ import type {
   LoadGraphResult,
   MutationResult,
   PluginListResult,
+  ProviderUsageResult,
   WeaverApi,
 } from "../shared/ipc-contract.js";
 import type { BlockInput } from "@repo/store";
@@ -68,6 +69,12 @@ const api: WeaverApi = {
   agent: {
     check: (endpoint, apiKey) =>
       ipcRenderer.invoke("agent:check", endpoint, apiKey) as Promise<CheckResult>,
+    providerUsage: (endpoint, apiKey) =>
+      ipcRenderer.invoke(
+        "agent:providerUsage",
+        endpoint,
+        apiKey,
+      ) as Promise<ProviderUsageResult>,
     run: (request: AgentRunRequest, onEvent: (event: AgentEvent) => void) => {
       const runId = crypto.randomUUID();
       const channel = `agent:run:event:${runId}`;

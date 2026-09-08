@@ -44,6 +44,29 @@ export interface CheckResult {
   message: string;
   /** Model ids the provider reports, when the probe reached `/models`. */
   models?: string[];
+  /** Each reported model id's own `supported_parameters`, when the
+   *  provider's `/models` response included them (OpenRouter does). Used
+   *  to flag a provider setting a chosen model doesn't actually support,
+   *  e.g. a thinking level on a model with no "reasoning" entry here. */
+  modelParameters?: Record<string, string[]>;
+}
+
+/** OpenRouter's own per-key usage and credit limit, as reported by
+ *  `GET /key`. `null` in `limit`/`limitRemaining` means the key has no
+ *  cap of its own; account balance still applies separately. */
+export interface ProviderUsageResult {
+  ok: boolean;
+  message: string;
+  usage?: {
+    label: string;
+    limit: number | null;
+    limitRemaining: number | null;
+    usage: number;
+    usageDaily: number;
+    usageWeekly: number;
+    usageMonthly: number;
+    isFreeTier: boolean;
+  };
 }
 
 /** One setting field a loaded plugin contributes, as it travels over IPC.
@@ -124,6 +147,9 @@ export interface WeaverApi {
   };
   agent: {
     check(endpoint: string, apiKey: string): Promise<CheckResult>;
+    /** Per-key usage and credit limit from OpenRouter's `GET /key`. Only
+     *  meaningful when `endpoint` points at OpenRouter. */
+    providerUsage(endpoint: string, apiKey: string): Promise<ProviderUsageResult>;
     /** Starts a run and subscribes `onEvent` to its events. Returns a
      *  `cancel` function that aborts the run and unsubscribes; also
      *  unsubscribes itself once a terminal (`done`/`error`) event arrives. */

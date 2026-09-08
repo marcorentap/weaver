@@ -13,8 +13,10 @@ import { cn } from "@/lib/utils";
 import type {
   PluginListResult,
   PluginSettingFieldWire,
+  ProviderUsageResult,
 } from "@shared/ipc-contract.js";
 import { detectProvider } from "@shared/provider-routing.js";
+import { MarkdownText } from "@/components/markdown";
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -39,6 +41,11 @@ type SettingDef =
       editable?: boolean;
       /** Rejects a typed value on `enter`, returning why. */
       validate?: (value: string) => string | null;
+      /** Shown under the row, in red, whenever non-null. Unlike `validate`,
+       *  checked every render rather than only on commit, so a value that
+       *  was fine when set but is stale now (the default model changed
+       *  under it) still gets flagged. */
+      warning?: string | null;
     }
   | {
       kind: "number";
@@ -72,6 +79,16 @@ type SettingDef =
       /** Shown, in gray, in place of an empty value, an example rather
        *  than a default. */
       placeholder?: string;
+    }
+  | {
+      /** Not a value to change, just markdown content: an OpenRouter
+       *  usage table, a note, whatever a provider or plugin wants to show
+       *  under its section. Rendered full-width, in place of the usual
+       *  label/value columns; `j`/`k` still land on it, nothing else does. */
+      kind: "info";
+      key: string;
+      section?: string;
+      content: string;
     };
 
 function displayValue(def: SettingDef): string {
@@ -85,6 +102,8 @@ function displayValue(def: SettingDef): string {
       return String(def.value);
     case "string":
       return def.value ? (def.secret ? "•".repeat(8) : def.value) : "";
+    case "info":
+      return "";
   }
 }
 
@@ -135,6 +154,24 @@ function commitEdit(def: EditableSettingDef, raw: string) {
   }
 }
 
+/** OpenRouter's key usage, as a markdown table for the "info" row under
+ *  provider settings. Credits are USD, 1:1. */
+function usageMarkdown(usage: NonNullable<ProviderUsageResult["usage"]>): string {
+  const usd = (value: number) => `$${value.toFixed(2)}`;
+  return [
+    `${usage.label}${usage.isFreeTier ? " (free tier)" : ""}`,
+    "",
+    "| | |",
+    "|---|---|",
+    `| Today | ${usd(usage.usageDaily)} |`,
+    `| This week | ${usd(usage.usageWeekly)} |`,
+    `| This month | ${usd(usage.usageMonthly)} |`,
+    `| All time | ${usd(usage.usage)} |`,
+    `| Key limit | ${usage.limit === null ? "Unlimited" : usd(usage.limit)} |`,
+    `| Remaining | ${usage.limitRemaining === null ? "Unlimited" : usd(usage.limitRemaining)} |`,
+  ].join("\n");
+}
+
 export default function SettingsPage() {
   const {
     settings,
@@ -156,7 +193,11 @@ export default function SettingsPage() {
     ok: boolean | null;
     message: string;
     models?: string[];
+    modelParameters?: Record<string, string[]>;
   } | null>(null);
+  /** OpenRouter's own per-key usage; unrelated to `probe`, `null` when not
+   *  applicable or not fetched yet. */
+  const [usage, setUsage] = useState<ProviderUsageResult | null>(null);
 const inputRef = useRef<HTMLInputElement>(null);
 
   /** Loaded plugins and their setting values, fetched over IPC so the
@@ -353,6 +394,16 @@ const inputRef = useRef<HTMLInputElement>(null);
               value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
               onChange: (value) =>
                 setProviderField(provider!.id, field.key, value),
+              warning:
+                field.key === "thinkingLevel" &&
+                settings.aiProviderSettings[provider!.id]?.thinkingLevel &&
+                settings.aiDefaultModel &&
+                probe?.modelParameters?.[settings.aiDefaultModel] &&
+                !probe.modelParameters[settings.aiDefaultModel]!.includes(
+                  "reasoning",
+                )
+                  ? `${settings.aiDefaultModel} doesn't list reasoning support`
+                  : null,
             }
           : {
               kind: "string",
@@ -366,6 +417,18 @@ const inputRef = useRef<HTMLInputElement>(null);
               placeholder: field.placeholder,
             },
     ),
+    ...(provider?.id === "openrouter"
+      ? [
+          {
+            kind: "info" as const,
+            key: `provider.${provider.id}.usage`,
+            content:
+              usage?.ok && usage.usage
+                ? usageMarkdown(usage.usage)
+                : `Usage: ${usage?.message ?? "checking…"}`,
+          },
+        ]
+      : []),
   ];
 
   // Plugin contributions come last: a "Plugins" section for the directory
@@ -421,9 +484,27 @@ const inputRef = useRef<HTMLInputElement>(null);
     setProbe({ ok: null, message: "checking…" });
     try {
       const verdict = await window.api.agent.check(endpoint, apiKey);
-      setProbe({ ok: verdict.ok, message: verdict.message, models: verdict.models });
+      setProbe({
+        ok: verdict.ok,
+        message: verdict.message,
+        models: verdict.models,
+        modelParameters: verdict.modelParameters,
+      });
     } catch {
       setProbe({ ok: false, message: "check request failed" });
+    }
+  }, []);
+
+  /** OpenRouter-only key usage. Same shape of probe as `checkProvider`. */
+  const fetchUsage = useCallback(async (endpoint: string, apiKey: string) => {
+    if (!apiKey) {
+      setUsage(null);
+      return;
+    }
+    try {
+      setUsage(await window.api.agent.providerUsage(endpoint, apiKey));
+    } catch {
+      setUsage({ ok: false, message: "usage request failed" });
     }
   }, []);
 
@@ -439,6 +520,18 @@ const inputRef = useRef<HTMLInputElement>(null);
     );
     return () => clearTimeout(timer);
   }, [hydrated, settings.aiEndpoint, settings.aiApiKey, checkProvider]);
+
+  // Same as above, for OpenRouter usage. Runs on visit and whenever the
+  // endpoint or key changes, so a fresh key never shows stale numbers.
+  useEffect(() => {
+    if (!hydrated || provider?.id !== "openrouter") return;
+    if (!settings.aiApiKey) return;
+    const timer = setTimeout(
+      () => void fetchUsage(settings.aiEndpoint, settings.aiApiKey),
+      0,
+    );
+    return () => clearTimeout(timer);
+  }, [hydrated, provider?.id, settings.aiEndpoint, settings.aiApiKey, fetchUsage]);
 
   const finishEdit = () => {
     if (!editing || !def || def.key !== editing || !isEditable(def)) {
@@ -526,7 +619,27 @@ const inputRef = useRef<HTMLInputElement>(null);
             !entry.value &&
             !isEditing &&
             entry.placeholder;
-          return (
+          return entry.kind === "info" ? (
+            <Fragment key={entry.key}>
+              {entry.section ? (
+                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
+                  {entry.section}
+                </div>
+              ) : null}
+              <div
+                aria-selected={selected}
+                onClick={() => setCursor(i)}
+                className={cn(
+                  "cursor-pointer border-l-2 px-1 py-1",
+                  selected
+                    ? "border-foreground/60 bg-muted"
+                    : "border-transparent",
+                )}
+              >
+                <MarkdownText text={entry.content} />
+              </div>
+            </Fragment>
+          ) : (
             <Fragment key={entry.key}>
               {entry.section ? (
                 <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
@@ -650,6 +763,11 @@ const inputRef = useRef<HTMLInputElement>(null);
                   {entry.label}: {fieldError}
                 </div>
               ) : null}
+              {!isEditing && entry.kind === "option" && entry.warning ? (
+                <div className="px-1 pb-1 pl-1 text-destructive">
+                  {entry.label}: {entry.warning}
+                </div>
+              ) : null}
               {entry.kind === "string" && entry.key === "aiApiKey" && probe ? (
                 <div
                   className={cn(
@@ -682,28 +800,6 @@ const inputRef = useRef<HTMLInputElement>(null);
             </Fragment>
           );
         })}
-        {provider && provider.links.length > 0 ? (
-          <>
-            {provider.links.map((link, i) => (
-              <a
-                key={link.url}
-                href={link.url}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-3 py-1 pl-1 pr-3 text-muted-foreground hover:text-foreground"
-              >
-                <span className="min-w-0 flex-1">
-                  {i === 0 ? (
-                    <span className="block pb-1 text-muted-foreground/70">
-                      {provider.name} links
-                    </span>
-                  ) : null}
-                  <span className="block underline">{link.label}</span>
-                </span>
-              </a>
-            ))}
-          </>
-        ) : null}
       </div>
     </div>
   );

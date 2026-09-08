@@ -20,7 +20,7 @@ import {
   type AgentEvent,
   type AgentRunRequest,
 } from "../../shared/agent-events.js";
-import type { CheckResult } from "../../shared/ipc-contract.js";
+import type { CheckResult, ProviderUsageResult } from "../../shared/ipc-contract.js";
 import { projectRoot } from "../lib/project.js";
 import { providerUrl } from "../lib/provider.js";
 import { readSource } from "../lib/read-source.js";
@@ -154,18 +154,31 @@ function messageText(message: unknown): string {
  *  a run reaches `done`/`error` on its own, or once cancelled. */
 const runs = new Map<string, { abort: () => void }>();
 
-/**
- * Translates the generic `providerId`/`providerSettings` string bag the
- * renderer sends (see `shared/provider-routing.ts`) into whatever the SDK's
- * own `compat` shape wants for that provider. Only OpenRouter has fields
- * today; any other provider id, or none, leaves `compat` unset, same as
- * before this existed.
- */
-function providerCompat(
+/** `shared/provider-routing.ts`'s "Thinking level" values, structurally
+ *  matching pi-ai's `ThinkingLevel` without importing it (that type is in
+ *  a transitive dependency this package doesn't declare directly). */
+const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+/** Turns the renderer's `providerId`/`providerSettings` into OpenRouter's
+ *  request shape: `only`/`sort` become the `provider` routing object; a
+ *  thinking level marks the model reasoning-capable and sets the session's
+ *  thinking level. Any other provider, or none set, is a no-op. */
+function openRouterTuning(
   providerId: string | undefined,
   providerSettings: Record<string, string> | undefined,
-): { openRouterRouting?: OpenRouterRouting } | undefined {
-  if (providerId !== "openrouter" || !providerSettings) return undefined;
+): {
+  compat?: { openRouterRouting?: OpenRouterRouting; thinkingFormat?: "openrouter" };
+  reasoning: boolean;
+  thinkingLevel?: (typeof THINKING_LEVELS)[number];
+} {
+  if (providerId !== "openrouter" || !providerSettings) return { reasoning: false };
   const only = (providerSettings.only ?? "")
     .split(",")
     .map((slug) => slug.trim())
@@ -174,9 +187,22 @@ function providerCompat(
   const routing: OpenRouterRouting = {};
   if (only.length > 0) routing.only = only;
   if (sort) routing.sort = sort;
-  return Object.keys(routing).length > 0
-    ? { openRouterRouting: routing }
+  const thinkingRaw = providerSettings.thinkingLevel?.trim();
+  const thinkingLevel = (THINKING_LEVELS as readonly string[]).includes(
+    thinkingRaw ?? "",
+  )
+    ? (thinkingRaw as (typeof THINKING_LEVELS)[number])
     : undefined;
+  const hasRouting = Object.keys(routing).length > 0;
+  if (!hasRouting && !thinkingLevel) return { reasoning: false };
+  return {
+    compat: {
+      ...(hasRouting ? { openRouterRouting: routing } : {}),
+      ...(thinkingLevel ? { thinkingFormat: "openrouter" as const } : {}),
+    },
+    reasoning: Boolean(thinkingLevel),
+    thinkingLevel,
+  };
 }
 
 async function runAgent(
@@ -208,6 +234,7 @@ async function runAgent(
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
+    const tuning = openRouterTuning(body.providerId, body.providerSettings);
     modelRuntime.registerProvider("weaver", {
       baseUrl: body.endpoint,
       apiKey: body.apiKey,
@@ -216,12 +243,12 @@ async function runAgent(
         {
           id: body.model,
           name: body.model,
-          reasoning: false,
+          reasoning: tuning.reasoning,
           input: ["text", "image"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,
           maxTokens: 8192,
-          compat: providerCompat(body.providerId, body.providerSettings),
+          compat: tuning.compat,
         },
       ],
     });
@@ -539,6 +566,14 @@ async function runAgent(
       agentDir: AGENT_DIR,
       modelRuntime,
       model,
+      // `ThinkingLevel` lives in `@earendil-works/pi-agent-core`, a
+      // transitive dependency this package does not declare directly, so
+      // this is a structural cast against `createAgentSession`'s own
+      // parameter type instead of importing it. Undefined here means "no
+      // preference"; the SDK falls back to its own default.
+      thinkingLevel: tuning.thinkingLevel as NonNullable<
+        Parameters<typeof createAgentSession>[0]
+      >["thinkingLevel"],
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
       tools: [...tools, display.name],
@@ -621,7 +656,14 @@ const checkRequestBody = z.object({
 
 /** A provider's `/models` listing, as far as this check cares. */
 const modelsResponse = z.object({
-  data: z.array(z.object({ id: z.string() })).optional(),
+  data: z
+    .array(
+      z.object({
+        id: z.string(),
+        supported_parameters: z.array(z.string()).optional(),
+      }),
+    )
+    .optional(),
   error: z.union([z.string(), z.object({ message: z.string() })]).nullish(),
 });
 
@@ -701,7 +743,13 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
     };
   }
 
-  const modelIds = parsed.data.data?.map((model) => model.id) ?? [];
+  const models = parsed.data.data ?? [];
+  const modelIds = models.map((model) => model.id);
+  const modelParameters = Object.fromEntries(
+    models
+      .filter((model) => model.supported_parameters)
+      .map((model) => [model.id, model.supported_parameters!]),
+  );
   return {
     ok: true,
     message:
@@ -709,12 +757,99 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
         ? `reachable, ${modelIds.length} models`
         : "reachable",
     models: modelIds,
+    modelParameters,
+  };
+}
+
+/** OpenRouter's `GET /key` response, as far as the settings usage panel
+ *  cares. See https://openrouter.ai/docs/api_reference/limits. */
+const keyResponse = z.object({
+  data: z.object({
+    label: z.string(),
+    limit: z.number().nullable(),
+    limit_remaining: z.number().nullable(),
+    usage: z.number(),
+    usage_daily: z.number(),
+    usage_weekly: z.number(),
+    usage_monthly: z.number(),
+    is_free_tier: z.boolean(),
+  }),
+});
+
+/**
+ * OpenRouter's key-scoped credit limit and how much of it is spent today,
+ * this week, this month, and all time. Same probe shape as `checkAgent`,
+ * against `GET /key` instead of `GET /models`. There is no equivalent
+ * endpoint for other providers, so this always targets OpenRouter and does
+ * not try to detect a provider from `endpoint` itself.
+ */
+async function checkProviderUsage(
+  endpoint: string,
+  apiKey: string,
+): Promise<ProviderUsageResult> {
+  const url = providerUrl(endpoint, "key");
+  if (!url) {
+    return { ok: false, message: "not a valid URL. It needs a scheme and host" };
+  }
+  if (!apiKey) return { ok: false, message: "no API key set" };
+
+  const upstream = await fetch(url, {
+    headers: { authorization: `Bearer ${apiKey}` },
+  }).catch((error: unknown) => {
+    console.error(`provider usage: fetch to ${url} failed:`, error);
+    return null;
+  });
+  if (!upstream) return { ok: false, message: `cannot reach ${url}` };
+
+  const raw = await upstream.text();
+  if (!upstream.ok) {
+    return {
+      ok: false,
+      message:
+        upstream.status === 401 || upstream.status === 403
+          ? `HTTP ${upstream.status}. API key rejected`
+          : `HTTP ${upstream.status}: ${raw.slice(0, 120) || "(empty response)"}`,
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return {
+      ok: false,
+      message: `HTTP ${upstream.status}: unexpected response from ${url}`,
+    };
+  }
+  const parsed = keyResponse.safeParse(payload);
+  if (!parsed.success) {
+    return { ok: false, message: `unexpected response shape from ${url}` };
+  }
+  const data = parsed.data.data;
+  return {
+    ok: true,
+    message: "reachable",
+    usage: {
+      label: data.label,
+      limit: data.limit,
+      limitRemaining: data.limit_remaining,
+      usage: data.usage,
+      usageDaily: data.usage_daily,
+      usageWeekly: data.usage_weekly,
+      usageMonthly: data.usage_monthly,
+      isFreeTier: data.is_free_tier,
+    },
   };
 }
 
 export function registerAgentHandlers(): void {
   ipcMain.handle("agent:check", (_event, endpoint: string, apiKey: string) =>
     checkAgent(endpoint, apiKey),
+  );
+  ipcMain.handle(
+    "agent:providerUsage",
+    (_event, endpoint: string, apiKey: string) =>
+      checkProviderUsage(endpoint, apiKey),
   );
   ipcMain.handle(
     "agent:run:start",

@@ -1,12 +1,11 @@
 /**
  * Registry mapping an inference endpoint's hostname to a known provider,
- * so settings can show that provider's own fields and links without
- * asking the user to say twice which provider they're using. Adding a new
- * provider is the only step needed to support one: `SettingsPage.tsx`
- * renders `fields`/`links` generically off `detectProvider`, and the main
- * process reads the same field keys back out of `providerSettings` (see
- * `main/ipc/agent.ts`'s `providerCompat`) to build that provider's own
- * request tuning.
+ * so settings can show that provider's own fields without asking the user
+ * to say twice which provider they're using. Adding a new provider is the
+ * only step needed to support one: `SettingsPage.tsx` renders `fields`
+ * generically off `detectProvider`, and the main process reads the same
+ * field keys back out of `providerSettings` (see `main/ipc/agent.ts`'s
+ * `openRouterTuning`) to build that provider's own request tuning.
  *
  * Shared between the renderer (settings UI) and the main process (request
  * building), so both read one definition instead of drifting apart.
@@ -25,18 +24,12 @@ export type ProviderField = {
   options?: readonly ProviderFieldOption[];
 };
 
-export type ProviderLink = { label: string; url: string };
-
 export type ProviderDef = {
   id: string;
   name: string;
   /** Endpoint hostnames that identify this provider. */
   hosts: readonly string[];
   fields: readonly ProviderField[];
-  /** External dashboard pages, shown as plain links under this provider's
-   *  settings section. Opened through the OS browser (see the main
-   *  window's `setWindowOpenHandler`), never loaded in-app. */
-  links: readonly ProviderLink[];
 };
 
 const OPENROUTER: ProviderDef = {
@@ -62,14 +55,21 @@ const OPENROUTER: ProviderDef = {
         { value: "latency", label: "Latency" },
       ],
     },
-  ],
-  links: [
     {
-      label: "Account guardrails",
-      url: "https://openrouter.ai/settings/privacy",
+      key: "thinkingLevel",
+      label: "Thinking level",
+      description:
+        "Reasoning effort a thinking-capable model spends before answering. Support and accepted values vary by model; some reject a value they don't support instead of ignoring it. Leave on Default to omit the field entirely.",
+      options: [
+        { value: "", label: "Default" },
+        { value: "off", label: "Off" },
+        { value: "minimal", label: "Minimal" },
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+        { value: "xhigh", label: "Extra high" },
+      ],
     },
-    { label: "Usage & credits", url: "https://openrouter.ai/credits" },
-    { label: "API keys", url: "https://openrouter.ai/settings/keys" },
   ],
 };
 
