@@ -58,6 +58,12 @@ export const agentRunRequest = z.object({
   /** Built-in tool names to enable for this run. Empty means every built-in
    *  tool (see `ALLOWED_TOOLS`). */
   tools: z.array(z.string()),
+  /** The provider `shared/provider-routing.ts` detected from `endpoint`,
+   *  if any, so the main process can apply that provider's own request
+   *  tuning (see `providerCompat` in `main/ipc/agent.ts`). */
+  providerId: z.string().optional(),
+  /** That provider's saved field values, keyed by field key. */
+  providerSettings: z.record(z.string(), z.string()).optional(),
 });
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;

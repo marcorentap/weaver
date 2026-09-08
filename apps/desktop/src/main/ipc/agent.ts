@@ -11,6 +11,7 @@ import {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import type { OpenRouterRouting } from "@earendil-works/pi-ai";
 import type { ToolRunContext } from "@repo/plugins";
 import { MEDIA_KIND, TOOL_KIND } from "@plugins/rich-media";
 import {
@@ -153,6 +154,31 @@ function messageText(message: unknown): string {
  *  a run reaches `done`/`error` on its own, or once cancelled. */
 const runs = new Map<string, { abort: () => void }>();
 
+/**
+ * Translates the generic `providerId`/`providerSettings` string bag the
+ * renderer sends (see `shared/provider-routing.ts`) into whatever the SDK's
+ * own `compat` shape wants for that provider. Only OpenRouter has fields
+ * today; any other provider id, or none, leaves `compat` unset, same as
+ * before this existed.
+ */
+function providerCompat(
+  providerId: string | undefined,
+  providerSettings: Record<string, string> | undefined,
+): { openRouterRouting?: OpenRouterRouting } | undefined {
+  if (providerId !== "openrouter" || !providerSettings) return undefined;
+  const only = (providerSettings.only ?? "")
+    .split(",")
+    .map((slug) => slug.trim())
+    .filter(Boolean);
+  const sort = providerSettings.sort?.trim();
+  const routing: OpenRouterRouting = {};
+  if (only.length > 0) routing.only = only;
+  if (sort) routing.sort = sort;
+  return Object.keys(routing).length > 0
+    ? { openRouterRouting: routing }
+    : undefined;
+}
+
 async function runAgent(
   event: IpcMainInvokeEvent,
   runId: string,
@@ -195,6 +221,7 @@ async function runAgent(
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,
           maxTokens: 8192,
+          compat: providerCompat(body.providerId, body.providerSettings),
         },
       ],
     });

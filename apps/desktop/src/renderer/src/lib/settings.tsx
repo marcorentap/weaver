@@ -44,6 +44,11 @@ type Settings = {
   aiApiKey: string;
   /** Model id an agent block uses when its own `model` field is blank. */
   aiDefaultModel: string;
+  /** Per-provider settings (routing preferences, and the like), keyed by
+   *  the provider id `shared/provider-routing.ts` detects from
+   *  `aiEndpoint`. Keyed rather than flat so switching endpoints between
+   *  two known providers never clobbers the other one's saved values. */
+  aiProviderSettings: Record<string, Record<string, string>>;
 };
 
 const STORAGE_KEY = "weaver.settings";
@@ -54,6 +59,7 @@ const DEFAULTS: Settings = {
   aiEndpoint: "",
   aiApiKey: "",
   aiDefaultModel: "",
+  aiProviderSettings: {},
 };
 
 /** Snapshot of everything the provider exposes; `hydrated` flips once the
@@ -104,6 +110,7 @@ type SettingsContextValue = {
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
   setAiDefaultModel: (value: string) => void;
+  setProviderField: (providerId: string, key: string, value: string) => void;
 };
 
 const context = createContext<SettingsContextValue | null>(null);
@@ -130,6 +137,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
             aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
             aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
+            aiProviderSettings:
+              stored?.aiProviderSettings ?? DEFAULTS.aiProviderSettings,
           },
           hydrated: true,
         });
@@ -171,6 +180,20 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: string) => set("aiDefaultModel", value),
     [set],
   );
+  /** Merges one field into one provider's settings bag, leaving every
+   *  other provider's saved values untouched. */
+  const setProviderField = useCallback(
+    (providerId: string, key: string, value: string) => {
+      set("aiProviderSettings", {
+        ...current.settings.aiProviderSettings,
+        [providerId]: {
+          ...current.settings.aiProviderSettings[providerId],
+          [key]: value,
+        },
+      });
+    },
+    [set],
+  );
 
   const value = useMemo(
     () => ({
@@ -181,6 +204,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
+      setProviderField,
     }),
     [
       settings,
@@ -190,6 +214,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
+      setProviderField,
     ],
   );
 

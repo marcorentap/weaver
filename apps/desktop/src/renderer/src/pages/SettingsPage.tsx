@@ -14,6 +14,7 @@ import type {
   PluginListResult,
   PluginSettingFieldWire,
 } from "@shared/ipc-contract.js";
+import { detectProvider } from "@shared/provider-routing.js";
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -143,6 +144,7 @@ export default function SettingsPage() {
     setAiEndpoint,
     setAiApiKey,
     setAiDefaultModel,
+    setProviderField,
   } = useSettings();
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
@@ -261,6 +263,8 @@ const inputRef = useRef<HTMLInputElement>(null);
     };
   }
 
+  const provider = detectProvider(settings.aiEndpoint);
+
   const defs: SettingDef[] = [
     {
       kind: "option",
@@ -332,7 +336,37 @@ const inputRef = useRef<HTMLInputElement>(null);
         return null;
       },
     },
-    ];
+    // A provider detected from the endpoint above gets its own fields,
+    // read from and written back to its own slot in `aiProviderSettings`
+    // so switching endpoints never clobbers another provider's saved
+    // values. Nothing renders here for an endpoint that matches none.
+    ...(provider ?? { fields: [] }).fields.map(
+      (field, i): SettingDef =>
+        field.options
+          ? {
+              kind: "option",
+              key: `provider.${provider!.id}.${field.key}`,
+              label: field.label,
+              description: field.description,
+              section: i === 0 ? "Provider settings" : undefined,
+              options: field.options,
+              value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
+              onChange: (value) =>
+                setProviderField(provider!.id, field.key, value),
+            }
+          : {
+              kind: "string",
+              key: `provider.${provider!.id}.${field.key}`,
+              label: field.label,
+              description: field.description,
+              section: i === 0 ? "Provider settings" : undefined,
+              value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
+              onChange: (value) =>
+                setProviderField(provider!.id, field.key, value),
+              placeholder: field.placeholder,
+            },
+    ),
+  ];
 
   // Plugin contributions come last: a "Plugins" section for the directory
   // setting, then one section per loaded plugin for its own settings. Each
@@ -648,6 +682,28 @@ const inputRef = useRef<HTMLInputElement>(null);
             </Fragment>
           );
         })}
+        {provider && provider.links.length > 0 ? (
+          <>
+            {provider.links.map((link, i) => (
+              <a
+                key={link.url}
+                href={link.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-3 py-1 pl-1 pr-3 text-muted-foreground hover:text-foreground"
+              >
+                <span className="min-w-0 flex-1">
+                  {i === 0 ? (
+                    <span className="block pb-1 text-muted-foreground/70">
+                      {provider.name} links
+                    </span>
+                  ) : null}
+                  <span className="block underline">{link.label}</span>
+                </span>
+              </a>
+            ))}
+          </>
+        ) : null}
       </div>
     </div>
   );

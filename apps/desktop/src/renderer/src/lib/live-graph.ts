@@ -69,7 +69,17 @@ export type LiveGraph = {
    */
   runInference: (
     id: BlockId,
-    options: { endpoint: string; apiKey: string; model: string; tools?: string[] },
+    options: {
+      endpoint: string;
+      apiKey: string;
+      model: string;
+      tools?: string[];
+      /** The provider detected from `endpoint`, and its saved settings.
+       *  Passed through to the main process untouched; see
+       *  `shared/provider-routing.ts`. */
+      providerId?: string;
+      providerSettings?: Record<string, string>;
+    },
   ) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
@@ -272,11 +282,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
 
   async function runInference(
     id: BlockId,
-    { endpoint, apiKey, model, tools = [] }: {
+    { endpoint, apiKey, model, tools = [], providerId, providerSettings }: {
       endpoint: string;
       apiKey: string;
       model: string;
       tools?: string[];
+      providerId?: string;
+      providerSettings?: Record<string, string>;
     },
   ): Promise<void> {
     const block = snapshot.graph.blocks[id];
@@ -354,7 +366,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     try {
       let failure: string | null = null;
       const { done, cancel } = streamInference(
-        { endpoint, apiKey, model, context, prompt, tools },
+        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings },
         (event) => {
           if (event.type === "text_delta") {
             appendDelta(event.text);

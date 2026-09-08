@@ -13,6 +13,7 @@ import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { ChatSessionSummary, LoadGraphResult } from "@shared/ipc-contract.js";
+import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
@@ -801,11 +802,14 @@ function ChatView({
    */
   function runInference(id: BlockId): Promise<void> {
     if (!session) return Promise.resolve();
-    const { aiEndpoint, aiApiKey, aiDefaultModel } = settings;
+    const { aiEndpoint, aiApiKey, aiDefaultModel, aiProviderSettings } = settings;
+    const provider = detectProvider(aiEndpoint);
     return engine.runInference(id, {
       endpoint: aiEndpoint,
       apiKey: aiApiKey,
       model: aiDefaultModel,
+      providerId: provider?.id,
+      providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
     });
   }
 
