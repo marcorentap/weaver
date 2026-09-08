@@ -740,7 +740,7 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
   } catch {
     return {
       ok: false,
-      message: `HTTP ${upstream.status}: ${raw.slice(0, 120) || "(empty response)"}`,
+      message: `HTTP ${upstream.status}: ${raw || "(empty response)"}`,
     };
   }
 
@@ -748,7 +748,7 @@ async function checkAgent(endpoint: string, apiKey: string): Promise<CheckResult
   if (!parsed.success) {
     return {
       ok: false,
-      message: `HTTP ${upstream.status}: unexpected response from ${url}`,
+      message: `HTTP ${upstream.status}: unexpected response from ${url}: ${raw}`,
     };
   }
 
@@ -833,7 +833,7 @@ async function checkProviderUsage(
       message:
         upstream.status === 401 || upstream.status === 403
           ? `HTTP ${upstream.status}. API key rejected`
-          : `HTTP ${upstream.status}: ${raw.slice(0, 120) || "(empty response)"}`,
+          : `HTTP ${upstream.status}: ${raw || "(empty response)"}`,
     };
   }
 
@@ -843,12 +843,12 @@ async function checkProviderUsage(
   } catch {
     return {
       ok: false,
-      message: `HTTP ${upstream.status}: unexpected response from ${url}`,
+      message: `HTTP ${upstream.status}: unexpected response from ${url}: ${raw}`,
     };
   }
   const parsed = keyResponse.safeParse(payload);
   if (!parsed.success) {
-    return { ok: false, message: `unexpected response shape from ${url}` };
+    return { ok: false, message: `unexpected response shape from ${url}: ${raw}` };
   }
   const data = parsed.data.data;
   return {

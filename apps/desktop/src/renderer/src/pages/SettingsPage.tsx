@@ -488,8 +488,11 @@ const inputRef = useRef<HTMLInputElement>(null);
         models: verdict.models,
         modelParameters: verdict.modelParameters,
       });
-    } catch {
-      setProbe({ ok: false, message: "check request failed" });
+    } catch (error) {
+      setProbe({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }, []);
 
@@ -501,8 +504,11 @@ const inputRef = useRef<HTMLInputElement>(null);
     }
     try {
       setUsage(await window.api.agent.providerUsage(endpoint, apiKey));
-    } catch {
-      setUsage({ ok: false, message: "usage request failed" });
+    } catch (error) {
+      setUsage({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }, []);
 
