@@ -571,10 +571,13 @@ function ChatView({
   }, [scheduleSignature, engine]);
 
   // ---- Persistence: autosave + manual save -------------------------------
-  // A fixed 3s cadence, not a debounce. A timer ticking every 2s would keep
-  // resetting a debounce and never actually save. `performSaveRef` lets that
-  // interval stay mounted for the component's life while always calling the
-  // latest closure (current `session`, current engine).
+  // Debounced on `graph`'s identity, which changes on every commit
+  // (structural edits, field/label writes, streamed inference deltas
+  // alike), rather than polled on a fixed cadence. A run streaming in
+  // token by token keeps resetting the timer and only actually saves once
+  // it settles, so this fires shortly after the graph goes quiet instead
+  // of mid-stream on every delta. `performSaveRef` lets the timeout always
+  // call the latest closure (current `session`, current engine).
   const performSave = useCallback(async (): Promise<void> => {
     if (!session) return;
     const result = await window.api.chat.saveGraph(
@@ -595,11 +598,10 @@ function ChatView({
   }, [performSave]);
 
   useEffect(() => {
-    const id = setInterval(() => {
-      if (engine.getSnapshot().dirty) void performSaveRef.current();
-    }, 3000);
-    return () => clearInterval(id);
-  }, [engine]);
+    if (!dirty) return;
+    const id = setTimeout(() => void performSaveRef.current(), 800);
+    return () => clearTimeout(id);
+  }, [graph, dirty]);
 
   const rows = flatten(liveNodes, expanded);
   const runningTailIds = new Set<BlockId>(appendTails.values());
