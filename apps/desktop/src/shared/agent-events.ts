@@ -20,6 +20,11 @@ export const agentEvent = z.discriminatedUnion("type", [
    *  used verbatim when no deltas arrived (a run that used no streaming) and
    *  as the streaming block's finish signal otherwise. */
   z.object({ type: z.literal("text_delta"), text: z.string() }),
+  /** The model's reasoning, spoken before its reply. Some providers stream
+   *  it as `thinking_delta` chunks; a `thinking` event still follows once
+   *  the message is complete, on the same terms as `text`/`text_delta`. */
+  z.object({ type: z.literal("thinking"), text: z.string() }),
+  z.object({ type: z.literal("thinking_delta"), text: z.string() }),
   /** A finished tool call, with whatever it printed. */
   z.object({
     type: z.literal("tool"),

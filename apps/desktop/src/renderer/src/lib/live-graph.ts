@@ -315,16 +315,27 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       setAppendTail(id, newId);
       return newId;
     };
-    // The block a run's `text_delta` chunks are currently landing in. Null
-    // between messages, so the first delta of a new one starts a fresh
-    // block instead of gluing onto whatever came before it, such as a tool
-    // result, a displayed block, or an earlier reply in the same run.
+    // The block a run's `text_delta`/`thinking_delta` chunks are currently
+    // landing in. Null between messages, so the first delta of a new one
+    // starts a fresh block instead of gluing onto whatever came before it,
+    // such as a tool result, a displayed block, or an earlier reply in the
+    // same run. Reasoning and reply share one block: the model's reasoning
+    // reads as part of its own answer, not as a separate turn, so it is
+    // italicized markdown ahead of the reply rather than its own block.
     let streamingId: BlockId | null = null;
-    let streamingText = "";
-    const appendDelta = (delta: string) => {
-      streamingText += delta;
+    let thinkingText = "";
+    let replyText = "";
+    const composeText = () => {
+      if (!thinkingText) return replyText;
+      const italic = thinkingText
+        .split("\n")
+        .map((line) => (line.trim().length > 0 ? `*${line}*` : ""))
+        .join("\n");
+      return replyText ? `${italic}\n\n${replyText}` : italic;
+    };
+    const updateStreaming = () => {
       if (streamingId === null) {
-        streamingId = append(TEXT_KIND, { text: streamingText }, "assistant");
+        streamingId = append(TEXT_KIND, { text: composeText() }, "assistant");
         return;
       }
       const current = snapshot.graph.blocks[streamingId];
@@ -336,13 +347,18 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
             ...snapshot.graph.blocks,
             [streamingId]: {
               ...current,
-              data: { text: streamingText },
+              data: { text: composeText() },
               modifiedAt: Date.now(),
             },
           },
         },
         true,
       );
+    };
+    const resetStreaming = () => {
+      streamingId = null;
+      thinkingText = "";
+      replyText = "";
     };
     // Pre-flight failures land as an appended error block too, and never
     // set `running`, because there is nothing in flight to show a spinner for.
@@ -368,23 +384,30 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       const { done, cancel } = streamInference(
         { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings },
         (event) => {
-          if (event.type === "text_delta") {
-            appendDelta(event.text);
+          if (event.type === "thinking_delta") {
+            thinkingText += event.text;
+            updateStreaming();
+          } else if (event.type === "thinking") {
+            // Deltas already streamed this into the block; only a
+            // non-streaming provider's whole-reasoning event needs to set
+            // it here, ahead of the `text` event that follows.
+            if (streamingId === null) thinkingText = event.text;
+          } else if (event.type === "text_delta") {
+            replyText += event.text;
+            updateStreaming();
           } else if (event.type === "text") {
             // Deltas already streamed this message in, so the block already holds
             // it; this only ends the stream rather than appending a duplicate.
             // If no deltas arrived (a non-streaming provider, or text that
             // came with no preceding delta at all), append the message whole,
             // exactly as before deltas existed.
-            if (streamingId !== null) {
-              streamingId = null;
-              streamingText = "";
-            } else {
-              append(TEXT_KIND, { text: event.text }, "assistant");
+            if (streamingId === null) {
+              replyText = event.text;
+              append(TEXT_KIND, { text: composeText() }, "assistant");
             }
+            resetStreaming();
           } else if (event.type === "tool") {
-            streamingId = null;
-            streamingText = "";
+            resetStreaming();
             append(
               TOOL_KIND,
               {
@@ -396,8 +419,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               event.name,
             );
           } else if (event.type === "block") {
-            streamingId = null;
-            streamingText = "";
+            resetStreaming();
             const target = kinds[event.kind];
             if (!target) return;
             try {

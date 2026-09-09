@@ -95,6 +95,7 @@ const contentParts = z.object({
       z.object({
         type: z.string(),
         text: z.string().optional(),
+        thinking: z.string().optional(),
         mimeType: z.string().optional(),
       }),
     )
@@ -139,14 +140,27 @@ function resultText(result: unknown): string {
  * Assistant prose from a finished message. `message_end` fires for the user
  * turn and for every tool result too, so the role is checked first. Without
  * that, a run echoes its own prompt back as a block and repeats each tool's
- * output twice. Tool calls become their own blocks and thinking is dropped,
- * so only spoken text is left.
+ * output twice. Tool calls become their own blocks and reasoning is read
+ * separately by `messageThinking`, so only spoken text is left here.
  */
 function messageText(message: unknown): string {
   const parsed = contentParts.safeParse(message);
   if (!parsed.success || parsed.data.role !== "assistant") return "";
   return (parsed.data.content ?? [])
     .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+    .filter((text) => text.trim().length > 0)
+    .join("\n\n");
+}
+
+/** The model's reasoning from a finished message, on the same terms as
+ *  `messageText`. Deltas already streamed it in during generation; this is
+ *  the terminal signal for a run that streamed no `thinking_delta` at all
+ *  (a non-reasoning provider, or a non-streaming one). */
+function messageThinking(message: unknown): string {
+  const parsed = contentParts.safeParse(message);
+  if (!parsed.success || parsed.data.role !== "assistant") return "";
+  return (parsed.data.content ?? [])
+    .map((part) => (part.type === "thinking" ? (part.thinking ?? "") : ""))
     .filter((text) => text.trim().length > 0)
     .join("\n\n");
 }
@@ -649,12 +663,15 @@ async function runAgent(
         pendingArgs.set(sessionEvent.toolCallId, JSON.stringify(sessionEvent.args ?? {}));
         return;
       }
-      // Token-by-token streaming of the assistant's own words; the
-      // `text` event at `message_end` below is still the authoritative
-      // full message, so nothing here is deduplicated against it.
+      // Token-by-token streaming of the assistant's own words and, where
+      // the model exposes it, its reasoning; the `text`/`thinking` events
+      // at `message_end` below are still the authoritative full message,
+      // so nothing here is deduplicated against them.
       if (sessionEvent.type === "message_update") {
         if (sessionEvent.assistantMessageEvent.type === "text_delta") {
           emit({ type: "text_delta", text: sessionEvent.assistantMessageEvent.delta });
+        } else if (sessionEvent.assistantMessageEvent.type === "thinking_delta") {
+          emit({ type: "thinking_delta", text: sessionEvent.assistantMessageEvent.delta });
         }
         return;
       }
@@ -664,6 +681,8 @@ async function runAgent(
           emit({ type: "error", message: failure });
           return;
         }
+        const thinking = messageThinking(sessionEvent.message);
+        if (thinking) emit({ type: "thinking", text: thinking });
         const text = messageText(sessionEvent.message);
         if (text) emit({ type: "text", text });
         return;
