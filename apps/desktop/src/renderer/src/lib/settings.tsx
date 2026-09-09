@@ -30,12 +30,20 @@ export const WORD_WRAP_OPTIONS = [
   { value: "on", label: "On" },
 ] as const satisfies readonly { value: WordWrapMode; label: string }[];
 
+/** Root font size, in px. Every rem-sized element scales off `<html>`. */
+export const DEFAULT_FONT_SIZE = 15;
+export const MIN_FONT_SIZE = 10;
+export const MAX_FONT_SIZE = 20;
+
 type Settings = {
   /** Left-hand gutter beside each chat block. */
   lineNumber: LineNumberMode;
   /** Whether preformatted content, code and a tool's output, wraps instead
    *  of scrolling sideways. */
   wordWrap: WordWrapMode;
+  /** Root font size in px. Applied to `<html>`, so every rem-sized element
+   *  scales with it. */
+  fontSize: number;
   /** Default URL of an OpenAI-completions provider, e.g.
    *  "http://seer:4000/v1". An agent block appends "/chat/completions"
    *  itself. */
@@ -56,6 +64,7 @@ const STORAGE_KEY = "weaver.settings";
 const DEFAULTS: Settings = {
   lineNumber: "absolute",
   wordWrap: "off",
+  fontSize: DEFAULT_FONT_SIZE,
   aiEndpoint: "",
   aiApiKey: "",
   aiDefaultModel: "",
@@ -107,6 +116,7 @@ type SettingsContextValue = {
   hydrated: boolean;
   setLineNumber: (mode: LineNumberMode) => void;
   setWordWrap: (mode: WordWrapMode) => void;
+  setFontSize: (size: number) => void;
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
   setAiDefaultModel: (value: string) => void;
@@ -134,6 +144,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
           settings: {
             lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
             wordWrap: stored?.wordWrap ?? DEFAULTS.wordWrap,
+            fontSize: stored?.fontSize ?? DEFAULTS.fontSize,
             aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
             aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
             aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
@@ -150,6 +161,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
+  // `<html>`'s font-size, not a component's own style, since every
+  // rem-sized element in the app scales off the root, not just the ones
+  // this provider wraps.
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${settings.fontSize}px`;
+  }, [settings.fontSize]);
+
   /** Every setter writes one field the same way: merge, commit, persist.
    *  Committed before the IPC round trip resolves, same optimistic order as
    *  every other mutation in the app, so a keystroke never waits on the
@@ -164,6 +182,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (lineNumber: LineNumberMode) => set("lineNumber", lineNumber),
     [set],
   );
+  const setFontSize = useCallback((size: number) => set("fontSize", size), [set]);
   const setWordWrap = useCallback(
     (wordWrap: WordWrapMode) => set("wordWrap", wordWrap),
     [set],
@@ -201,6 +220,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       hydrated,
       setLineNumber,
       setWordWrap,
+      setFontSize,
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,
@@ -211,6 +231,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       hydrated,
       setLineNumber,
       setWordWrap,
+      setFontSize,
       setAiEndpoint,
       setAiApiKey,
       setAiDefaultModel,

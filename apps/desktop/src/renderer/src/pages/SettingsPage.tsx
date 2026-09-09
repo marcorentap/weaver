@@ -2,6 +2,8 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   LINE_NUMBER_OPTIONS,
+  MAX_FONT_SIZE,
+  MIN_FONT_SIZE,
   useSettings,
   WORD_WRAP_OPTIONS,
   type LineNumberMode,
@@ -178,6 +180,7 @@ export default function SettingsPage() {
     hydrated,
     setLineNumber,
     setWordWrap,
+    setFontSize,
     setAiEndpoint,
     setAiApiKey,
     setAiDefaultModel,
@@ -325,6 +328,17 @@ const inputRef = useRef<HTMLInputElement>(null);
       options: WORD_WRAP_OPTIONS,
       value: settings.wordWrap,
       onChange: (value) => setWordWrap(value as WordWrapMode),
+    },
+    {
+      kind: "number",
+      key: "fontSize",
+      label: "Font size",
+      description: "Root text size in px.",
+      value: settings.fontSize,
+      step: 1,
+      min: MIN_FONT_SIZE,
+      max: MAX_FONT_SIZE,
+      onChange: setFontSize,
     },
     {
       kind: "string",
