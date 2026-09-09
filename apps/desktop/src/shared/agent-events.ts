@@ -80,7 +80,6 @@ export const ALLOWED_TOOLS = [
   "read",
   "grep",
   "find",
-  "ls",
   "bash",
   "write",
   "edit",

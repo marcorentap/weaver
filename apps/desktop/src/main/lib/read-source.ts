@@ -1,4 +1,4 @@
-import { open } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSsh, shellQuote, sshPath } from "./ssh.js";
@@ -53,6 +53,26 @@ async function readLocalRange(path: string, start: number, length: number): Prom
   }
 }
 
+/** False on any stat failure (missing path, no permission), so a bad path
+ *  falls through to the normal file read and fails there with the real
+ *  error instead of a misleading "not a directory" here. */
+async function isLocalDirectory(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** One entry per line, name only, a trailing `/` marking a subdirectory.
+ *  Sorted so the result is stable across runs on the same directory. */
+async function readLocalDirectory(path: string): Promise<string[]> {
+  const entries = await readdir(path, { withFileTypes: true });
+  return entries
+    .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 async function readHttpRange(url: URL, start: number, length: number): Promise<Buffer> {
   const to = start + length - 1;
   const res = await fetch(url, { headers: { Range: `bytes=${start}-${to}` } });
@@ -77,6 +97,33 @@ async function readSshRange(url: URL, start: number, length: number): Promise<Bu
       ? `tail -c +${start + 1} -- ${path} | head -c ${length}`
       : `head -c ${length} -- ${path}`;
   return runSsh(url, command);
+}
+
+/** False whenever the remote `test -d` fails to run at all (bad host,
+ *  missing path, no permission), so those fall through to the normal file
+ *  read and fail there with the real error instead of a misleading "not a
+ *  directory" here. */
+async function isSshDirectory(url: URL): Promise<boolean> {
+  const path = shellQuote(sshPath(url));
+  try {
+    const out = await runSsh(url, `[ -d ${path} ] && echo 1 || echo 0`);
+    return out.toString("utf8").trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Same shape as `readLocalDirectory`: one sorted entry per line, a
+ *  trailing `/` marking a subdirectory. `-p` is `ls`'s own way to mark
+ *  that, so sorting is the only local work left. */
+async function readSshDirectory(url: URL): Promise<string[]> {
+  const path = shellQuote(sshPath(url));
+  const out = await runSsh(url, `ls -1p -- ${path}`);
+  return out
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .sort((a, b) => a.localeCompare(b));
 }
 
 async function fetchRange(backend: Backend, start: number, length: number): Promise<Buffer> {
@@ -119,12 +166,38 @@ export type ReadSourceResult = {
   byteEnd?: number;
 };
 
+/** `offset`/`limit` windowed onto `lines`, shared by file content and
+ *  directory listings alike: a listing is just lines with no bytes behind
+ *  them. */
+function windowLines(
+  lines: string[],
+  offset: number | undefined,
+  limit: number | undefined,
+): ReadSourceResult {
+  const startLine = Math.max(offset ?? 1, 1);
+  const endLine =
+    limit !== undefined
+      ? Math.min(startLine - 1 + limit, lines.length)
+      : lines.length;
+  const windowed = lines.slice(startLine - 1, endLine);
+  return {
+    content: windowed.join("\n"),
+    truncated: startLine > 1 || endLine < lines.length,
+    startLine,
+    endLine,
+    totalLines: lines.length,
+  };
+}
+
 /**
  * Reads `source`: a bare filesystem path, or a `file://`, `http(s)://` or
- * `ssh://` URI. The read is windowed either by line (`offset`/`limit`, the
- * default) or by byte (`byteOffset`/`byteLength`, for content a line
- * boundary can't usefully cut). `cwd` anchors a bare relative path; every
- * URI form is self-contained.
+ * `ssh://` URI. A local path, `file://` URI, or `ssh://` URI naming a
+ * directory lists its immediate entries instead, one per line, sorted,
+ * subdirectories marked with a trailing `/`; `http(s)://` sources are read
+ * as files only. Otherwise the read is windowed either by line
+ * (`offset`/`limit`, the default) or by byte (`byteOffset`/`byteLength`,
+ * for content a line boundary can't usefully cut). `cwd` anchors a bare
+ * relative path; every URI form is self-contained.
  */
 export async function readSource(
   source: string,
@@ -140,6 +213,23 @@ export async function readSource(
   }
 
   const backend = resolveBackend(source, cwd);
+
+  let directoryLines: string[] | null = null;
+  if (backend.kind === "local") {
+    if (await isLocalDirectory(backend.path)) {
+      directoryLines = await readLocalDirectory(backend.path);
+    }
+  } else if (backend.kind === "ssh") {
+    if (await isSshDirectory(backend.url)) {
+      directoryLines = await readSshDirectory(backend.url);
+    }
+  }
+  if (directoryLines !== null) {
+    if (byteMode) {
+      throw new Error("byteOffset/byteLength read a file; this path is a directory");
+    }
+    return windowLines(directoryLines, offset, limit);
+  }
 
   if (byteMode) {
     const start = Math.max(byteOffset ?? 0, 0);
@@ -157,18 +247,5 @@ export async function readSource(
   }
 
   const buf = await fetchRange(backend, 0, MAX_BYTES);
-  const lines = buf.toString("utf8").split("\n");
-  const startLine = Math.max(offset ?? 1, 1);
-  const endLine =
-    limit !== undefined
-      ? Math.min(startLine - 1 + limit, lines.length)
-      : lines.length;
-  const windowed = lines.slice(startLine - 1, endLine);
-  return {
-    content: windowed.join("\n"),
-    truncated: startLine > 1 || endLine < lines.length,
-    startLine,
-    endLine,
-    totalLines: lines.length,
-  };
+  return windowLines(buf.toString("utf8").split("\n"), offset, limit);
 }

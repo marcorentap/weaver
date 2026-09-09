@@ -476,11 +476,12 @@ async function runAgent(
       name: "read",
       label: "Read",
       description: [
-        "Use this to check what's actually in a file, or to visit or fetch a webpage, instead of guessing. Windows the result by line or by byte.",
+        "Use this to check what's actually in a file or directory, or to visit or fetch a webpage, instead of guessing. Windows the result by line or by byte.",
         "`path` is a filesystem path (relative to the project root, or absolute) or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
+        "A local path, file:// URI, or ssh:// URI naming a directory lists its immediate entries, one per line, subdirectories marked with a trailing /; http(s):// only reads files.",
         "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
-        "Default is line mode: `offset`/`limit` window onto 1-indexed lines.",
-        "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both.",
+        "Default is line mode: `offset`/`limit` window onto 1-indexed lines (also the entries of a directory listing).",
+        "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both; neither applies to a directory.",
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
