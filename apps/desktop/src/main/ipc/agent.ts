@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { OpenRouterRouting } from "@earendil-works/pi-ai";
 import type { ToolRunContext } from "@repo/plugins";
-import { MEDIA_KIND } from "@plugins/rich-media";
+import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import {
   ALLOWED_TOOLS,
   agentRunRequest,
@@ -34,6 +34,27 @@ import { registerPendingMedia } from "../lib/pending-media.js";
 /** Config directory handed to the agent. Sessions are in-memory and every
  *  discovery pass is disabled, so nothing is actually read from it. */
 const AGENT_DIR = "/tmp/weaver-agent";
+
+/**
+ * Markdown image syntax naming a `file://` URI: `![alt](file://…)`. The
+ * model can point `display_media` at a URI, or just write it inline in its
+ * own reply, and either way it is a URI this live run just asserted, so
+ * both get the same "trust it until the next autosave" treatment as
+ * `display_media` (see pending-media.ts). Without this, an inline image the
+ * model writes instead of calling the tool 403s at the `weaver-media://`
+ * protocol handler, since it is neither store-referenced nor inside the
+ * project, and silently fails to render. A plain link is not covered: it
+ * opens through `shell.openExternal`, never through `weaver-media://`, so
+ * it never hits that check.
+ */
+const INLINE_MEDIA_IMAGE = /!\[[^\]]*\]\(\s*(file:\/\/[^\s)]+)\)/g;
+
+function registerInlineMedia(text: string): void {
+  for (const match of text.matchAll(INLINE_MEDIA_IMAGE)) {
+    const uri = match[1];
+    if (uri && parseMediaUri(uri)) registerPendingMedia(uri);
+  }
+}
 
 /**
  * A plugin's settings, one JSON blob per plugin id under a per-plugin store
@@ -601,6 +622,12 @@ async function runAgent(
     // are paired by id. A tool block shows what was asked as well as what
     // came back.
     const pendingArgs = new Map<string, string>();
+    // Accumulated so `registerInlineMedia` sees a URI as soon as its
+    // `![...](file://...)` closes, not only once the whole message is
+    // final; the renderer mirrors every delta into the live block, so an
+    // inline image can render mid-stream, well before `message_end`. Reset
+    // per assistant message, since a run may take several turns.
+    let assistantText = "";
     const unsubscribe = session.subscribe((sessionEvent) => {
       if (sessionEvent.type === "tool_execution_start") {
         pendingArgs.set(sessionEvent.toolCallId, JSON.stringify(sessionEvent.args ?? {}));
@@ -612,6 +639,8 @@ async function runAgent(
       // so nothing here is deduplicated against them.
       if (sessionEvent.type === "message_update") {
         if (sessionEvent.assistantMessageEvent.type === "text_delta") {
+          assistantText += sessionEvent.assistantMessageEvent.delta;
+          registerInlineMedia(assistantText);
           emit({ type: "text_delta", text: sessionEvent.assistantMessageEvent.delta });
         } else if (sessionEvent.assistantMessageEvent.type === "thinking_delta") {
           emit({ type: "thinking_delta", text: sessionEvent.assistantMessageEvent.delta });
@@ -619,6 +648,7 @@ async function runAgent(
         return;
       }
       if (sessionEvent.type === "message_end") {
+        assistantText = "";
         const failure = messageFailure(sessionEvent.message);
         if (failure) {
           emit({ type: "error", message: failure });
@@ -627,7 +657,11 @@ async function runAgent(
         const thinking = messageThinking(sessionEvent.message);
         if (thinking) emit({ type: "thinking", text: thinking });
         const text = messageText(sessionEvent.message);
-        if (text) emit({ type: "text", text });
+        if (text) {
+          // Covers a non-streaming provider, which never fires `text_delta`.
+          registerInlineMedia(text);
+          emit({ type: "text", text });
+        }
         return;
       }
       if (sessionEvent.type === "tool_execution_end") {
