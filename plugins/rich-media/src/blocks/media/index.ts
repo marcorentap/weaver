@@ -114,7 +114,8 @@ export type MediaState = z.infer<typeof mediaState>;
 export const mediaKind = defineKind({
   kind: MEDIA_KIND,
   schema: mediaState,
-  snapshot: (state, ctx) =>
-    `${ctx.block.label}: ${mediaInfo(state.uri).type} at ${state.uri}`,
+  // `snapshotBlock` prefixes the label itself; this only adds what's
+  // specific to a media block.
+  snapshot: (state) => `${mediaInfo(state.uri).type} at ${state.uri}`,
   defaults: { uri: "file:///" },
 });

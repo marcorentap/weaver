@@ -279,9 +279,15 @@ export function assertTree(graph: BlockGraph): void {
 }
 
 /**
- * Flatten a block into its LLM string. Unknown kinds throw rather than guess:
- * silently wrong context is worse than a loud failure, and a purely visual
- * block can register a snapshot that returns "".
+ * Flatten a block into its LLM string, prefixed with the block's own label
+ * (`label: body`) so an agent reading the flattened graph can tell blocks
+ * apart by who or what produced them, not just by juxtaposition. A block
+ * with no label, or whose kind snapshots to "", is returned unprefixed: an
+ * empty snapshot means "nothing to show", not "a label with nothing after
+ * it", and a checked-empty prompt (e.g. an empty trigger block) must stay
+ * checkably empty. Unknown kinds throw rather than guess: silently wrong
+ * context is worse than a loud failure, and a purely visual block can
+ * register a snapshot that returns "".
  */
 export function snapshotBlock(
   graph: BlockGraph,
@@ -293,11 +299,13 @@ export function snapshotBlock(
   if (!kind) {
     throw new Error(`no kind registered for block kind: ${block.kind}`);
   }
-  return kind.snapshot(block.data, {
+  const body = kind.snapshot(block.data, {
     block,
     nested: (childId) => snapshotBlock(graph, childId, registry),
     children: childIds(graph, id),
   });
+  if (!body || !block.label) return body;
+  return `${block.label}: ${body}`;
 }
 
 /** Snapshot the whole graph: every top-level block, in order. */
