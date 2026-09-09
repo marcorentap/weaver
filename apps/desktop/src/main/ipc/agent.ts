@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { OpenRouterRouting } from "@earendil-works/pi-ai";
 import type { ToolRunContext } from "@repo/plugins";
-import { MEDIA_KIND, TOOL_KIND } from "@plugins/rich-media";
+import { MEDIA_KIND } from "@plugins/rich-media";
 import {
   ALLOWED_TOOLS,
   agentRunRequest,
@@ -62,10 +62,6 @@ const toolRunContext: ToolRunContext = {
   },
 };
 
-/** A tool block is the harness's own record of a call rather than something
- *  to fabricate, so the `display` tool refuses to create one. */
-const NOT_DISPLAYABLE = new Set<string>([TOOL_KIND]);
-
 /**
  * Appended to the SDK's own system prompt (see `resourceLoader` below).
  * Everything here is what's specific to running as one block in a weaver
@@ -103,22 +99,6 @@ const contentParts = z.object({
   stopReason: z.string().optional(),
   errorMessage: z.string().optional(),
 });
-
-/** The kinds an agent can display, each with the JSON Schema of its state.
- *  Derived from the kind registry, so a plugin registering a kind is all it
- *  takes to make it something the model can produce. */
-function displayableKinds(): { kind: string; schema: unknown }[] {
-  return Object.values(loadedPlugins().kinds).flatMap((kind) => {
-    if (NOT_DISPLAYABLE.has(kind.kind)) return [];
-    try {
-      return [{ kind: kind.kind, schema: z.toJSONSchema(kind.schema) }];
-    } catch {
-      // A kind whose schema has no JSON Schema form is simply not offered,
-      // rather than taking the whole run down with it.
-      return [];
-    }
-  });
-}
 
 /** Text of a tool result, joined. Image content is named rather than
  *  inlined because the bytes are already on disk and the browser has the
@@ -294,8 +274,6 @@ async function runAgent(
     return;
   }
 
-  const displayable = displayableKinds();
-
   try {
     const modelRuntime = await ModelRuntime.create({
       // Nothing on disk: the endpoint and key come from the caller's
@@ -331,30 +309,24 @@ async function runAgent(
     }
 
     /**
-     * The one tool the harness adds: it turns anything the agent wants to
-     * show into a real block. Its parameters are deliberately generic: a
-     * kind plus that kind's own state, so "what an agent can display" is
-     * exactly "which kinds exist", with no tool per kind to maintain.
+     * The one tool the harness adds: it turns a URI into a media block. A
+     * generic version of this, one block kind per call with that kind's own
+     * JSON Schema for `data`, existed before; the model kept getting a
+     * kind's own fields wrong. Media only, with the two fields it actually
+     * needs, has no schema left to get wrong.
      */
-    const display = defineTool({
-      name: "display",
-      label: "Display",
+    const displayMedia = defineTool({
+      name: "display_media",
+      label: "Display media",
       description: [
-        "Use this to show the user something concrete: code, a diagram, a fetched page, structured data. Don't just describe it in your reply, add a block for it.",
-        "Pick the kind that fits and pass its state as `data`. Available kinds, with the JSON Schema of their `data`:",
-        ...displayable.map(
-          (entry) => `- ${entry.kind}: ${JSON.stringify(entry.schema)}`,
-        ),
-        'Media: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL. The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn\'t recognize, renders as a plain "no preview" placeholder instead of the actual file, so don\'t use this kind for extensionless paths. If the only copy you have is extensionless (a download, a temp file, an attachment), write or copy it to a path that ends in the right extension first, then point this block at that copy. A local file needs an absolute file:// URI, such as {"uri":"file:///home/me/diagram.png"}.',
-        "Text: renders GitHub-flavoured markdown, so headings, lists, tables, fenced code and images all work; an image needs an http(s) or absolute file:// URL.",
-        "A `Text` block is already visible. Don't restate its content in your reply. Summarizing is fine.",
+        "Show the user a real file: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL.",
+        "The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn't recognize, renders as a plain \"no preview\" placeholder instead of the actual file.",
+        "If the only copy you have is extensionless (a download, a temp file, an attachment), write or copy it to a path that ends in the right extension first, then point this tool at that copy.",
+        "A local file needs an absolute file:// URI, such as file:///home/me/diagram.png.",
       ].join("\n"),
       parameters: Type.Object({
-        kind: Type.String({ description: "Block kind to create" }),
+        uri: Type.String({ description: "http(s)://, file://, or a YouTube URL" }),
         label: Type.String({ description: "Short label for the block" }),
-        data: Type.Unknown({
-          description: "State for that kind, matching its schema",
-        }),
       }),
       execute: async (_toolCallId, params) => {
         const answer = (text: string) => ({
@@ -362,59 +334,29 @@ async function runAgent(
           details: {},
         });
         // Thrown, not returned. The agent loop turns a throw into a failed
-        // tool result, so a rejected display shows up as a failed call
-        // instead of vanishing.
+        // tool result, so a rejected call shows up as a failed one instead
+        // of vanishing.
         const refuse = (text: string): never => {
           throw new Error(text);
         };
-        const kind = loadedPlugins().kinds[params.kind];
-        if (!kind || NOT_DISPLAYABLE.has(params.kind)) {
-          refuse(
-            `no such kind: ${params.kind}. Available: ${displayable
-              .map((entry) => entry.kind)
-              .join(", ")}`,
-          );
-        }
-        // `data` is an object in the schema, but a model handed a
-        // schemaless parameter often sends the JSON as a string. Both
-        // mean the same thing, so both are accepted.
-        const raw =
-          typeof params.data === "string"
-            ? ((): unknown => {
-                try {
-                  return JSON.parse(params.data as string);
-                } catch {
-                  return refuse("data is not valid JSON");
-                }
-              })()
-            : params.data;
-        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-          refuse("data must be an object of that kind's fields");
-        }
-        // A record, per the check above; the schema decides the rest.
-        const state = raw as Record<string, unknown>;
+        const kind = loadedPlugins().kinds[MEDIA_KIND];
+        if (!kind) throw new Error("media kind is not registered");
+        const state = { uri: params.uri };
         try {
-          // Validated here so the model is told what it got wrong while
-          // it can still fix it, instead of the renderer rejecting the
-          // block once the run is over.
-          loadedPlugins().kinds[params.kind]?.parse(state);
+          // Validated here so the model is told what it got wrong while it
+          // can still fix it, instead of the renderer rejecting the block
+          // once the run is over.
+          kind.parse(state);
         } catch (error) {
           refuse(schemaMessage(error));
         }
-        // A file this block points at is not in the store until the next
+        // The block this points at is not in the store until the next
         // autosave, so the media protocol would refuse it on the renderer's
         // first request. Say "this is about to be shown" ahead of that so
         // the fresh block displays without a reload (see pending-media.ts).
-        if (params.kind === MEDIA_KIND && typeof state.uri === "string") {
-          registerPendingMedia(state.uri);
-        }
-        emit({
-          type: "block",
-          kind: params.kind,
-          label: params.label,
-          data: state,
-        });
-        return answer(`displayed a ${params.kind} block`);
+        registerPendingMedia(params.uri);
+        emit({ type: "block", kind: MEDIA_KIND, label: params.label, data: state });
+        return answer(`added a media block for ${params.uri}`);
       },
     });
 
@@ -649,8 +591,8 @@ async function runAgent(
       >["thinkingLevel"],
       resourceLoader,
       sessionManager: SessionManager.inMemory(cwd),
-      tools: [...tools, display.name],
-      customTools: [display, ...mountedPluginTools, read, write, edit],
+      tools: [...tools, displayMedia.name],
+      customTools: [displayMedia, ...mountedPluginTools, read, write, edit],
     });
 
     runs.set(runId, { abort: () => void session.abort() });
@@ -691,11 +633,11 @@ async function runAgent(
       if (sessionEvent.type === "tool_execution_end") {
         const args = pendingArgs.get(sessionEvent.toolCallId) ?? "";
         pendingArgs.delete(sessionEvent.toolCallId);
-        // A successful `display` already emitted its block, so recording
-        // the call as well would say nothing new. A rejected one has
-        // nothing to show, and a silent failure is worse than a visible
-        // one.
-        if (sessionEvent.toolName === display.name && !sessionEvent.isError) return;
+        // A successful `display_media` already emitted its block, so
+        // recording the call as well would say nothing new. A rejected one
+        // has nothing to show, and a silent failure is worse than a
+        // visible one.
+        if (sessionEvent.toolName === displayMedia.name && !sessionEvent.isError) return;
         emit({
           type: "tool",
           name: sessionEvent.toolName,

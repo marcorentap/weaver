@@ -36,13 +36,13 @@ export const MEDIA_PROTOCOL_PRIVILEGES: CustomScheme = {
  * headers on the origin.
  *
  * What may be served is either something a media block already points at, a
- * file inside the project directory, or a URI the display tool has just
- * handed to a live agent run (see `pending-media.ts`). The second and third
- * rules exist because an agent's output is live. It displays a file it just
- * read or wrote, and the block showing it is only in the renderer until the
- * next autosave, so a store-reference check alone would blank every fresh
- * block for a few seconds. The first and third rules only let through a
- * URI a block or run already points at.
+ * file inside the project directory, or a URI the `display_media` tool has
+ * just handed to a live agent run (see `pending-media.ts`). The second and
+ * third rules exist because an agent's output is live. It shows a file it
+ * just read or wrote, and the block showing it is only in the renderer
+ * until the next autosave, so a store-reference check alone would blank
+ * every fresh block for a few seconds. The first and third rules only let
+ * through a URI a block or run already points at.
  */
 function isReferenced(uri: string): boolean {
   const store = getStore();

@@ -33,9 +33,8 @@ export const agentEvent = z.discriminatedUnion("type", [
     output: z.string(),
     ok: z.boolean(),
   }),
-  /** The agent asking for a block of a specific kind, sent through the
-   *  `display` tool. `data` is validated against that kind's schema before
-   *  it is sent. */
+  /** A media block the `display_media` tool created. `data` is validated
+   *  against the media kind's schema before it is sent. */
   z.object({
     type: z.literal("block"),
     kind: z.string(),

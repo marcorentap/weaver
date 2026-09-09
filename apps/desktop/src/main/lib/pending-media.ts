@@ -1,15 +1,16 @@
 /**
- * Media URIs a live agent run has asked to display but whose blocks are not
+ * Media URIs a live agent run has asked to show but whose blocks are not
  * in the store yet.
  *
  * The `weaver-media://` protocol handler serves a URI only when a persisted
  * media block references it or the file is inside the project, the two
  * things it can verify on its own. A block an agent just produced is
- * neither until the renderer's next autosave, so a fresh file it displays
+ * neither until the renderer's next autosave, so a fresh file it shows
  * (an output written to `/tmp`, say, outside the project) would 403 on the
  * first load. A failed `<img>` never retries, so it stays broken until a
- * reload lands after persistence. The display tool records what it is about
- * to show here, ahead of any request for it, which covers exactly that gap.
+ * reload lands after persistence. The `display_media` tool records what it
+ * is about to show here, ahead of any request for it, which covers exactly
+ * that gap.
  *
  * Entries live for the process. They never grant more than what the agent
  * already chose to show, and once the block autosaves the store reference
