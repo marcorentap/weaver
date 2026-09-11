@@ -43,7 +43,8 @@ export type KeyLayer = {
   id: string;
   /**
    * Modal layers swallow keys they do not bind. Non-modal layers fall through,
-   * which is how `1`/`2`/`3` keep switching tabs while a page layer is active.
+   * which is how `tab` + digits and `[`/`]` keep switching tabs while a page
+   * layer is active.
    */
   modal?: boolean;
   bindings: KeyBinding[];
@@ -132,6 +133,18 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    // The innermost modal layer, if any. Count prefixes are a non-modal-mode
+    // feature, so their presence turns digits back into ordinary keys, which
+    // a popup is then free to bind (a tab menu offering "1".."9").
+    function topModal(): KeyLayer | undefined {
+      for (let i = stack.length - 1; i >= 0; i -= 1) {
+        const layer = layers.get(stack[i] as string);
+        if (!layer) continue;
+        if (layer.modal) return layer;
+      }
+      return undefined;
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (isTextEntry(event.target)) return;
 
@@ -191,10 +204,13 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
 
       // Digits build a count prefix for the next binding, vim-style. "3j"
       // moves three rows, "12G" jumps to line 12. A leading zero can't start
-      // one, so it is free to be an ordinary binding.
+      // one, so it is free to be an ordinary binding. A modal popup stops
+      // all that: it owns the digits it binds, and swallows the ones it
+      // doesn't, like any other key.
       if (
         /^[0-9]$/.test(event.key) &&
-        !(event.key === "0" && pendingCount.current === "")
+        !(event.key === "0" && pendingCount.current === "") &&
+        !topModal()
       ) {
         event.preventDefault();
         pendingCount.current += event.key;

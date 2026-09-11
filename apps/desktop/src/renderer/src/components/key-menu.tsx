@@ -23,12 +23,16 @@ export function KeyMenu({
   title,
   meta,
   items,
+  hint,
   onClose,
 }: {
   id: string;
   title: string;
   meta?: string;
   items: KeyMenuItem[];
+  /** A dim line under the menu, for keys the menu itself doesn't own, e.g.
+   *  "NUM — switch to a tab". */
+  hint?: string;
   onClose: () => void;
 }) {
   const [cursor, setCursor] = useState(0);
@@ -81,7 +85,13 @@ export function KeyMenu({
   });
 
   return (
-    <ModalFrame label={title} title={title} meta={meta} onClose={onClose}>
+    <ModalFrame
+      label={title}
+      title={title}
+      meta={meta}
+      onClose={onClose}
+      footer={hint}
+    >
       <ul className="max-h-72 overflow-y-auto overscroll-contain py-1">
           {items.length === 0 ? (
             <li className="px-3 py-1 text-muted-foreground">Nothing here</li>
