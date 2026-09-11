@@ -180,6 +180,7 @@ const CLIP_LINES = 12;
 
 function BlockRow({
   row,
+  index,
   selected,
   inSelection,
   line,
@@ -193,6 +194,9 @@ function BlockRow({
   onShow,
 }: {
   row: Row;
+  /** Position in the flattened row list; also the DOM marker used to measure
+   *  where one row ends and the next begins for viewport paging. */
+  index: number;
   selected: boolean;
   /** Whether this row falls inside an active visual selection (`v`),
    *  cursor row included. */
@@ -268,6 +272,7 @@ function BlockRow({
   return (
     <div
       ref={ref}
+      data-index={index}
       aria-selected={selected}
       aria-expanded={row.nested > 0 ? row.expanded : undefined}
       onClick={onSelect}
@@ -389,12 +394,33 @@ function PreviewModal({
     setPlayer(true);
   }, []);
 
+  /** The preview's own scrollable element, or null when nothing scrolls
+   *  (an image, a player — the keymap bindings below all no-op then). */
+  const scroller = () =>
+    body.current?.querySelector<HTMLElement>(".overflow-auto") ?? null;
+
   /** One line of vim-style scroll, in pixels. A reasonable step at the
    * rail's text-xs scale rather than a measured line height, since the
    * scrollable element varies (a `<pre>` for code, a markdown `<div>`). */
   const scrollBy = (lines: number) => {
-    const scroller = body.current?.querySelector<HTMLElement>(".overflow-auto");
-    scroller?.scrollBy({ top: lines * 20 });
+    scroller()?.scrollBy({ top: lines * 20 });
+  };
+
+  /** Half a viewport at a time — vim's Ctrl-D/Ctrl-U scroll step. */
+  const scrollPage = (direction: 1 | -1) => {
+    const element = scroller();
+    element?.scrollBy({ top: (direction * element.clientHeight) / 2 });
+  };
+
+  /** `G` jumps to the bottom, `gg` back to the top. (The preview is a
+   *  modal layer, so the keymap never feeds it a count prefix — `<n>G`
+   *  stays a plain `G`.) */
+  const jumpTo = (line: number | undefined) => {
+    const element = scroller();
+    if (!element) return;
+    element.scrollTo({
+      top: line === undefined ? element.scrollHeight : (line - 1) * 20,
+    });
   };
 
   useKeyLayer({
@@ -429,6 +455,26 @@ function PreviewModal({
       {
         keys: ["k"],
         run: (count) => scrollBy(-(count ?? 1)),
+      },
+      {
+        keys: ["ctrl+d"],
+        help: { keys: "ctrl+d", label: "Scroll down half a page" },
+        run: () => scrollPage(1),
+      },
+      {
+        keys: ["ctrl+u"],
+        help: { keys: "ctrl+u", label: "Scroll up half a page" },
+        run: () => scrollPage(-1),
+      },
+      {
+        keys: ["G"],
+        help: { keys: "G", label: "Scroll to bottom" },
+        run: (count) => jumpTo(count),
+      },
+      {
+        chord: ["g", "g"],
+        help: { keys: "gg", label: "Scroll to top" },
+        run: () => jumpTo(1),
       },
       {
         keys: ["Escape", "q"],
@@ -492,6 +538,9 @@ function ChatView({
   const navigate = useNavigate();
   const [, startTransition] = useTransition();
   const [cursor, setCursor] = useState(0);
+  /** The chat list root; page-up/page-down measures the rows inside it and
+   *  the scroller that holds them (not guessed heights, since rows vary). */
+  const listRef = useRef<HTMLDivElement>(null);
   /** Whether the cursor sat on the last row as of the last completed
    *  render, and how many rows there were then. An append (a streaming
    *  inference reply, a hook's own result) can tell "was following the
@@ -677,6 +726,66 @@ function ChatView({
     setCursor(Math.min(Math.max(index + delta, 0), rows.length - 1));
   };
 
+  /**
+   * `ctrl+d` / `ctrl+u`: half a page down/up through the blocks — vim's
+   * Ctrl-D/Ctrl-U scroll step, half the window at a time. Rows vary in
+   * height, so a page is measured from the DOM rather than guessed at a row
+   * count: find the row whose top edge the viewport lands on after paging,
+   * move the cursor there, and scroll it to the top edge, the way vim's own
+   * scroll moves. When everything fits with nothing to scroll, a page is the
+   * whole list, so both directions just jump to the ends.
+   */
+  const pageMove = (direction: 1 | -1) => {
+    if (rows.length === 0) return;
+    const root = listRef.current;
+    if (!root) return;
+    // The nearest ancestor that actually scrolls, AppShell's `<main>`. With
+    // nothing to scroll, a page is the whole list, so jump to the ends.
+    let scroller: HTMLElement | null = root;
+    while (scroller && scroller.scrollHeight <= scroller.clientHeight) {
+      scroller = scroller.parentElement;
+    }
+    const items = Array.from(
+      root.querySelectorAll<HTMLElement>("[data-index]"),
+    ).sort(
+      (a, b) => Number(a.dataset.index ?? 0) - Number(b.dataset.index ?? 0),
+    );
+    if (items.length === 0) return;
+    if (!scroller) {
+      setCursor(direction === 1 ? rows.length - 1 : 0);
+      return;
+    }
+    // Each row's top within the scroller's content, independent of the
+    // current scroll offset, so the math below works the same whether the
+    // viewport sits at the top, middle or bottom of the list.
+    const scrollerTop = scroller.getBoundingClientRect().top;
+    const rowTops = items.map(
+      (element) =>
+        scroller.scrollTop + element.getBoundingClientRect().top - scrollerTop,
+    );
+    // The content offset the scroller's top edge lands on after scrolling
+    // half a viewport, vim's Ctrl-D/Ctrl-U step.
+    const target = scroller.scrollTop + (direction * scroller.clientHeight) / 2;
+    // The first row to start at or after that edge becomes the row at the
+    // top after the scroll. Nothing matches past the last row, so paging
+    // down at the end grounds on the last row, like every other down motion.
+    let next = rows.length - 1;
+    for (let i = 0; i < rowTops.length; i++) {
+      const top = rowTops[i];
+      if (top !== undefined && top >= target) {
+        next = i;
+        break;
+      }
+    }
+    // Scroll the view itself, not just the cursor: vim's Ctrl-D/Ctrl-U
+    // scrolls the window even when the target row is taller than the step
+    // and already on screen. `BlockRow`'s `scrollIntoView` then finds the
+    // cursor row at the top edge and leaves it there.
+    const stop = rowTops[next];
+    if (stop !== undefined) scroller.scrollTo({ top: stop });
+    setCursor(next);
+  };
+
   /** Jumps to the 1-based line number shown in the gutter, vim's `G`,
    *  clamped to the row range instead of no-oping past either end. */
   const jump = (line: number) => {
@@ -827,6 +936,16 @@ function ChatView({
         keys: ["ArrowUp", "k"],
         help: { keys: "↑ / k / <n>k", label: "Previous block, <n> at a time" },
         run: (count = 1) => move(-count),
+      },
+      {
+        keys: ["ctrl+d"],
+        help: { keys: "ctrl+d", label: "Half page down" },
+        run: () => pageMove(1),
+      },
+      {
+        keys: ["ctrl+u"],
+        help: { keys: "ctrl+u", label: "Half page up" },
+        run: () => pageMove(-1),
       },
       {
         keys: ["ArrowRight", "l"],
@@ -1549,7 +1668,7 @@ function ChatView({
   ];
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div ref={listRef} className="flex min-h-full flex-col">
       <ShellHeader>
         <header className="flex items-center gap-3 border-b px-3 py-1">
           <span className="font-semibold">Chat</span>
@@ -1573,6 +1692,7 @@ function ChatView({
             <Fragment key={entry.block.id}>
               <BlockRow
                 row={entry}
+                index={i}
                 selected={i === index}
                 inSelection={
                   selectionRange !== null &&
