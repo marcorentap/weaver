@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
@@ -37,6 +37,16 @@ export function KeyMenu({
 }) {
   const [cursor, setCursor] = useState(0);
   const index = Math.min(cursor, Math.max(items.length - 1, 0));
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // The list itself scrolls (``max-h-72 overflow-y-auto`` below), but j/k
+  // only move the cursor; without this the highlighted row walks off screen
+  // in a long menu (recent sessions) and the wheel is the only way back.
+  useEffect(() => {
+    listRef.current
+      ?.querySelector('[aria-current="true"]')
+      ?.scrollIntoView({ block: "nearest" });
+  }, [index]);
 
   const move = (delta: number) => {
     if (items.length === 0) return;
@@ -92,7 +102,7 @@ export function KeyMenu({
       onClose={onClose}
       footer={hint}
     >
-      <ul className="max-h-72 overflow-y-auto overscroll-contain py-1">
+      <ul ref={listRef} className="max-h-72 overflow-y-auto overscroll-contain py-1">
           {items.length === 0 ? (
             <li className="px-3 py-1 text-muted-foreground">Nothing here</li>
           ) : (
