@@ -36,13 +36,16 @@ export function ShellHeader({ children }: { children: React.ReactNode }) {
  */
 type Tab = { id: string; pageId: string; to: string; label?: string };
 
-/** The first layout mirrors the old fixed bar: one tab per page. Any of them
- *  can be re-pointed at any page later. */
-const DEFAULT_TABS: Tab[] = PAGES.map((page) => ({
-  id: page.id,
-  pageId: page.id,
-  to: page.href,
-}));
+/** The startup layout is a single tab: chat, nothing else. Resources and
+ *  Settings are no longer open at boot; they stay reachable through the
+ *  `tab`/`space` popup, but the app starts with exactly one tab. It holds no
+ *  session yet — `AppShell` points it at a brand-new one on mount, so boot
+ *  is always a fresh chat, never someone else's (or last run's) last one. */
+const STARTUP_TAB: Tab = {
+  id: PAGES[0]!.id,
+  pageId: PAGES[0]!.id,
+  to: PAGES[0]!.href,
+};
 
 function tabLabel(tab: Tab): string {
   return (
@@ -168,13 +171,36 @@ function TabBar({
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [slot, setSlot] = useState<HTMLDivElement | null>(null);
-  const [tabs, setTabs] = useState<Tab[]>(DEFAULT_TABS);
-  const [activeId, setActiveId] = useState<string>(DEFAULT_TABS[0]!.id);
+  const [tabs, setTabs] = useState<Tab[]>([STARTUP_TAB]);
+  const [activeId, setActiveId] = useState<string>(STARTUP_TAB.id);
   const [pickerOpen, setPickerOpen] = useState(false);
   /** Whether the rename-tab dialog is up, over the popup layer. */
   const [renaming, setRenaming] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // The startup tab is a fresh chat: create a session the shell has never
+  // shown and point the startup tab at it. Starting at the chat home page
+  // means `/chat` would silently fall back to the most recently modified
+  // session; navigating to the new session's own URL avoids that, and the
+  // location effect below records it into the tab, so switching away and
+  // back returns to this new session rather than resuming an old one.
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.chat.createChatSession("New chat").then((result) => {
+      if (cancelled || result.error || !result.id) return;
+      const to = `/chat?session=${encodeURIComponent(result.id)}`;
+      setTabs((entries) =>
+        entries.map((tab) =>
+          tab.id === STARTUP_TAB.id ? { ...tab, to } : tab,
+        ),
+      );
+      navigate(to);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   const activeIndex = Math.max(
     tabs.findIndex((tab) => tab.id === activeId),
