@@ -229,9 +229,18 @@ function BlockRow({
   const [clipped, setClipped] = useState(0);
   const view = viewFor(row.block);
 
+  // Scroll the selected row into view both when it becomes selected and when
+  // it moves while staying selected. A relocate (`J`/`K`/`alt+j`/`alt+k`)
+  // follows the cursor to the block's new row without flipping `selected`
+  // (rows are keyed by block id, so the component and its flag persist), so
+  // `[selected]` alone never fires for the move. The browser's scroll
+  // anchoring happens to cover an up-move (the node reappears above the
+  // viewport and pushes content down, so the page scrolls up to compensate),
+  // but a down-move leaves the block below the fold with nothing to bring it
+  // back. Scrolling on the row index change makes both directions follow.
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
+  }, [selected, index]);
 
   useEffect(() => {
     const box = content.current;
