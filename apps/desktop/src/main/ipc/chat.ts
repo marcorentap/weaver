@@ -1,7 +1,7 @@
 import { ipcMain } from "electron";
 import type { Block, BlockGraph, Position } from "@repo/core";
 import { insertBlock, moveBlock, removeBlock } from "@repo/core";
-import type { BlockInput } from "@repo/store";
+import { newId, type BlockInput, type Store } from "@repo/store";
 import { getStore } from "../lib/store.js";
 import { schemaMessage } from "../lib/schema-error.js";
 import type {
@@ -12,6 +12,28 @@ import type {
 } from "../../shared/ipc-contract.js";
 
 const EMPTY_GRAPH: BlockGraph = { blocks: {}, root: null };
+
+/**
+ * Sessions the app has opened but not yet written a block to. A name typed
+ * into a fresh session is remembered here until its first real write creates
+ * the row (`saveGraph`). Nothing here survives a restart, which is exactly
+ * right: an empty session is not worth keeping, so the database never sees
+ * it.
+ */
+const pendingSessions = new Map<string, string>();
+
+/**
+ * Creates the session's row the first time it gets a block, so an empty
+ * session never has one. The row is created under the id the client is
+ * already navigating by (`createGraph` would mint a fresh one), with the
+ * name the user typed when the session was opened, remembered in
+ * `pendingSessions`. A session whose row already exists is left alone, so
+ * renames and later writes keep touching the same row.
+ */
+function ensureSessionRow(store: Store, graphId: string): void {
+  if (store.getGraph(graphId)) return;
+  store.createGraphAt(graphId, pendingSessions.get(graphId) ?? "New chat");
+}
 
 /**
  * Structural edits load the graph, apply a core tree operation, and write
@@ -25,10 +47,30 @@ function rewrite(
 ): MutationResult {
   const store = getStore();
   try {
-    store.writeGraph(
-      graphId,
-      Object.values(apply(store.loadGraph(graphId)).blocks),
-    );
+    const blocks = Object.values(apply(store.loadGraph(graphId)).blocks);
+    if (blocks.length === 0) {
+      // Deleting the last block empties the session, the same outcome as an
+      // empty autosave: the session is no longer a session, so its row goes
+      // with it. `deleteGraph` is a no-op when the row never existed.
+      pendingSessions.delete(graphId);
+      store.deleteGraph(graphId);
+      return { error: null };
+    }
+    // The first block of a newly opened session reaches this (via
+    // `createChatBlock`) before any autosave materializes the row, and
+    // `writeGraph`'s block rows are foreign-keyed to a graph row that must
+    // exist, so create it here rather than failing the write.
+    const created = !store.getGraph(graphId);
+    ensureSessionRow(store, graphId);
+    try {
+      store.writeGraph(graphId, blocks);
+    } catch (error) {
+      // A row created just for this write must not survive a rejected
+      // write (validation can still fail inside `writeGraph`).
+      if (created) store.deleteGraph(graphId);
+      throw error;
+    }
+    pendingSessions.delete(graphId);
   } catch (error) {
     return { error: schemaMessage(error) };
   }
@@ -118,17 +160,20 @@ function moveChatBlock(
  *  is what callers should navigate with. Names are display-only and need
  *  not be unique. */
 function createChatSession(name: string): CreateSessionResult {
-  const store = getStore();
-  try {
-    return { error: null, id: store.createGraph(name).id };
-  } catch (error) {
-    return { error: schemaMessage(error), id: null };
-  }
+  const id = newId();
+  pendingSessions.set(id, name);
+  return { error: null, id };
 }
 
 /** Renames a session in place with a new (not necessarily unique) name.
  *  The graph and blocks are unchanged. */
 function renameChatSession(graphId: string, name: string): MutationResult {
+  if (pendingSessions.has(graphId)) {
+    // The row does not exist yet, so there is nothing to rename: remember
+    // the new name and let `ensureSessionRow` use it at the first write.
+    pendingSessions.set(graphId, name);
+    return { error: null };
+  }
   try {
     getStore().renameGraph(graphId, name);
   } catch (error) {
@@ -142,6 +187,7 @@ function renameChatSession(graphId: string, name: string): MutationResult {
 function deleteChatSession(graphId: string): MutationResult {
   try {
     getStore().deleteGraph(graphId);
+    pendingSessions.delete(graphId);
   } catch (error) {
     return { error: schemaMessage(error) };
   }
@@ -154,10 +200,41 @@ function deleteChatSession(graphId: string): MutationResult {
  * is the source of truth, since hook ticks land there first at whatever
  * cadence a timer names, so this is a plain "flush what I already have",
  * not a merge.
+ *
+ * An empty session is never written: the row is created together with its
+ * first block, and a write that empties a session (deleting its last
+ * block, or a session that never got one) drops the session instead, so
+ * the database never holds a session with nothing in it.
  */
 function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
+  const store = getStore();
   try {
-    getStore().writeGraph(graphId, blocks);
+    if (blocks.length === 0) {
+      // Deleting the last block ends a session's persisted life: no row is
+      // left behind, since an empty session is not saved. Keep its name as
+      // pending, so the same id still resolves to a real session and a
+      // fresh block recreates the row, instead of surfacing a rowless
+      // session the view could no longer write.
+      const name =
+        store.getGraph(graphId)?.name ??
+        pendingSessions.get(graphId) ??
+        "New chat";
+      pendingSessions.set(graphId, name);
+      store.deleteGraph(graphId);
+      return { error: null };
+    }
+    const created = !store.getGraph(graphId);
+    ensureSessionRow(store, graphId);
+    try {
+      store.writeGraph(graphId, blocks);
+    } catch (error) {
+      // `writeGraph` validates the tree and the kinds' schemas, which can
+      // still reject a write. A row created just for this failed write
+      // must not be left behind.
+      if (created) store.deleteGraph(graphId);
+      throw error;
+    }
+    pendingSessions.delete(graphId);
   } catch (error) {
     return { error: schemaMessage(error) };
   }
@@ -173,20 +250,40 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
 function loadGraph(session?: string): LoadGraphResult {
   const store = getStore();
 
-  const sessions: ChatSessionSummary[] = store
-    .listGraphs()
-    .sort((a, b) => b.modifiedAt - a.modifiedAt)
-    .map(({ id, name, modifiedAt }) => ({ id, name, modifiedAt }));
+  const summarize = (): ChatSessionSummary[] =>
+    store
+      .listGraphs()
+      .sort((a, b) => b.modifiedAt - a.modifiedAt)
+      .map(({ id, name, modifiedAt }) => ({ id, name, modifiedAt }));
 
-  const wanted = typeof session === "string" ? session : sessions[0]?.id;
+  const wanted = typeof session === "string" ? session : summarize()[0]?.id;
+
+  // A session with no blocks is not a session worth keeping. Since rows are
+  // now only written together with their first block, any empty row here is
+  // a leftover from before that, so drop it — except the one being opened,
+  // which the client still owns (removing its row would strand a live tab
+  // against a rowless graph its writes could not reach).
+  for (const graph of store.listGraphs()) {
+    if (graph.id === wanted) continue;
+    if (Object.keys(store.loadGraph(graph.id).blocks).length === 0) {
+      store.deleteGraph(graph.id);
+    }
+  }
+
+  // A session the client just opened may have no row and no write yet; only
+  // a name. It is a session to the user all the same, so report it and let
+  // the first real write create its row.
   const active = wanted ? store.getGraph(wanted) : undefined;
+  let open: { id: string; name: string } | null = null;
+  if (active) {
+    open = { id: active.id, name: active.name };
+  } else if (wanted) {
+    const name = pendingSessions.get(wanted);
+    if (name) open = { id: wanted, name };
+  }
   const graph = active ? store.loadGraph(active.id) : EMPTY_GRAPH;
 
-  return {
-    graph,
-    sessions,
-    session: active ? { id: active.id, name: active.name } : null,
-  };
+  return { graph, sessions: summarize(), session: open };
 }
 
 export function registerChatHandlers(): void {

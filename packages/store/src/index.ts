@@ -77,6 +77,10 @@ export type Store = {
   /** Looks a graph up by id. */
   getGraph: (id: string) => GraphRecord | undefined;
   createGraph: (name: string) => GraphRecord;
+  /** Like `createGraph`, but at a caller-chosen id. Used when a session's
+   *  row is deferred until its first real write, so the id the client
+   *  already navigated by is preserved. */
+  createGraphAt: (id: string, name: string) => GraphRecord;
   /** Renames a graph in place, keeping its id and its blocks. Names are not
    *  unique, so this never fails on the new name alone. */
   renameGraph: (id: string, name: string) => void;
@@ -228,6 +232,12 @@ export function openStore(options: StoreOptions = {}): Store {
     createGraph: (name) => {
       const now = Date.now();
       const id = newId();
+      insertGraph.run(id, name, now, now);
+      return { id, name, createdAt: now, modifiedAt: now };
+    },
+
+    createGraphAt: (id, name) => {
+      const now = Date.now();
       insertGraph.run(id, name, now, now);
       return { id, name, createdAt: now, modifiedAt: now };
     },
