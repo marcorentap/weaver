@@ -21,7 +21,8 @@ export type KeyBinding = {
   /**
    * Matched against `KeyboardEvent.key`, so "Enter" and "s" both work. A
    * `ctrl+`-prefixed lowercase name ("ctrl+o") matches that key held with
-   * ctrl or cmd; unprefixed names never match a modified press.
+   * ctrl or cmd, and an `alt+`-prefixed one ("alt+j") matches it held with
+   * alt; unprefixed names never match a modified press.
    */
   keys?: string[];
   /**
@@ -165,7 +166,19 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
         });
         return;
       }
-      if (event.altKey) return;
+      if (event.altKey) {
+        const combo = `alt+${event.key.toLowerCase()}`;
+        forEachReachableLayer((layer) => {
+          const binding = layer.bindings.find((entry) =>
+            entry.keys?.includes(combo),
+          );
+          if (!binding) return false;
+          event.preventDefault();
+          binding.run();
+          return true;
+        });
+        return;
+      }
 
       // The help key is reserved, so a modal layer cannot hide the only way
       // of finding out which keys it binds.

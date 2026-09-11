@@ -968,6 +968,16 @@ function ChatView({
         run: () => moveWithinSiblings(-1),
       },
       {
+        keys: ["alt+j"],
+        help: { keys: "alt+j", label: "Move block down" },
+        run: () => moveWithinSiblings(1),
+      },
+      {
+        keys: ["alt+k"],
+        help: { keys: "alt+k", label: "Move block up" },
+        run: () => moveWithinSiblings(-1),
+      },
+      {
         keys: [">"],
         help: { keys: ">", label: "Nest under previous block" },
         run: nest,
