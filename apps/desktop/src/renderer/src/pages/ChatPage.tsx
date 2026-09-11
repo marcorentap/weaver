@@ -1642,8 +1642,24 @@ function ChatView({
               // was last streaming into this one.
               dropLiveGraph(graphId);
               startTransition(() => {
+                // Deleting leaves nowhere to go: drop the user into a
+                // fresh session instead of the recent-session fallback or
+                // a dead-empty chat page. Same default name as a session
+                // whose pending name was never set.
                 void window.api.chat.deleteChatSession(graphId);
-                navigate("/chat");
+                void window.api.chat
+                  .createChatSession("New chat")
+                  .then((result) => {
+                    if (result.error || !result.id) {
+                      navigate("/chat");
+                      return;
+                    }
+                    // Identical to `createSession`'s landing, so the new
+                    // tab reloads the sessions list on its own too.
+                    setCursor(0);
+                    setExpanded(new Set());
+                    navigate(`/chat?session=${encodeURIComponent(result.id)}`);
+                  });
               });
             },
           },
