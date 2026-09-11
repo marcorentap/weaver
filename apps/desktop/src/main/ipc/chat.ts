@@ -250,25 +250,23 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
 function loadGraph(session?: string): LoadGraphResult {
   const store = getStore();
 
-  const summarize = (): ChatSessionSummary[] =>
-    store
-      .listGraphs()
-      .sort((a, b) => b.modifiedAt - a.modifiedAt)
-      .map(({ id, name, modifiedAt }) => ({ id, name, modifiedAt }));
-
-  const wanted = typeof session === "string" ? session : summarize()[0]?.id;
-
   // A session with no blocks is not a session worth keeping. Since rows are
   // now only written together with their first block, any empty row here is
   // a leftover from before that, so drop it — except the one being opened,
   // which the client still owns (removing its row would strand a live tab
   // against a rowless graph its writes could not reach).
   for (const graph of store.listGraphs()) {
-    if (graph.id === wanted) continue;
+    if (session !== undefined && graph.id === session) continue;
     if (Object.keys(store.loadGraph(graph.id).blocks).length === 0) {
       store.deleteGraph(graph.id);
     }
   }
+
+  const sessions: ChatSessionSummary[] = store
+    .listGraphs()
+    .sort((a, b) => b.modifiedAt - a.modifiedAt)
+    .map(({ id, name, modifiedAt }) => ({ id, name, modifiedAt }));
+  const wanted = typeof session === "string" ? session : sessions[0]?.id;
 
   // A session the client just opened may have no row and no write yet; only
   // a name. It is a session to the user all the same, so report it and let
@@ -283,7 +281,7 @@ function loadGraph(session?: string): LoadGraphResult {
   }
   const graph = active ? store.loadGraph(active.id) : EMPTY_GRAPH;
 
-  return { graph, sessions: summarize(), session: open };
+  return { graph, sessions, session: open };
 }
 
 export function registerChatHandlers(): void {
