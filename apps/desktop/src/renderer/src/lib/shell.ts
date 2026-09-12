@@ -185,10 +185,19 @@ export function splitLeaf(
 /** Drop `paneId`'s leaf, collapsing any split left with a single child. */
 export function removeLeaf(node: PaneNode, paneId: PaneId): PaneNode | null {
   if (node.kind === "leaf") return node.pane.id === paneId ? null : node;
-  const children = node.children
-    .map((child) => removeLeaf(child, paneId))
-    .filter((child): child is PaneNode => child !== null);
-  if (children.length === node.children.length) return node;
+  // Track whether anything actually changed by identity, not by comparing
+  // the direct child count: a grandchild split can collapse (2 -> 1) without
+  // changing this node's own child count, and comparing counts would return
+  // the stale node with the removed pane still in it. `removeLeaf` returns
+  // the same object when it changes nothing, so identity is a reliable test.
+  const children: PaneNode[] = [];
+  let changed = false;
+  for (const child of node.children) {
+    const next = removeLeaf(child, paneId);
+    if (next !== child) changed = true;
+    if (next) children.push(next);
+  }
+  if (!changed) return node;
   if (children.length === 0) return null;
   if (children.length === 1) return children[0]!;
   return { ...node, children };
@@ -424,11 +433,21 @@ export function reduceLayout(layout: Layout, action: ShellAction): Layout {
       }
       const root = removeLeaf(active.root, active.activePaneId);
       if (!root) return layout;
-      const next = orderedPanes(root)[0];
+      // Vim-like: the pane that takes over the closed pane's space — its
+      // right/below neighbour first, then its left/above one, computed on
+      // the pre-removal tree (the neighbour still exists out there unless
+      // the closed pane was the last on that side). Last resort: the tree's
+      // first survivor.
+      const neighbor =
+        neighborPane(active.root, active.activePaneId, "l") ??
+        neighborPane(active.root, active.activePaneId, "j") ??
+        neighborPane(active.root, active.activePaneId, "h") ??
+        neighborPane(active.root, active.activePaneId, "k");
+      const next = neighbor ?? orderedPanes(root)[0]?.id;
       return mapTab(layout, active.id, (tab) => ({
         ...tab,
         root,
-        activePaneId: next?.id ?? tab.activePaneId,
+        activePaneId: next ?? tab.activePaneId,
       }));
     }
 
