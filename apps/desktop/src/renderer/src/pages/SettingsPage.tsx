@@ -328,14 +328,14 @@ function hostOk(value: string): boolean {
 }
 
 /** OpenRouter's key usage, as a markdown table for the "info" row under
- *  the AI provider credentials. Credits are USD, 1:1. */
+ *  the AI provider credentials. Credits are USD, 1:1. The key's own
+ *  `label` (which on OpenRouter is the key string itself) is deliberately
+ *  left out, so no key text ever sits above the table. */
 function usageMarkdown(
   usage: NonNullable<ProviderUsageResult["usage"]>,
 ): string {
   const usd = (value: number) => `$${value.toFixed(2)}`;
   return [
-    `${usage.label}${usage.isFreeTier ? " (free tier)" : ""}`,
-    "",
     "| | |",
     "|---|---|",
     `| Today | ${usd(usage.usageDaily)} |`,
