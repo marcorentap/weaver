@@ -45,6 +45,23 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
+  // Ctrl+W is the default "Close" menu accelerator and would silently kill
+  // the whole app mid-session, so swallow it before it reaches the menu.
+  // (before-input-event.preventDefault stops both the page event and the
+  // menu shortcuts.) The window still closes via the OS title bar / Alt+F4.
+  win.webContents.on("before-input-event", (event, input) => {
+    if (
+      input.type === "keyDown" &&
+      input.control &&
+      !input.alt &&
+      !input.shift &&
+      !input.meta &&
+      input.key.toLowerCase() === "w"
+    ) {
+      event.preventDefault();
+    }
+  });
+
   if (isDev && process.env["ELECTRON_RENDERER_URL"]) {
     void win.loadURL(process.env["ELECTRON_RENDERER_URL"]);
   } else {
