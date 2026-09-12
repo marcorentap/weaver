@@ -19,8 +19,9 @@ export function ModalFrame({
   title: string;
   meta?: ReactNode;
   footer?: ReactNode;
-  /** `lg` is for previews, which need room for the media itself. */
-  size?: "md" | "lg";
+  /** `lg` is for previews, which need room for the media itself; `xl` for
+   *  wide dialogs like the settings-style custom inference form. */
+  size?: "md" | "lg" | "xl";
   /** Clicking the backdrop leaves the mode, the same as the popup's esc. */
   onClose: () => void;
   children: ReactNode;
@@ -42,7 +43,11 @@ export function ModalFrame({
         aria-label={label}
         className={cn(
           "w-full border bg-background",
-          size === "lg" ? "max-w-3xl" : "max-w-md",
+          size === "lg"
+            ? "max-w-3xl"
+            : size === "xl"
+              ? "max-w-5xl"
+              : "max-w-md",
         )}
       >
         <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5">

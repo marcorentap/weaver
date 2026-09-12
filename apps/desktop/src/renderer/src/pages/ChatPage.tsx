@@ -17,6 +17,7 @@ import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
+import { CustomInferenceDialog, type CustomInferenceRun } from "@/components/custom-inference";
 import { FieldEditor } from "@/components/field-editor";
 import { Gutter } from "@/components/gutter";
 import type { KeyMenuItem } from "@/components/key-menu";
@@ -40,6 +41,7 @@ type Popup =
   | { kind: "selection" }
   | { kind: "sessions" }
   | { kind: "preview" }
+  | { kind: "customInference" }
   | { kind: "field"; field: BlockField }
   | { kind: "labelField" }
   | { kind: "configure" }
@@ -942,17 +944,29 @@ function ChatView({
    * blocks (`lib/live-graph`'s `runInference`). It lives there rather than
    * here so a run survives this component unmounting mid-stream, e.g. a tab
    * switch away from chat and back.
+   *
+   * `custom` overrides the saved settings for this one run — the `X` modal
+   * passes everything it collected. Each omitted field falls back to the
+   * saved default, and provider detection follows the endpoint actually
+   * used, so a run aimed at a different endpoint gets that endpoint's
+   * provider tuning, not the default one's.
    */
-  function runInference(id: BlockId): Promise<void> {
+  function runInference(
+    id: BlockId,
+    custom?: Partial<CustomInferenceRun>,
+  ): Promise<void> {
     if (!session) return Promise.resolve();
     const { aiEndpoint, aiApiKey, aiDefaultModel, aiProviderSettings } = settings;
-    const provider = detectProvider(aiEndpoint);
+    const endpoint = custom?.endpoint ?? aiEndpoint;
+    const provider = detectProvider(endpoint);
     return engine.runInference(id, {
-      endpoint: aiEndpoint,
-      apiKey: aiApiKey,
-      model: aiDefaultModel,
-      providerId: provider?.id,
-      providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
+      endpoint,
+      apiKey: custom?.apiKey ?? aiApiKey,
+      model: custom?.model ?? aiDefaultModel,
+      providerId: custom?.providerId ?? provider?.id,
+      providerSettings:
+        custom?.providerSettings ??
+        (provider ? aiProviderSettings[provider.id] : undefined),
     });
   }
 
@@ -1025,6 +1039,14 @@ function ChatView({
         run: () => {
           if (visualAnchor !== null) setPopup({ kind: "selection" });
           else if (row) setPopup({ kind: "actions" });
+        },
+      },
+      {
+        keys: ["X"],
+        help: { keys: "X", label: "Run custom inference" },
+        run: () => {
+          if (visualAnchor === null && row)
+            setPopup({ kind: "customInference" });
         },
       },
       {
@@ -1370,6 +1392,14 @@ function ChatView({
             run: () => {
               setPopup(null);
               void runInference(row.block.id);
+            },
+          },
+          {
+            label: "Run custom inference",
+            key: "X",
+            run: () => {
+              setError(null);
+              setPopup({ kind: "customInference" });
             },
           },
           ...(locked
@@ -1889,6 +1919,25 @@ function ChatView({
         >
           <view.Preview block={row.block} graph={graph} />
         </PreviewModal>
+      ) : null}
+
+      {popup?.kind === "customInference" && row ? (
+        <CustomInferenceDialog
+          id="custom-inference"
+          title="Run custom inference"
+          meta={row.block.label}
+          defaults={{
+            endpoint: settings.aiEndpoint,
+            apiKey: settings.aiApiKey,
+            model: settings.aiDefaultModel,
+            providerSettings: settings.aiProviderSettings,
+          }}
+          onRun={(run) => {
+            setPopup(null);
+            void runInference(row.block.id, run);
+          }}
+          onCancel={() => setPopup(null)}
+        />
       ) : null}
 
       {popup?.kind === "field" ? (
