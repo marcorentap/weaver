@@ -1057,13 +1057,13 @@ export default function SettingsPage() {
       ...viewport,
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "Next setting" },
-        run: () => move(1),
+        help: { keys: "↓ / j / <n>j", label: "Next setting, <n> at a time" },
+        run: (count = 1) => move(count),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "Previous setting" },
-        run: () => move(-1),
+        help: { keys: "↑ / k / <n>k", label: "Previous setting, <n> at a time" },
+        run: (count = 1) => move(-count),
       },
       {
         keys: ["ArrowLeft", "h"],
