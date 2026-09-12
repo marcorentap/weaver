@@ -7,6 +7,7 @@ import {
   mediaName,
   mediaState,
   parseMediaUri,
+  resolveMediaUri,
   youtubeVideoId,
 } from "@plugins/rich-media";
 import type { MediaState, MediaType } from "@plugins/rich-media";
@@ -25,6 +26,7 @@ export {
   mediaName,
   mediaState,
   parseMediaUri,
+  resolveMediaUri,
 };
 export type { MediaState, MediaType };
 
@@ -33,13 +35,23 @@ export type { MediaState, MediaType };
  * renderer page cannot read `file://` bytes, and a cross-origin text file is
  * unreadable without CORS headers, so both go through the `weaver-media://`
  * protocol the main process registers (see `mediaProtocolUrl`).
+ *
+ * A scheme-less filesystem path (absolute, or relative to `pwd`) cannot be
+ * loaded by the page any more than a `file://` URI can, so it is resolved to
+ * an absolute `file://` URL first — against `pwd`, the merged environment's
+ * `WEAVER_PWD` when one applies to this block — and then served through the
+ * same protocol. Without a `pwd`, a relative path cannot be resolved here or
+ * anywhere else, so it is returned unresolved rather than guessed.
  */
-export function mediaSrc(uri: string): string {
+export function mediaSrc(uri: string, pwd?: string): string {
   const url = parseMediaUri(uri);
-  if (!url) return uri;
-  const id = youtubeVideoId(url);
-  if (id) return `https://www.youtube.com/embed/${id}`;
-  return url.protocol === "file:" || mediaInfo(uri).type === "text"
-    ? mediaProtocolUrl(uri)
-    : uri;
+  if (url) {
+    const id = youtubeVideoId(url);
+    if (id) return `https://www.youtube.com/embed/${id}`;
+    return url.protocol === "file:" || mediaInfo(uri).type === "text"
+      ? mediaProtocolUrl(uri)
+      : uri;
+  }
+  const resolved = resolveMediaUri(uri, pwd);
+  return resolved ? mediaProtocolUrl(resolved) : uri;
 }

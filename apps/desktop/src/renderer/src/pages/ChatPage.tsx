@@ -189,6 +189,7 @@ function BlockRow({
   locked,
   gutter,
   shown,
+  graph,
   onSelect,
   onToggle,
   onShow,
@@ -215,6 +216,8 @@ function BlockRow({
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
   shown: boolean;
+  /** The graph this row's content sits in. */
+  graph: BlockGraph;
   /** Click anywhere on the row to select it and open its actions, like `enter`. */
   onSelect: () => void;
   /** Click the chevron to fold or unfold, without opening actions. */
@@ -350,7 +353,12 @@ function BlockRow({
           className={cn("flex w-full", shown ? "" : "overflow-hidden")}
           style={shown ? undefined : { maxHeight: `${CLIP_LINES}rem` }}
         >
-          <view.Row block={row.block} nested={row.nested} running={running} />
+          <view.Row
+            block={row.block}
+            nested={row.nested}
+            running={running}
+            graph={graph}
+          />
         </div>
         {!shown && clipped > 0 ? (
           <button
@@ -523,9 +531,10 @@ function PreviewModal({
 function previewRaw(
   view: BlockView,
   block: Block,
+  graph: BlockGraph,
 ): (() => string) | undefined {
   const getRaw = view.raw;
-  return getRaw ? () => getRaw(block) : undefined;
+  return getRaw ? () => getRaw(block, graph) : undefined;
 }
 
 function ChatView({
@@ -1745,6 +1754,7 @@ function ChatView({
                   )
                 }
                 gutter={gutter}
+                graph={graph}
                 onSelect={() => {
                   setCursor(i);
                   setPopup({ kind: "actions" });
@@ -1803,10 +1813,10 @@ function ChatView({
       {popup?.kind === "preview" && row && view?.Preview ? (
         <PreviewModal
           block={row.block}
-          raw={previewRaw(view, row.block)}
+          raw={previewRaw(view, row.block, graph)}
           onClose={() => setPopup(null)}
         >
-          <view.Preview block={row.block} />
+          <view.Preview block={row.block} graph={graph} />
         </PreviewModal>
       ) : null}
 

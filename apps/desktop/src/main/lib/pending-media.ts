@@ -26,3 +26,10 @@ export function registerPendingMedia(uri: string): void {
 export function isPendingMedia(uri: string): boolean {
   return pending.has(uri);
 }
+
+/** Every URI a live agent run has asked to show so far, for the protocol
+ *  handler's own resolution matching (a stored block's relative path, say,
+ *  asks for it by its absolute form). */
+export function pendingMediaUris(): string[] {
+  return [...pending];
+}

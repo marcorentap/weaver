@@ -44,6 +44,15 @@ import {
   textKind,
   textState,
 } from "./kinds/text";
+import type { EnvState } from "./kinds/env";
+import {
+  ENV_KIND,
+  environmentKind,
+  envState,
+  mergedEnvironment,
+  parseEnv,
+  WEAVER_PWD,
+} from "./kinds/env";
 
 export type {
   Block,
@@ -52,6 +61,7 @@ export type {
   BlockId,
   BlockKind,
   CallbackSpec,
+  EnvState,
   GroupState,
   HookContext,
   KindRegistry,
@@ -65,6 +75,9 @@ export {
   assertValidData,
   chainIds,
   childIds,
+  ENV_KIND,
+  environmentKind,
+  envState,
   findParent,
   findPrevSibling,
   GROUP_KIND,
@@ -76,7 +89,9 @@ export {
   insertBlock,
   kindRegistry,
   lastChildId,
+  mergedEnvironment,
   moveBlock,
+  parseEnv,
   positionOf,
   removeBlock,
   rootOf,
@@ -88,4 +103,5 @@ export {
   textKind,
   textState,
   topLevelBlockIds,
+  WEAVER_PWD,
 };

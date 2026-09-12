@@ -1,14 +1,15 @@
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { protocol, type CustomScheme } from "electron";
+import { mergedEnvironment, WEAVER_PWD } from "@repo/core";
 import { MEDIA_KIND, mediaInfo, parseMediaUri } from "@plugins/rich-media";
 import { MEDIA_PROTOCOL } from "../../shared/ipc-contract.js";
 import { projectRoot } from "../lib/project.js";
 import { getStore } from "../lib/store.js";
-import { isPendingMedia } from "../lib/pending-media.js";
+import { isPendingMedia as isPendingMediaThere, pendingMediaUris } from "../lib/pending-media.js";
 
 /**
  * Privileges the `weaver-media://` scheme needs registered before
@@ -125,16 +126,96 @@ function requestedUri(url: URL): string {
   return decodeURIComponent(last);
 }
 
+/**
+ * The `WEAVER_PWD` a scheme-less media uri resolves against: the merged
+ * environment of a stored media block naming that uri, or the project root
+ * when no block names it (or none of them sets the variable). The renderer
+ * normally resolves a media block's relative path before asking (see
+ * `resolveMediaUri`), so this only ever matters for a relative path an agent
+ * asked `display_media` to show, which lands here raw.
+ */
+function pwdForMediaUri(uri: string): string {
+  const store = getStore();
+  for (const record of store.listGraphs()) {
+    const graph = store.loadGraph(record.id);
+    for (const id of Object.keys(graph.blocks)) {
+      const block = graph.blocks[id];
+      if (!block || block.kind !== MEDIA_KIND || block.data.uri !== uri) continue;
+      const pwd = mergedEnvironment(graph, id)[WEAVER_PWD];
+      if (pwd) return isAbsolute(pwd) ? pwd : resolve(projectRoot(), pwd);
+    }
+  }
+  return projectRoot();
+}
+
+/** The absolute filesystem path a scheme-less media `uri` names. */
+function schemeLessPath(uri: string): string {
+  return isAbsolute(uri) ? uri : resolve(pwdForMediaUri(uri), uri);
+}
+
+/**
+ * Whether `path` is what some stored media block's scheme-less uri resolves
+ * to. A block written as a relative path against a `WEAVER_PWD` asks the
+ * protocol by its absolute form, so the plain raw-uri reference check alone
+ * would turn it away every time; this resolves each stored scheme-less uri
+ * the same way it resolves and compares.
+ */
+function isStoredMediaPath(path: string): boolean {
+  const want = resolve(path);
+  const store = getStore();
+  for (const record of store.listGraphs()) {
+    const graph = store.loadGraph(record.id);
+    for (const id of Object.keys(graph.blocks)) {
+      const block = graph.blocks[id];
+      if (!block || block.kind !== MEDIA_KIND) continue;
+      const uri = block.data.uri;
+      if (typeof uri !== "string" || parseMediaUri(uri) !== null) continue;
+      const pwd = mergedEnvironment(graph, id)[WEAVER_PWD];
+      const base = pwd
+        ? isAbsolute(pwd)
+          ? pwd
+          : resolve(projectRoot(), pwd)
+        : projectRoot();
+      if (resolve(base, uri) === want) return true;
+    }
+  }
+  return false;
+}
+
+/** Same as `isStoredMediaPath`, for a URI a live agent run asked to show
+ *  (see pending-media.ts). Its working directory is not recorded, so a
+ *  relative pending URI resolves against the project root; a relative path
+ *  against an environment `WEAVER_PWD` only clears once the block autosaves
+ *  and the stored check above covers it — a sub-second gap. */
+function isPendingMediaPath(path: string): boolean {
+  const want = resolve(path);
+  for (const uri of pendingMediaUris()) {
+    if (parseMediaUri(uri) !== null) continue;
+    if (resolve(projectRoot(), uri) === want) return true;
+  }
+  return false;
+}
+
 async function handleMediaRequest(request: Request): Promise<Response> {
   const uri = requestedUri(new URL(request.url));
   if (!uri) return new Response("missing uri", { status: 400 });
 
   const url = parseMediaUri(uri);
-  if (!url) return new Response("not a media uri", { status: 400 });
+  // Scheme-less paths are served as files: rendered as an absolute `file://`
+  // URI by the renderer, or resolved here against the merged `WEAVER_PWD`
+  // when one arrives raw. Everything else rides the existing file/remote
+  // logic below.
+  const local =
+    url?.protocol === "file:"
+      ? fileURLToPath(url)
+      : url === null
+        ? schemeLessPath(uri)
+        : null;
   const allowed =
     isReferenced(uri) ||
-    isPendingMedia(uri) ||
-    (url.protocol === "file:" && inProject(fileURLToPath(url)));
+    isPendingMediaThere(uri) ||
+    (local !== null &&
+      (inProject(local) || isStoredMediaPath(local) || isPendingMediaPath(local)));
   if (!allowed) {
     return new Response("uri is neither referenced nor in the project", {
       status: 403,
@@ -142,21 +223,23 @@ async function handleMediaRequest(request: Request): Promise<Response> {
   }
 
   const { mime, type } = mediaInfo(uri);
-  if (url.protocol !== "file:") {
+  if (url && url.protocol !== "file:") {
     if (type !== "text") {
       return new Response("remote media loads directly", { status: 400 });
     }
     return proxyText(url, mime);
   }
+  if (local === null) {
+    return new Response("not a media uri", { status: 400 });
+  }
 
-  const path = fileURLToPath(url);
-  const info = await stat(path).catch(() => null);
+  const info = await stat(local).catch(() => null);
   if (!info?.isFile()) return new Response("not a file", { status: 404 });
 
   const range = parseRange(request.headers.get("range"), info.size);
   const { start, end } = range ?? { start: 0, end: info.size - 1 };
   const stream = Readable.toWeb(
-    createReadStream(path, { start, end }),
+    createReadStream(local, { start, end }),
   ) as ReadableStream<Uint8Array>;
 
   return new Response(stream, {

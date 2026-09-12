@@ -319,19 +319,19 @@ export function snapshotGraph(
 }
 
 /**
- * Everything that appears before `id`, walking up from it: the ancestor
- * chain from the root down to `id`'s direct parent, and at every level,
- * starting at the top and ending at `id`'s own siblings, every block that
- * comes before the next step on the way down to `id`. The pieces are
- * snapshotted in full and joined top-down. `id`'s own subtree, the blocks
+ * Everything that appears before `id`, in order: the ancestor chain from
+ * the root down to `id`'s direct parent, and at every level, starting at
+ * the top and ending at `id`'s own siblings, every block that comes before
+ * the next step on the way down to `id`. `id`'s own subtree, the blocks
  * after it, and anything after its ancestors are never included. This is a
- * block's view of "the graph so far", not the whole graph.
+ * block's view of "the graph so far", not the whole graph — and the same
+ * ordering `mergedEnvironment` folds environment blocks in, so context and
+ * environment can never disagree about what comes before a block.
  */
-export function snapshotAbove(
+export function precedingBlockIds(
   graph: BlockGraph,
   id: BlockId,
-  registry: KindRegistry,
-): string {
+): BlockId[] {
   const chain: BlockId[] = [];
   for (
     let parent = findParent(graph, id);
@@ -341,20 +341,33 @@ export function snapshotAbove(
     chain.unshift(parent);
   }
 
-  const pieces: string[] = [];
+  const ids: BlockId[] = [];
   let siblings = topLevelBlockIds(graph);
   for (let level = 0; level <= chain.length; level++) {
     const target = level < chain.length ? (chain[level] as BlockId) : id;
     const index = siblings.indexOf(target);
     const preceding = index === -1 ? siblings : siblings.slice(0, index);
-    for (const sibling of preceding) {
-      pieces.push(snapshotBlock(graph, sibling, registry));
-    }
+    ids.push(...preceding);
     if (level < chain.length) {
       siblings = childIds(graph, chain[level] as BlockId);
     }
   }
-  return pieces.join("\n");
+  return ids;
+}
+
+/**
+ * Everything that appears before `id`, walking up from it: the ids of
+ * `precedingBlockIds`, each snapshotted in full and joined top-down (farthest
+ * first). This is a block's view of "the graph so far", not the whole graph.
+ */
+export function snapshotAbove(
+  graph: BlockGraph,
+  id: BlockId,
+  registry: KindRegistry,
+): string {
+  return precedingBlockIds(graph, id)
+    .map((sibling) => snapshotBlock(graph, sibling, registry))
+    .join("\n");
 }
 
 /** Validate every block's data against its kind schema. */

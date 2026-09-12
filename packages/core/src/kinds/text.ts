@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { defineKind } from "../kind";
+import { environmentKind } from "./env";
 
 export const TEXT_KIND = "text";
 export const GROUP_KIND = "group";
@@ -31,4 +32,4 @@ export const groupKind = defineKind({
 });
 
 /** Kinds that ship with the harness. */
-export const coreKinds = [textKind, groupKind];
+export const coreKinds = [textKind, groupKind, environmentKind];

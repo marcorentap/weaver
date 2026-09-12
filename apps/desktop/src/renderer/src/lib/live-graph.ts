@@ -11,6 +11,7 @@ import {
   findParent,
   insertBlock,
   lastChildId,
+  mergedEnvironment,
   moveBlock as moveBlockCore,
   removeBlock,
   snapshotAbove,
@@ -376,13 +377,18 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       return;
     }
     const context = snapshotAbove(snapshot.graph, id, kinds);
+    // The environment the block sees, walked up the graph the same way the
+    // agent's own context is. The main process turns `WEAVER_PWD` into the
+    // agent's working directory and hands the rest to the agent's tools, so
+    // "where am I" and "what's my environment" stay the block's own view.
+    const env = mergedEnvironment(snapshot.graph, id);
 
     setRunning(id, true);
     setAppendTail(id, id);
     try {
       let failure: string | null = null;
       const { done, cancel } = streamInference(
-        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings },
+        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings, env },
         (event) => {
           if (event.type === "thinking_delta") {
             thinkingText += event.text;

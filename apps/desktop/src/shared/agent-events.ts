@@ -68,6 +68,14 @@ export const agentRunRequest = z.object({
   providerId: z.string().optional(),
   /** That provider's saved field values, keyed by field key. */
   providerSettings: z.record(z.string(), z.string()).optional(),
+  /**
+   * The merged environment the anchoring block sees: every `environment`
+   * block above it in the graph, closer ones overriding farther ones. The
+   * main process runs the agent with `WEAVER_PWD` as its working directory
+   * and shades the rest of the variables over the host's own for the run.
+   * Omitted when the block sees no environment at all.
+   */
+  env: z.record(z.string(), z.string()).optional(),
 });
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;

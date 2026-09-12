@@ -1,6 +1,12 @@
 import type { ReactNode } from "react";
-import type { Block } from "@repo/core";
-import { GROUP_KIND, TEXT_KIND, textState } from "@repo/core";
+import type { Block, BlockGraph } from "@repo/core";
+import {
+  GROUP_KIND,
+  mergedEnvironment,
+  TEXT_KIND,
+  textState,
+  WEAVER_PWD,
+} from "@repo/core";
 import { schemaMessage } from "@/lib/schema-error";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
@@ -52,10 +58,18 @@ export type BlockField = {
  * `Preview`, and a `raw` URL the underlying file can be opened at.
  */
 export type BlockView = {
-  Row: (props: { block: Block; nested: number; running: boolean }) => ReactNode;
+  Row: (props: {
+    block: Block;
+    nested: number;
+    running: boolean;
+    /** The graph this row sits in. Needed by a view whose content depends
+     *  on what is above its block (a media block's relative path resolving
+     *  against the merged environment, say); everyone else ignores it. */
+    graph: BlockGraph;
+  }) => ReactNode;
   fields?: (block: Block) => BlockField[];
-  Preview?: (props: { block: Block }) => ReactNode;
-  raw?: (block: Block) => string;
+  Preview?: (props: { block: Block; graph: BlockGraph }) => ReactNode;
+  raw?: (block: Block, graph: BlockGraph) => string;
 };
 
 function UserRow({ text }: { text: string }) {
@@ -138,13 +152,25 @@ function ToolPreview({ state }: { state: ToolState }) {
 }
 
 /**
+ * The `WEAVER_PWD` the merged environment above `block` defines — the
+ * directory a relative media path resolves against — or undefined when no
+ * environment block above it sets the variable. Every media view asks for
+ * this and plugs it into `mediaSrc`, so the media block and the "run
+ * inference" agent agree on the working directory without anyone
+ * hardcoding a second lookup.
+ */
+function envPwd(graph: BlockGraph, block: Block): string | undefined {
+  return mergedEnvironment(graph, block.id)[WEAVER_PWD];
+}
+
+/**
  * Media renders inline. Big enough to actually watch or read a frame of, small
  * enough that a list of blocks still scrolls like a list; `p` opens the
  * full-size preview.
  */
-function MediaRow({ state }: { state: MediaState }) {
+function MediaRow({ state, pwd }: { state: MediaState; pwd?: string }) {
   const { type, mime } = mediaInfo(state.uri);
-  const src = mediaSrc(state.uri);
+  const src = mediaSrc(state.uri, pwd);
 
   return (
     <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -217,9 +243,9 @@ function MediaRow({ state }: { state: MediaState }) {
 }
 
 /** Full-size presentation, one element per detected type. */
-function MediaPreview({ state }: { state: MediaState }) {
+function MediaPreview({ state, pwd }: { state: MediaState; pwd?: string }) {
   const { type, mime } = mediaInfo(state.uri);
-  const src = mediaSrc(state.uri);
+  const src = mediaSrc(state.uri, pwd);
 
   if (type === "image") {
     return (
@@ -301,7 +327,12 @@ export const blockViews: Record<string, BlockView> = {
   },
 
   [MEDIA_KIND]: {
-    Row: ({ block }) => <MediaRow state={mediaState.parse(block.data)} />,
+    Row: ({ block, graph }) => (
+      <MediaRow
+        state={mediaState.parse(block.data)}
+        pwd={envPwd(graph, block)}
+      />
+    ),
     fields: (block) => [
       {
         name: "uri",
@@ -310,8 +341,11 @@ export const blockViews: Record<string, BlockView> = {
         multiline: true,
       },
     ],
-    Preview: ({ block }) => (
-      <MediaPreview state={mediaState.parse(block.data)} />
+    Preview: ({ block, graph }) => (
+      <MediaPreview
+        state={mediaState.parse(block.data)}
+        pwd={envPwd(graph, block)}
+      />
     ),
     // "Open in new tab" goes through `shell.openExternal`, the OS browser,
     // so it should get an address the browser can load on its own. An
@@ -320,13 +354,13 @@ export const blockViews: Record<string, BlockView> = {
     // cannot read cross-origin text or `file://` bytes, constraints the OS
     // browser does not share. The YouTube embed URL is likewise for the
     // iframe only, not the watch page.
-    raw: (block) => {
+    raw: (block, graph) => {
       const uri = mediaState.parse(block.data).uri;
       const url = parseMediaUri(uri);
       return url &&
         (url.protocol === "http:" || url.protocol === "https:")
         ? uri
-        : mediaSrc(uri);
+        : mediaSrc(uri, envPwd(graph, block));
     },
   },
 

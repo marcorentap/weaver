@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
 import { z } from "zod";
 import type { IpcMainInvokeEvent } from "electron";
@@ -13,6 +13,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { OpenRouterRouting } from "@earendil-works/pi-ai";
 import type { ToolRunContext } from "@repo/plugins";
+import { WEAVER_PWD } from "@repo/core";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import {
   ALLOWED_TOOLS,
@@ -406,7 +407,22 @@ async function runAgent(
       }),
     );
 
-    const cwd = projectRoot();
+    /**
+     * The agent's working directory and environment. The block's own merged
+     * environment (every `environment` block above it, closer overriding
+     * farther) shades the host's own for this run: `WEAVER_PWD` becomes the
+     * directory the agent starts in, and the remaining variables reach its
+     * tools. A relative `WEAVER_PWD` resolves against the project root, the
+     * same base the media protocol falls back to; an unset one leaves the
+     * agent at the project root as before.
+     */
+    const agentEnv = { ...process.env, ...(body.env ?? {}) };
+    const weaverPwd = agentEnv[WEAVER_PWD];
+    const cwd = weaverPwd
+      ? isAbsolute(weaverPwd)
+        ? weaverPwd
+        : resolve(projectRoot(), weaverPwd)
+      : projectRoot();
 
     const resourceLoader = new DefaultResourceLoader({
       cwd,
@@ -694,7 +710,26 @@ async function runAgent(
         ].join("\n")
       : body.prompt;
 
-    await session.prompt(prompt);
+    // The agent's own tools spawn shells that inherit `process.env`, so the
+    // block's variables reach them by shading `process.env` for the duration
+    // of this run and restoring it afterwards — only the run's own keys are
+    // touched, and only their exact previous values are put back. A second,
+    // concurrent run shading the same key could interleave; runs are short
+    // and this app drives one inference at a time, so that is a race nobody
+    // has met yet rather than one to engineer around.
+    const previousEnv = new Map<string, string | undefined>();
+    for (const [key, value] of Object.entries(body.env ?? {})) {
+      previousEnv.set(key, process.env[key]);
+      process.env[key] = value;
+    }
+    try {
+      await session.prompt(prompt);
+    } finally {
+      for (const [key, previous] of previousEnv) {
+        if (previous === undefined) delete process.env[key];
+        else process.env[key] = previous;
+      }
+    }
     unsubscribe();
     session.dispose();
     emit({ type: "done" });
