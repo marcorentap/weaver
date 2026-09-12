@@ -1129,6 +1129,23 @@ function ChatView({
           if (!next) setShown(new Set());
         },
       },
+      {
+        keys: ["u"],
+        help: { keys: "u / <n>u", label: "Undo last change" },
+        run: (count) => {
+          // `<n>u` rewinds that many steps at once, vim-style. The engine
+          // itself no-ops while a run is in flight, so a held or repeated
+          // key never yanks anything out from under a streaming reply.
+          for (let i = 0; i < (count ?? 1); i++) engine.undo();
+        },
+      },
+      {
+        keys: ["ctrl+r"],
+        help: { keys: "ctrl+r", label: "Redo" },
+        run: () => {
+          engine.redo();
+        },
+      },
     ],
   });
 
@@ -1548,12 +1565,17 @@ function ChatView({
                   run: () => {
                     setPopup(null);
                     setVisualAnchor(null);
-                    const ids = selectedRows
-                      .map((entry) => entry.block.id)
-                      .filter((id) => engine.deleteBlock(id));
+                    // One undo unit for the whole deletion, not one per
+                    // block: whatever survives `deleteBlock` (an id an
+                    // ancestor in this same selection already dropped is
+                    // a no-op) all rewinds with a single `u`.
+                    const ids = engine.group(() =>
+                      selectedRows
+                        .map((entry) => entry.block.id)
+                        .filter((id) => engine.deleteBlock(id)),
+                    );
                     // Optimistic, same as a single delete. Each id's own
-                    // nested contents go with it, and an id an ancestor in
-                    // this same selection already dropped is just a no-op.
+                    // nested contents go with it.
                     if (session && ids.length > 0) {
                       const graphId = session.id;
                       startTransition(() => {
@@ -1574,8 +1596,11 @@ function ChatView({
                   run: () => {
                     setPopup(null);
                     setVisualAnchor(null);
-                    for (const entry of selectedRows)
-                      engine.setHidden(entry.block.id, true);
+                    // One undo unit for the whole range, same as delete.
+                    engine.group(() => {
+                      for (const entry of selectedRows)
+                        engine.setHidden(entry.block.id, true);
+                    });
                   },
                 },
               ]),
@@ -1613,30 +1638,33 @@ function ChatView({
                     };
                     // Optimistic, same as delete. The group lands locally
                     // first, then each selected block relocates into it in
-                    // order. An id an ancestor in this same selection
-                    // already carried along is just a redundant, harmless
-                    // move.
-                    engine.addBlock(
-                      {
-                        id: input.id,
-                        kind: input.kind,
-                        label: input.label,
-                        createdAt: input.createdAt,
-                        // eslint-disable-next-line react-hooks/purity -- same deferred-closure false positive as above
-                        modifiedAt: Date.now(),
-                        next: null,
-                        children: null,
-                        data: input.data ?? {},
-                      },
-                      at,
-                    );
+                    // order — all one undo unit, so `u` after grouping
+                    // restores the selection rather than undoing the moves
+                    // one block at a time. An id an ancestor in this same
+                    // selection already carried along is just a redundant,
+                    // harmless move.
+                    engine.group(() => {
+                      engine.addBlock(
+                        {
+                          id: input.id,
+                          kind: input.kind,
+                          label: input.label,
+                          createdAt: input.createdAt,
+                          modifiedAt: Date.now(),
+                          next: null,
+                          children: null,
+                          data: input.data ?? {},
+                        },
+                        at,
+                      );
+                      for (const id of ids) {
+                        relocate(id, {
+                          parentId: groupId,
+                          afterId: lastChildId(engine.getSnapshot().graph, groupId),
+                        });
+                      }
+                    });
                     setOpen(groupId, true);
-                    for (const id of ids) {
-                      relocate(id, {
-                        parentId: groupId,
-                        afterId: lastChildId(engine.getSnapshot().graph, groupId),
-                      });
-                    }
                     setPendingFocus({ id: groupId, openActions: false });
                     startTransition(() => {
                       void window.api.chat.createChatBlock(graphId, input, at);

@@ -1,5 +1,12 @@
 import { join } from "node:path";
-import { app, BrowserWindow, protocol, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  protocol,
+  shell,
+  type MenuItemConstructorOptions,
+} from "electron";
 import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-protocol.js";
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
@@ -19,6 +26,75 @@ app.setDesktopName("weaver.desktop");
 protocol.registerSchemesAsPrivileged([MEDIA_PROTOCOL_PRIVILEGES]);
 
 const isDev = !app.isPackaged;
+
+/**
+ * The default application menu binds Ctrl+R to "Reload", which would yank
+ * the window out from under a running session. The chat page owns that key
+ * (the keymap binds `ctrl+r` to redo), so the accelerator has to go.
+ * Swallowing the key in `before-input-event` can't do this: its
+ * `preventDefault` eats the page's own keydown too, so the keymap would
+ * never see `ctrl+r` even with the menu neutralized. Removing the item from
+ * the menu is the only way to let the renderer have the key.
+ *
+ * The Electron default menu is otherwise reproduced role-for-role (close,
+ * edit clipboard + zoom, full-screen, devtools, quit), so nothing else
+ * changes about the app's shortcuts.
+ */
+function installApplicationMenu(): void {
+  const isMac = process.platform === "darwin";
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideOthers" },
+              { role: "unhide" },
+              { type: "separator" },
+              { role: "quit" },
+            ],
+          } as MenuItemConstructorOptions,
+        ]
+      : []),
+    {
+      label: "File",
+      submenu: [isMac ? { role: "close" } : { role: "quit" }],
+    },
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+        ...(isMac
+          ? ([{ role: "pasteAndMatchStyle" }, { role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])
+          : ([{ role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])),
+      ],
+    },
+    {
+      label: "View",
+      submenu: [
+        // No reload/force-reload here — that is what was stealing Ctrl+R.
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+        { role: "toggleDevTools" },
+      ],
+    },
+    ...(isMac ? [{ role: "windowMenu" } as MenuItemConstructorOptions] : []),
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -45,10 +121,12 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  // Ctrl+W is the default "Close" menu accelerator and would silently kill
-  // the whole app mid-session, so swallow it before it reaches the menu.
-  // (before-input-event.preventDefault stops both the page event and the
-  // menu shortcuts.) The window still closes via the OS title bar / Alt+F4.
+  // Ctrl+W is the default "Close" menu role and would silently kill the
+  // whole app mid-session, so swallow it before it reaches the menu. Unlike
+  // `installApplicationMenu`'s Ctrl+R handling, this key is owned by nobody
+  // in the renderer, so killing both the menu shortcut and the page keydown
+  // is exactly what we want. (before-input-event.preventDefault stops both.)
+  // The window still closes via the OS title bar / Alt+F4.
   win.webContents.on("before-input-event", (event, input) => {
     if (
       input.type === "keyDown" &&
@@ -86,6 +164,7 @@ void app.whenReady().then(async () => {
   // the window opens so a remote peer is never left hanging on a restart.
   startServerFromStoredSettings();
 
+  installApplicationMenu();
   createWindow();
 
   app.on("activate", () => {

@@ -43,6 +43,11 @@ export type LiveGraphSnapshot = {
    *  the chain, so it is tracked directly rather than derived by walking
    *  `next` pointers, which would run off the end of the whole chain. */
   appendTails: ReadonlyMap<BlockId, BlockId>;
+  /** Whether an undo/redo can run right now. False while a run is in
+   *  flight, since rewinding the graph out from under a streaming run
+   *  would strand its appends. */
+  canUndo: boolean;
+  canRedo: boolean;
 };
 
 export type LiveGraph = {
@@ -96,8 +101,32 @@ export type LiveGraph = {
   setHidden: (id: BlockId, hidden: boolean) => boolean;
   /** Abort the inference anchored at `id`, if one is in flight. */
   abortRun: (id: BlockId) => boolean;
+  /**
+   * Undo the most recent user change, restored one graph snapshot at a
+   * time. No-ops, returning false, when there is nothing to undo or a run
+   * is in flight. Every user-initiated commit (add, move, delete, field
+   * and label edits, hiding, whole inference runs) records a snapshot
+   * before mutating, so `u` / `ctrl+r` step through a session's own edit
+   * history. Hook-generated churn — a timer tick, a scheduled fetch — is
+   * deliberately outside the history: it has no single author to fault.
+   */
+  undo: () => boolean;
+  /** Step forward again through an undone change, if one was undone and no
+   *  newer edit was made since (a new edit clears the redo stack, the
+   *  standard editor contract). No-ops, returning false, when there is
+   *  nothing to redo or a run is in flight. */
+  redo: () => boolean;
+  /**
+   * Run `mutate` as a single undoable action: however many calls it makes
+   * to the engine's own mutating methods, exactly one history entry is
+   * recorded, so a single `u` rewinds all of them together. Multi-block
+   * actions (delete a visual selection, hide a range, group blocks under a
+   * new one) use this so an undo doesn't hop one block at a time. Nested
+   * groups collapse into the outermost one; the call runs synchronously.
+   */
+  group: <T>(mutate: () => T) => T;
   /** Link an already-persisted new block into the tree at `at`. No-ops,
-   *  returning false, if `at.afterId` is locked. */
+   *  returning false, when `at.afterId` is locked. */
   addBlock: (block: Block, at: Position) => boolean;
   /** Relink a block, and everything nested under it, at `at`. That is the
    *  whole of "moving" a block, reorder and nesting alike. No-ops,
@@ -165,8 +194,40 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     savedAt: null,
     running: new Set(),
     appendTails: new Map(),
+    canUndo: false,
+    canRedo: false,
   };
   const listeners = new Set<() => void>();
+  /** Past graph states, oldest first, each pushed just before a user edit
+   *  rewrites the tree. They are cheap to keep: every commit builds a new
+   *  graph that structurally shares everything it did not touch, so a
+   *  snapshot is a few references, not a copy. `redoStack` holds the
+   *  graphs an undo stepped away from, and is discarded the moment a new
+   *  user edit lands, the standard editor contract. */
+  const undoStack: BlockGraph[] = [];
+  const redoStack: BlockGraph[] = [];
+  const HISTORY_LIMIT = 100;
+  const hasUndo = () => undoStack.length > 0 && snapshot.running.size === 0;
+  const hasRedo = () => redoStack.length > 0 && snapshot.running.size === 0;
+  /** Nesting depth of the currently open undo group, and whether it has
+   *  already recorded its single history entry. Reset when a group opens
+   *  from depth 0, so nested `group` calls collapse into the outermost
+   *  unit. See `group` on the live engine. */
+  let groupDepth = 0;
+  let groupRecorded = false;
+  /** Remember the current graph as the point an undo would return to, ahead
+   *  of a user-initiated mutation, and invalidate any redo branch. Inside
+   *  an open group only the first mutation records, capturing the
+   *  pre-action state; everything after it stays under the same entry. */
+  function pushUndo() {
+    if (groupDepth > 0) {
+      if (groupRecorded) return;
+      groupRecorded = true;
+    }
+    undoStack.push(snapshot.graph);
+    if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+    redoStack.length = 0;
+  }
   /** Cancel handle per in-flight inference, so an abort can be aimed at a
    *  specific block rather than being a global stop. */
   const runningAborts = new Map<BlockId, () => void>();
@@ -176,7 +237,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   }
 
   function commit(graph: BlockGraph, dirty: boolean) {
-    snapshot = { ...snapshot, graph, dirty };
+    snapshot = {
+      ...snapshot,
+      graph,
+      dirty,
+      canUndo: hasUndo(),
+      canRedo: hasRedo(),
+    };
     emit();
   }
 
@@ -184,7 +251,17 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     const next = new Set(snapshot.running);
     if (active) next.add(id);
     else next.delete(id);
-    snapshot = { ...snapshot, running: next };
+    // A run starting rewrites the tree from here on, so its future result
+    // invalidates any pending redo, exactly like a user edit would.
+    if (active) redoStack.length = 0;
+    // Flags read the set being installed, not the stale `snapshot.running`
+    // still marked as in flight.
+    snapshot = {
+      ...snapshot,
+      running: next,
+      canUndo: undoStack.length > 0 && next.size === 0,
+      canRedo: redoStack.length > 0 && next.size === 0,
+    };
     emit();
   }
 
@@ -302,6 +379,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     if (!block) return; // Stale reference (deleted target).
     if (snapshot.running.has(id)) return; // Already running for this block.
 
+    // The whole run is one undo unit: the graph exactly as it was when the
+    // run began. Everything the run appends (reasoning, replies, tool
+    // results, even a pre-flight error block) rewinds together with a
+    // single `u` afterwards, rather than leaving one history entry per
+    // streamed delta.
+    pushUndo();
     const parentId = findParent(snapshot.graph, id);
     let afterId: BlockId | null = id;
     const append = (
@@ -498,6 +581,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
+      pushUndo();
       commit(
         {
           ...snapshot.graph,
@@ -517,6 +601,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
+      pushUndo();
       commit(
         {
           ...snapshot.graph,
@@ -532,6 +617,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return false;
       const current = snapshot.graph.blocks[id];
       if (!current || (current.hidden ?? false) === hidden) return false;
+      pushUndo();
       commit(
         {
           ...snapshot.graph,
@@ -550,6 +636,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         lockedBlockIds(snapshot.graph, snapshot.appendTails).has(at.afterId)
       )
         return false;
+      pushUndo();
       commit(insertBlock(snapshot.graph, block, at), true);
       return true;
     },
@@ -557,6 +644,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       if (!snapshot.graph.blocks[id]) return false;
       const locked = lockedBlockIds(snapshot.graph, snapshot.appendTails);
       if (locked.has(id) || (at.afterId && locked.has(at.afterId))) return false;
+      pushUndo();
       commit(moveBlockCore(snapshot.graph, id, at), true);
       return true;
     },
@@ -564,8 +652,39 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) {
         return false;
       }
+      pushUndo();
       commit(removeBlock(snapshot.graph, id), true);
       return true;
+    },
+    undo() {
+      if (!hasUndo()) return false;
+      while (undoStack.length > 0) {
+        const previous = undoStack.pop() as BlockGraph;
+        // A run that was cut off before appending anything leaves a
+        // history entry pointing at the graph it never changed. Step past
+        // those, they have nothing to rewind.
+        if (previous === snapshot.graph) continue;
+        redoStack.push(snapshot.graph);
+        commit(previous, true);
+        return true;
+      }
+      return false;
+    },
+    redo() {
+      if (!hasRedo()) return false;
+      const next = redoStack.pop() as BlockGraph;
+      undoStack.push(snapshot.graph);
+      commit(next, true);
+      return true;
+    },
+    group<T>(mutate: () => T): T {
+      if (groupDepth === 0) groupRecorded = false;
+      groupDepth++;
+      try {
+        return mutate();
+      } finally {
+        groupDepth--;
+      }
     },
     // A `Block` is already a valid `BlockInput`; the store ignores the extra
     // `modifiedAt`, which it owns.
