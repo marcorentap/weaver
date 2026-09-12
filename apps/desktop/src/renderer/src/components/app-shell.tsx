@@ -593,12 +593,15 @@ export function AppShell() {
         {layout.tabs.map((tab) => {
           const rects = paneGeometry(tab.root);
           const visible = tab.id === layout.activeTabId;
+          // A tab with a single pane has no split dividers to read, so its
+          // focused pane doesn't need the ring either.
+          const panes = orderedPanes(tab.root);
           return (
             <div
               key={tab.id}
               className={cn(visible ? "absolute inset-0" : "hidden")}
             >
-              {orderedPanes(tab.root).map((pane) => {
+              {panes.map((pane) => {
                 const rect = rects.get(pane.id);
                 if (!rect) return null;
                 const focused = visible && pane.id === focusedPaneId;
@@ -607,7 +610,7 @@ export function AppShell() {
                     key={pane.id}
                     pane={pane}
                     rect={rect}
-                    focused={focused}
+                    focused={focused && panes.length > 1}
                     onFocus={() =>
                       dispatch({ type: "focus-pane", paneId: pane.id })
                     }
