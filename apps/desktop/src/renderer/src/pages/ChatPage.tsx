@@ -612,7 +612,12 @@ function ChatView({
    *  `openActions` distinguishes "just created, show its actions" (create
    *  flow) from "just moved, only follow the cursor" (move/nest keys). */
   const [pendingFocus, setPendingFocus] = useState<
-    { id: BlockId; openActions: boolean; runInference?: boolean } | null
+    {
+      id: BlockId;
+      openActions: boolean;
+      runInference?: boolean;
+      customInference?: boolean;
+    } | null
   >(null);
   const { settings, hydrated } = useSettings();
 
@@ -711,6 +716,8 @@ function ChatView({
       setCursor(i);
       if (pendingFocus.openActions) setPopup({ kind: "actions" });
       if (pendingFocus.runInference) void runInference(pendingFocus.id);
+      if (pendingFocus.customInference)
+        setPopup({ kind: "customInference" });
       setPendingFocus(null);
     }
   }
@@ -1274,11 +1281,11 @@ function ChatView({
     setPopup(null);
   };
 
-  /** Persists the `i`/`I` flow's message as a `user` block, then immediately
-   *  runs inference on it once it is visible. That is the whole point of
-   *  typing a message rather than opening its actions to pick something
-   *  to do. */
-  const createUserBlock = async (text: string) => {
+  /** Persists the `i`/`I` flow's message as a `user` block, then follows it
+   *  with whatever the submit key asked for: the default inference run, or
+   *  (with shift, `ctrl+shift+enter`) the custom inference dialog, the same
+   *  one `X` opens on an existing block. */
+  const createUserBlock = async (text: string, custom = false) => {
     if (!session || !creating) return;
     if (creating.afterId && engine.isLocked(creating.afterId)) {
       setError("can't insert here while a reply is still streaming in");
@@ -1317,7 +1324,12 @@ function ChatView({
       creating,
     );
     if (creating.parentId) setOpen(creating.parentId, true);
-    setPendingFocus({ id: input.id, openActions: false, runInference: true });
+    setPendingFocus({
+      id: input.id,
+      openActions: false,
+      runInference: !custom,
+      customInference: custom,
+    });
     setCreating(null);
     setPopup(null);
   };
@@ -2032,6 +2044,7 @@ function ChatView({
           error={error}
           saving={saving}
           onSubmit={(value) => void createUserBlock(value)}
+          onSubmitShift={(value) => void createUserBlock(value, true)}
           onCancel={() => {
             setCreating(null);
             setPopup(null);

@@ -16,6 +16,7 @@ export function FieldEditor({
   error,
   saving,
   onSubmit,
+  onSubmitShift,
   onCancel,
 }: {
   id: string;
@@ -28,6 +29,10 @@ export function FieldEditor({
   error: string | null;
   saving: boolean;
   onSubmit: (value: string) => void;
+  /** Run instead of `onSubmit` on ctrl/cmd+shift+enter — the "submit and
+   *  do something else" escape hatch (e.g. save the message and open custom
+   *  inference rather than running the default run). */
+  onSubmitShift?: (value: string) => void;
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(field.value);
@@ -47,6 +52,14 @@ export function FieldEditor({
       ? [
           { keys: "enter", label: "New line" },
           { keys: "ctrl+enter", label: `Save ${field.label}` },
+          ...(onSubmitShift
+            ? [
+                {
+                  keys: "ctrl+shift+enter",
+                  label: `Save ${field.label} and run custom inference`,
+                },
+              ]
+            : []),
         ]
       : [{ keys: "enter", label: `Save ${field.label}` }],
   });
@@ -74,7 +87,8 @@ export function FieldEditor({
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
-                onSubmit(value);
+                if (event.shiftKey && onSubmitShift) onSubmitShift(value);
+                else onSubmit(value);
               } else if (event.key === "Escape") {
                 event.preventDefault();
                 onCancel();
