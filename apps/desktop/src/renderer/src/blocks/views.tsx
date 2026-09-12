@@ -45,6 +45,10 @@ export type BlockField = {
    *  through `Number()` before it's written; everything else stays a
    *  string as-is. */
   type?: "number";
+  /** Whether the actions menu may preview the value next to the edit row.
+   *  Huge or sensitive bodies (an environment file's contents) keep the
+   *  row clean; default is to preview. */
+  preview?: boolean;
 };
 
 /**
@@ -338,9 +342,12 @@ export const blockViews: Record<string, BlockView> = {
     fields: (block) => [
       {
         name: "text",
-        label: ".env",
+        // "environment", not ".env": the menu says "Edit environment".
+        label: "environment",
         value: envState.parse(block.data).text,
         multiline: true,
+        // The whole file is the value; never spill it across the menu.
+        preview: false,
       },
     ],
     Preview: ({ block }) => (

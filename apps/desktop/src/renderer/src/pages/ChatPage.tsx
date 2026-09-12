@@ -1450,8 +1450,11 @@ function ChatView({
                 ...(i === 0 ? { key: "e" as const } : {}),
                 label: `Edit ${field.label}`,
                 // A blank field shows what it falls back to, not an empty
-                // column.
-                detail: field.value || field.placeholder,
+                // column. A field that opts out (`preview: false`, like the
+                // environment kind's whole-file body) keeps its row clean.
+                ...(field.preview === false
+                  ? {}
+                  : { detail: field.value || field.placeholder }),
                 run: () => openField(field),
               }))),
           ...(!locked && kind && (kind.hooks.length > 0 || kind.callbacks.length > 0)
