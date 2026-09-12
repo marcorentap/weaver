@@ -14,25 +14,40 @@ import type {
 const EMPTY_GRAPH: BlockGraph = { blocks: {}, root: null };
 
 /**
- * Sessions the app has opened but not yet written a block to. A name typed
- * into a fresh session is remembered here until its first real write creates
- * the row (`saveGraph`). Nothing here survives a restart, which is exactly
- * right: an empty session is not worth keeping, so the database never sees
- * it.
+ * A session the app has opened but not yet persisted anything to. Its row
+ * does not exist until the first real write (`saveGraph` or an edit IPC),
+ * so an untouched session never touches the database. The default graph it
+ * holds is minted at creation, ids and all, so the block Ids the client got
+ * from `loadGraph` are exactly the ones the mutation handlers resolve
+ * against: a pending session's edit loads this graph, applies the change,
+ * and creates the row together with it. Nothing here survives a restart,
+ * which is exactly right: an empty session is not worth keeping.
  */
-const pendingSessions = new Map<string, string>();
+type PendingSession = { name: string; graph: BlockGraph };
+const pendingSessions = new Map<string, PendingSession>();
+
+/**
+ * The graph the writer side works on: the stored session once its row
+ * exists, otherwise the pending default graph. A just-created session has
+ * editable blocks (its `environment` block) before any write has happened,
+ * and a mutation must resolve against those, not against an empty store.
+ */
+function sessionGraph(store: Store, graphId: string): BlockGraph {
+  return store.getGraph(graphId)
+    ? store.loadGraph(graphId)
+    : (pendingSessions.get(graphId)?.graph ?? EMPTY_GRAPH);
+}
 
 /**
  * Creates the session's row the first time it gets a block, so an empty
  * session never has one. The row is created under the id the client is
  * already navigating by (`createGraph` would mint a fresh one), with the
- * name the user typed when the session was opened, remembered in
- * `pendingSessions`. A session whose row already exists is left alone, so
- * renames and later writes keep touching the same row.
+ * name remembered in `pendingSessions`. A session whose row already exists
+ * is left alone, so renames and later writes keep touching the same row.
  */
 function ensureSessionRow(store: Store, graphId: string): void {
   if (store.getGraph(graphId)) return;
-  store.createGraphAt(graphId, pendingSessions.get(graphId) ?? "New chat");
+  store.createGraphAt(graphId, pendingSessions.get(graphId)?.name ?? "New chat");
 }
 
 /**
@@ -47,7 +62,7 @@ function rewrite(
 ): MutationResult {
   const store = getStore();
   try {
-    const blocks = Object.values(apply(store.loadGraph(graphId)).blocks);
+    const blocks = Object.values(apply(sessionGraph(store, graphId)).blocks);
     if (blocks.length === 0) {
       // Deleting the last block empties the session, the same outcome as an
       // empty autosave: the session is no longer a session, so its row goes
@@ -192,14 +207,13 @@ function defaultGraph(): BlockGraph {
  *  not be unique.
  *
  *  Nothing is written here: a fresh session only gets the default graph
- *  (`environment` block, see `defaultGraph`), and that comes from
- *  `loadGraph` rather than being persisted, so creating a chat the user
- *  never touches costs the database nothing. The row is created together
- *  with the first real write (`saveGraph`), under the name remembered in
- *  `pendingSessions`. */
+ *  (`environment` block, see `defaultGraph`), minted once and remembered
+ *  with the session so the view and the first edit resolve the same block
+ *  ids. The row is created together with the first real write (`saveGraph`
+ *  or any edit IPC), under the name remembered in `pendingSessions`. */
 function createChatSession(name: string): CreateSessionResult {
   const id = newId();
-  pendingSessions.set(id, name);
+  pendingSessions.set(id, { name, graph: defaultGraph() });
   return { error: null, id };
 }
 
@@ -215,7 +229,7 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
   const source = store.getGraph(sourceId);
   const name = source ? `${source.name} copy` : "New chat";
   const id = newId();
-  pendingSessions.set(id, name);
+  pendingSessions.set(id, { name, graph: defaultGraph() });
   try {
     const blocks = Object.values(store.loadGraph(sourceId).blocks);
     if (blocks.length === 0) {
@@ -250,8 +264,10 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
 function renameChatSession(graphId: string, name: string): MutationResult {
   if (pendingSessions.has(graphId)) {
     // The row does not exist yet, so there is nothing to rename: remember
-    // the new name and let `ensureSessionRow` use it at the first write.
-    pendingSessions.set(graphId, name);
+    // the new name (keeping the pending graph) and let `ensureSessionRow`
+    // use it at the first write.
+    const pending = pendingSessions.get(graphId)!;
+    pendingSessions.set(graphId, { name, graph: pending.graph });
     return { error: null };
   }
   try {
@@ -297,9 +313,9 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
       // session the view could no longer write.
       const name =
         store.getGraph(graphId)?.name ??
-        pendingSessions.get(graphId) ??
+        pendingSessions.get(graphId)?.name ??
         "New chat";
-      pendingSessions.set(graphId, name);
+      pendingSessions.set(graphId, { name, graph: defaultGraph() });
       store.deleteGraph(graphId);
       return { error: null };
     }
@@ -361,10 +377,14 @@ function loadGraph(session?: string): LoadGraphResult {
   if (active) {
     open = { id: active.id, name: active.name };
   } else if (wanted) {
-    const name = pendingSessions.get(wanted);
-    if (name) open = { id: wanted, name };
+    const pending = pendingSessions.get(wanted);
+    if (pending) open = { id: wanted, name: pending.name };
   }
-  const graph = active ? store.loadGraph(active.id) : open ? defaultGraph() : EMPTY_GRAPH;
+  const graph = active
+    ? store.loadGraph(active.id)
+    : open
+      ? (pendingSessions.get(open.id)?.graph ?? EMPTY_GRAPH)
+      : EMPTY_GRAPH;
 
   return { graph, sessions, session: open };
 }
