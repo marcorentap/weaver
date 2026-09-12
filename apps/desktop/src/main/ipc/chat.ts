@@ -165,6 +165,47 @@ function createChatSession(name: string): CreateSessionResult {
   return { error: null, id };
 }
 
+/**
+ * Forks a session into a brand-new one: same name plus a "copy" suffix,
+ * same blocks under fresh ids, so the copy's tree stays independent of the
+ * original's as either one is edited later. The copy's row is written right
+ * away (the source is a listed session, so it has content), and the copy -
+ * like any written session - shows up in the sessions list.
+ */
+function duplicateChatSession(sourceId: string): CreateSessionResult {
+  const store = getStore();
+  const source = store.getGraph(sourceId);
+  const name = source ? `${source.name} copy` : "New chat";
+  const id = newId();
+  pendingSessions.set(id, name);
+  try {
+    const blocks = Object.values(store.loadGraph(sourceId).blocks);
+    if (blocks.length === 0) {
+      // The source has no content (a pending, never-written session): the
+      // copy is just an empty session under its own name, pending until its
+      // first block, exactly like `createChatSession`.
+      return { error: null, id };
+    }
+    const remap = new Map(blocks.map((block) => [block.id, newId()]));
+    const copied: BlockInput[] = blocks.map((block) => ({
+      id: remap.get(block.id)!,
+      kind: block.kind,
+      label: block.label,
+      createdAt: block.createdAt,
+      next: block.next ? remap.get(block.next) : null,
+      children: block.children ? remap.get(block.children) : null,
+      data: structuredClone(block.data),
+    }));
+    ensureSessionRow(store, id);
+    store.writeGraph(id, copied);
+    pendingSessions.delete(id);
+    return { error: null, id };
+  } catch (error) {
+    pendingSessions.delete(id);
+    return { error: schemaMessage(error), id: null };
+  }
+}
+
 /** Renames a session in place with a new (not necessarily unique) name.
  *  The graph and blocks are unchanged. */
 function renameChatSession(graphId: string, name: string): MutationResult {
@@ -316,6 +357,9 @@ export function registerChatHandlers(): void {
   );
   ipcMain.handle("chat:renameChatSession", (_event, graphId: string, name: string) =>
     renameChatSession(graphId, name),
+  );
+  ipcMain.handle("chat:duplicateChatSession", (_event, graphId: string) =>
+    duplicateChatSession(graphId),
   );
   ipcMain.handle("chat:deleteChatSession", (_event, graphId: string) =>
     deleteChatSession(graphId),

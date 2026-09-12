@@ -144,6 +144,9 @@ export interface WeaverApi {
     ): Promise<MutationResult>;
     createChatSession(name: string): Promise<CreateSessionResult>;
     renameChatSession(graphId: string, name: string): Promise<MutationResult>;
+    /** Forks `graphId` into a new session (`<name> copy`) with fresh block
+     *  ids, and returns the copy's id. */
+    duplicateChatSession(graphId: string): Promise<CreateSessionResult>;
     deleteChatSession(graphId: string): Promise<MutationResult>;
     saveGraph(graphId: string, blocks: BlockInput[]): Promise<MutationResult>;
   };

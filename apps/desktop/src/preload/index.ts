@@ -59,6 +59,11 @@ const api: WeaverApi = {
       ipcRenderer.invoke("chat:createChatSession", name) as Promise<CreateSessionResult>,
     renameChatSession: (graphId, name) =>
       ipcRenderer.invoke("chat:renameChatSession", graphId, name) as Promise<MutationResult>,
+    duplicateChatSession: (graphId) =>
+      ipcRenderer.invoke(
+        "chat:duplicateChatSession",
+        graphId,
+      ) as Promise<CreateSessionResult>,
     deleteChatSession: (graphId) =>
       ipcRenderer.invoke("chat:deleteChatSession", graphId) as Promise<MutationResult>,
     saveGraph: (graphId, blocks: BlockInput[]) =>

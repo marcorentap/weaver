@@ -1290,6 +1290,25 @@ function ChatView({
     navigate(`/chat?session=${encodeURIComponent(result.id)}`);
   };
 
+  /** Forks the open session into a new one and switches to the copy.
+   *  Same task as `createSession` (writing the fork lives in the main
+   *  process), so navigating to the new `?session=` makes `ChatPage` reload
+   *  the sessions list on its own. */
+  const duplicateSession = async () => {
+    if (!session) return;
+    setSaving(true);
+    const result = await window.api.chat.duplicateChatSession(session.id);
+    setSaving(false);
+    if (result.error || !result.id) {
+      setError(result.error ?? "failed to duplicate session");
+      return;
+    }
+    setPopup(null);
+    setCursor(0);
+    setExpanded(new Set());
+    navigate(`/chat?session=${encodeURIComponent(result.id)}`);
+  };
+
   /** Renames the open session in place. Its id, and so the URL, never
    *  changes, so nothing navigates. The sessions list (and this session's
    *  own displayed name) would otherwise go stale, so this refetches it
@@ -1647,6 +1666,14 @@ function ChatView({
             run: () => {
               setError(null);
               setPopup({ kind: "renameSession" });
+            },
+          },
+          {
+            label: "Duplicate session",
+            key: "N",
+            run: () => {
+              setError(null);
+              void duplicateSession();
             },
           },
           {
