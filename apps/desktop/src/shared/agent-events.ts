@@ -66,6 +66,15 @@ export const agentRunRequest = z.object({
    *  if any, so the main process can apply that provider's own request
    *  tuning (see `providerCompat` in `main/ipc/agent.ts`). */
   providerId: z.string().optional(),
+  /** What pi's own `DefaultResourceLoader` discovers for this block:
+   *  extensions, `SKILL.md` files, prompt templates, themes and project
+   *  context files. Each flag, when omitted, keeps the app's default (see
+   *  `DISCOVERY_DEFAULTS` in `main/lib/run-agent.ts`). */
+  noExtensions: z.boolean().optional(),
+  noSkills: z.boolean().optional(),
+  noPromptTemplates: z.boolean().optional(),
+  noThemes: z.boolean().optional(),
+  noContextFiles: z.boolean().optional(),
   /** That provider's saved field values, keyed by field key. */
   providerSettings: z.record(z.string(), z.string()).optional(),
   /**

@@ -15,7 +15,21 @@ export type CustomInferenceRun = {
   model: string;
   providerId?: string;
   providerSettings?: Record<string, string>;
+  /** What pi's `DefaultResourceLoader` loads for this run; `true` = don't
+   *  load. Omitted by callers that don't aim the run (plain `x`), which
+   *  then fall back to the saved inference settings. */
+  noExtensions?: boolean;
+  noSkills?: boolean;
+  noPromptTemplates?: boolean;
+  noThemes?: boolean;
+  noContextFiles?: boolean;
 };
+
+/** On/off choice the discovery rows use, mirroring the settings page. */
+const ON_OFF_OPTIONS = [
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+] as const;
 
 /**
  * A settings-style row inside the dialog: a label column on the left and a
@@ -81,6 +95,11 @@ export function CustomInferenceDialog({
     apiKey: string;
     model: string;
     providerSettings: Record<string, Record<string, string>>;
+    noExtensions: boolean;
+    noSkills: boolean;
+    noPromptTemplates: boolean;
+    noThemes: boolean;
+    noContextFiles: boolean;
   };
   onRun: (run: CustomInferenceRun) => void;
   onCancel: () => void;
@@ -99,6 +118,17 @@ export function CustomInferenceDialog({
         { ...fields },
       ]),
     ),
+  );
+  /** What pi loads for this run, copied from the saved settings like every
+   *  other value in the dialog. */
+  const [noExtensions, setNoExtensions] = useState(defaults.noExtensions);
+  const [noSkills, setNoSkills] = useState(defaults.noSkills);
+  const [noPromptTemplates, setNoPromptTemplates] = useState(
+    defaults.noPromptTemplates,
+  );
+  const [noThemes, setNoThemes] = useState(defaults.noThemes);
+  const [noContextFiles, setNoContextFiles] = useState(
+    defaults.noContextFiles,
   );
   // The provider the endpoint being typed belongs to. Same detection the
   // default run and the main process use, so its fields appear (and are
@@ -150,6 +180,54 @@ export function CustomInferenceDialog({
       placeholder: "gpt-4o",
       onChange: setModel,
     },
+    // What pi's DefaultResourceLoader loads for this run, same rows the
+    // settings page's "Inference settings" section shows. On/off here
+    // reads as the feature it enables (`no…` is the saved/inverted value).
+    {
+      key: "noExtensions",
+      kind: "option",
+      label: "Pi extensions",
+      description: "Load pi extensions (slash commands, hooks, tools).",
+      options: ON_OFF_OPTIONS,
+      value: noExtensions ? "on" : "off",
+      onChange: (value) => setNoExtensions(value === "on"),
+    },
+    {
+      key: "noSkills",
+      kind: "option",
+      label: "Skills",
+      description: "Load SKILL.md files from the agent and project directories.",
+      options: ON_OFF_OPTIONS,
+      value: noSkills ? "on" : "off",
+      onChange: (value) => setNoSkills(value === "on"),
+    },
+    {
+      key: "noPromptTemplates",
+      kind: "option",
+      label: "Prompt templates",
+      description: "Load pi prompt templates (/agent, /session, system personas).",
+      options: ON_OFF_OPTIONS,
+      value: noPromptTemplates ? "on" : "off",
+      onChange: (value) => setNoPromptTemplates(value === "on"),
+    },
+    {
+      key: "noThemes",
+      kind: "option",
+      label: "Themes",
+      description: "Load pi themes.",
+      options: ON_OFF_OPTIONS,
+      value: noThemes ? "on" : "off",
+      onChange: (value) => setNoThemes(value === "on"),
+    },
+    {
+      key: "noContextFiles",
+      kind: "option",
+      label: "Context files",
+      description: "Load project context files (CONTEXT.md / AGENTS.md).",
+      options: ON_OFF_OPTIONS,
+      value: noContextFiles ? "on" : "off",
+      onChange: (value) => setNoContextFiles(value === "on"),
+    },
     ...(provider?.fields ?? []).map(
       (field: ProviderField): RowDef =>
         field.options
@@ -187,6 +265,11 @@ export function CustomInferenceDialog({
       providerSettings: provider
         ? providerSettings[provider.id]
         : undefined,
+      noExtensions,
+      noSkills,
+      noPromptTemplates,
+      noThemes,
+      noContextFiles,
     });
 
   const [cursor, setCursor] = useState(0);

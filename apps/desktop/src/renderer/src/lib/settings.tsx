@@ -57,6 +57,15 @@ type Settings = {
    *  `aiEndpoint`. Keyed rather than flat so switching endpoints between
    *  two known providers never clobbers the other one's saved values. */
   aiProviderSettings: Record<string, Record<string, string>>;
+  /** What pi's `DefaultResourceLoader` loads on each agent run, inverted
+   *  (`true` = don't load) so the names match the SDK flags the main
+   *  process passes through. These are the app-wide defaults the `X` modal
+   *  prefills per run. */
+  noExtensions: boolean;
+  noSkills: boolean;
+  noPromptTemplates: boolean;
+  noThemes: boolean;
+  noContextFiles: boolean;
   /** Whether agent runs go through a remote weaver instance. */
   remoteEnabled: boolean;
   /** Scheme'd host of the remote instance, e.g. "http://192.168.1.20". */
@@ -83,6 +92,15 @@ const DEFAULTS: Settings = {
   aiApiKey: "",
   aiDefaultModel: "",
   aiProviderSettings: {},
+  // Extensions, skills and context files are part of a block's context and
+  // default on; pi's prompt templates and themes would change how
+  // surrounding weaver chrome renders and stay off. Same defaults the main
+  // process applies when a run omits a flag (`DISCOVERY_DEFAULTS`).
+  noExtensions: false,
+  noSkills: false,
+  noPromptTemplates: true,
+  noThemes: true,
+  noContextFiles: false,
   remoteEnabled: false,
   remoteHost: "",
   remotePort: 3111,
@@ -141,6 +159,11 @@ type SettingsContextValue = {
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
   setAiDefaultModel: (value: string) => void;
+  setNoExtensions: (value: boolean) => void;
+  setNoSkills: (value: boolean) => void;
+  setNoPromptTemplates: (value: boolean) => void;
+  setNoThemes: (value: boolean) => void;
+  setNoContextFiles: (value: boolean) => void;
   setProviderField: (providerId: string, key: string, value: string) => void;
   setRemoteEnabled: (value: boolean) => void;
   setRemoteHost: (value: string) => void;
@@ -178,6 +201,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
             aiProviderSettings:
               stored?.aiProviderSettings ?? DEFAULTS.aiProviderSettings,
+            noExtensions: stored?.noExtensions ?? DEFAULTS.noExtensions,
+            noSkills: stored?.noSkills ?? DEFAULTS.noSkills,
+            noPromptTemplates:
+              stored?.noPromptTemplates ?? DEFAULTS.noPromptTemplates,
+            noThemes: stored?.noThemes ?? DEFAULTS.noThemes,
+            noContextFiles:
+              stored?.noContextFiles ?? DEFAULTS.noContextFiles,
             remoteEnabled: stored?.remoteEnabled ?? DEFAULTS.remoteEnabled,
             remoteHost: stored?.remoteHost ?? DEFAULTS.remoteHost,
             remotePort: stored?.remotePort ?? DEFAULTS.remotePort,
@@ -251,6 +281,26 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     },
     [set],
   );
+  const setNoExtensions = useCallback(
+    (value: boolean) => set("noExtensions", value),
+    [set],
+  );
+  const setNoSkills = useCallback(
+    (value: boolean) => set("noSkills", value),
+    [set],
+  );
+  const setNoPromptTemplates = useCallback(
+    (value: boolean) => set("noPromptTemplates", value),
+    [set],
+  );
+  const setNoThemes = useCallback(
+    (value: boolean) => set("noThemes", value),
+    [set],
+  );
+  const setNoContextFiles = useCallback(
+    (value: boolean) => set("noContextFiles", value),
+    [set],
+  );
   const setRemoteEnabled = useCallback(
     (value: boolean) => set("remoteEnabled", value),
     [set],
@@ -291,6 +341,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiApiKey,
       setAiDefaultModel,
       setProviderField,
+      setNoExtensions,
+      setNoSkills,
+      setNoPromptTemplates,
+      setNoThemes,
+      setNoContextFiles,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,
@@ -309,6 +364,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setAiApiKey,
       setAiDefaultModel,
       setProviderField,
+      setNoExtensions,
+      setNoSkills,
+      setNoPromptTemplates,
+      setNoThemes,
+      setNoContextFiles,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,

@@ -29,6 +29,22 @@ import { schemaMessage } from "./schema-error.js";
 const AGENT_DIR = "/tmp/weaver-agent";
 
 /**
+ * What pi's own `DefaultResourceLoader` loads for a run when the request
+ * doesn't say: extensions, skills and project context files are part of a
+ * weaver block's context (the graph + prompt handle those), so they default
+ * on; pi's prompt templates and themes would change how surrounding weaver
+ * chrome renders, so they stay off. The `X` modal and the settings page's
+ * "Inference settings" section override these per run / app-wide.
+ */
+const DISCOVERY_DEFAULTS = {
+  noExtensions: false,
+  noSkills: false,
+  noPromptTemplates: true,
+  noThemes: true,
+  noContextFiles: false,
+} as const;
+
+/**
  * Markdown image syntax naming a `file://` URI: `![alt](file://…)`. The
  * model can point `display_media` at a URI, or just write it inline in its
  * own reply, and either way it is a URI this live run just asserted, so
@@ -469,13 +485,17 @@ export async function runAgent(
       cwd,
       agentDir: AGENT_DIR,
       // A weaver agent's instructions are its prompt plus the graph above
-      // it. pi's own extensions, skills and context files are not part of
-      // that, and would silently change what a block does.
-      noExtensions: true,
-      noSkills: true,
-      noPromptTemplates: true,
-      noThemes: true,
-      noContextFiles: true,
+      // it. pi's own prompt templates and themes are not part of that and
+      // would silently change what a block does, so they're off by default
+      // (see `DISCOVERY_DEFAULTS`); extensions, skills and context files
+      // load unless the run (or the app's inference settings) opts out.
+      noExtensions: body.noExtensions ?? DISCOVERY_DEFAULTS.noExtensions,
+      noSkills: body.noSkills ?? DISCOVERY_DEFAULTS.noSkills,
+      noPromptTemplates:
+        body.noPromptTemplates ?? DISCOVERY_DEFAULTS.noPromptTemplates,
+      noThemes: body.noThemes ?? DISCOVERY_DEFAULTS.noThemes,
+      noContextFiles:
+        body.noContextFiles ?? DISCOVERY_DEFAULTS.noContextFiles,
       // A replacement, not an append: pi's default prompt (CLI-agent
       // phrasing, SDK-built tool list) is replaced wholesale; this file is
       // the whole system prompt. Tools still reach the model through the

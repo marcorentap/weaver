@@ -970,7 +970,8 @@ function ChatView({
     custom?: Partial<CustomInferenceRun>,
   ): Promise<void> {
     if (!session) return Promise.resolve();
-    const { aiEndpoint, aiApiKey, aiDefaultModel, aiProviderSettings } = settings;
+    const { aiEndpoint, aiApiKey, aiDefaultModel, aiProviderSettings,
+      noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles } = settings;
     const endpoint = custom?.endpoint ?? aiEndpoint;
     const provider = detectProvider(endpoint);
     return engine.runInference(id, {
@@ -981,6 +982,11 @@ function ChatView({
       providerSettings:
         custom?.providerSettings ??
         (provider ? aiProviderSettings[provider.id] : undefined),
+      noExtensions: custom?.noExtensions ?? noExtensions,
+      noSkills: custom?.noSkills ?? noSkills,
+      noPromptTemplates: custom?.noPromptTemplates ?? noPromptTemplates,
+      noThemes: custom?.noThemes ?? noThemes,
+      noContextFiles: custom?.noContextFiles ?? noContextFiles,
     });
   }
 
@@ -1972,6 +1978,11 @@ function ChatView({
             apiKey: settings.aiApiKey,
             model: settings.aiDefaultModel,
             providerSettings: settings.aiProviderSettings,
+            noExtensions: settings.noExtensions,
+            noSkills: settings.noSkills,
+            noPromptTemplates: settings.noPromptTemplates,
+            noThemes: settings.noThemes,
+            noContextFiles: settings.noContextFiles,
           }}
           onRun={(run) => {
             setPopup(null);

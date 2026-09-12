@@ -310,6 +310,11 @@ export default function SettingsPage() {
     setAiApiKey,
     setAiDefaultModel,
     setProviderField,
+    setNoExtensions,
+    setNoSkills,
+    setNoPromptTemplates,
+    setNoThemes,
+    setNoContextFiles,
     setRemoteEnabled,
     setRemoteHost,
     setRemotePort,
@@ -610,6 +615,57 @@ export default function SettingsPage() {
         }
         return null;
       },
+    },
+    // What pi's own DefaultResourceLoader loads for each run: extensions,
+    // `SKILL.md` files, prompt templates, themes and project context files.
+    // These are the app-wide defaults the `X` modal prefills; the values
+    // below are inverted from the saved booleans (`no…` = off) so a row
+    // reads as the feature it enables rather than its negation.
+    {
+      kind: "option",
+      key: "inference.noExtensions",
+      label: "Pi extensions",
+      description: "Load pi extensions (slash commands, hooks, tools) for a run.",
+      section: "Inference settings",
+      options: ON_OFF_OPTIONS,
+      value: settings.noExtensions ? "off" : "on",
+      onChange: (value) => setNoExtensions(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inference.noSkills",
+      label: "Skills",
+      description: "Load SKILL.md files from the agent and project directories.",
+      options: ON_OFF_OPTIONS,
+      value: settings.noSkills ? "off" : "on",
+      onChange: (value) => setNoSkills(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inference.noPromptTemplates",
+      label: "Prompt templates",
+      description: "Load pi prompt templates (/agent, /session, system personas).",
+      options: ON_OFF_OPTIONS,
+      value: settings.noPromptTemplates ? "off" : "on",
+      onChange: (value) => setNoPromptTemplates(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inference.noThemes",
+      label: "Themes",
+      description: "Load pi themes.",
+      options: ON_OFF_OPTIONS,
+      value: settings.noThemes ? "off" : "on",
+      onChange: (value) => setNoThemes(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inference.noContextFiles",
+      label: "Context files",
+      description: "Load project context files (CONTEXT.md / AGENTS.md).",
+      options: ON_OFF_OPTIONS,
+      value: settings.noContextFiles ? "off" : "on",
+      onChange: (value) => setNoContextFiles(value === "off"),
     },
     // A provider detected from the endpoint above gets its own fields,
     // read from and written back to its own slot in `aiProviderSettings`

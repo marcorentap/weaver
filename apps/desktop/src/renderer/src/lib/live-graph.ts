@@ -85,6 +85,14 @@ export type LiveGraph = {
        *  `shared/provider-routing.ts`. */
       providerId?: string;
       providerSettings?: Record<string, string>;
+      /** What pi's `DefaultResourceLoader` loads for this run; see
+       *  `AgentRunRequest` for the wire names. Omitted → the main process
+       *  applies its own (and the saved settings') defaults. */
+      noExtensions?: boolean;
+      noSkills?: boolean;
+      noPromptTemplates?: boolean;
+      noThemes?: boolean;
+      noContextFiles?: boolean;
     },
   ) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
@@ -366,13 +374,19 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
 
   async function runInference(
     id: BlockId,
-    { endpoint, apiKey, model, tools = [], providerId, providerSettings }: {
+    { endpoint, apiKey, model, tools = [], providerId, providerSettings,
+      noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles }: {
       endpoint: string;
       apiKey: string;
       model: string;
       tools?: string[];
       providerId?: string;
       providerSettings?: Record<string, string>;
+      noExtensions?: boolean;
+      noSkills?: boolean;
+      noPromptTemplates?: boolean;
+      noThemes?: boolean;
+      noContextFiles?: boolean;
     },
   ): Promise<void> {
     const block = snapshot.graph.blocks[id];
@@ -490,7 +504,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     try {
       let failure: string | null = null;
       const { done, cancel } = streamInference(
-        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings, env },
+        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings, env,
+          noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles },
         (event) => {
           if (event.type === "thinking_delta") {
             thinkingText += event.text;
