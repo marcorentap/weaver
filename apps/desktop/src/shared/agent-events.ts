@@ -25,9 +25,24 @@ export const agentEvent = z.discriminatedUnion("type", [
    *  the message is complete, on the same terms as `text`/`text_delta`. */
   z.object({ type: z.literal("thinking"), text: z.string() }),
   z.object({ type: z.literal("thinking_delta"), text: z.string() }),
+  /** A tool call started. Opens the tool block so the call shows up while
+   *  it runs, and gives the `tool_delta`/`tool` events that follow an `id`
+   *  to land in the same block with. */
+  z.object({
+    type: z.literal("tool_start"),
+    id: z.string(),
+    name: z.string(),
+    args: z.string(),
+  }),
+  /** One incremental chunk of a running tool's output, in execution order.
+   *  Only tools that request streaming updates emit these, so a call may
+   *  go straight from `tool_start` to `tool`. The finished call's `tool`
+   *  event is still the authoritative full output. */
+  z.object({ type: z.literal("tool_delta"), id: z.string(), text: z.string() }),
   /** A finished tool call, with whatever it printed. */
   z.object({
     type: z.literal("tool"),
+    id: z.string(),
     name: z.string(),
     args: z.string(),
     output: z.string(),

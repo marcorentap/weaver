@@ -457,6 +457,34 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         true,
       );
     };
+    // A run's tool calls each occupy one `tool` block, opened by the wire's
+    // `tool_start` and streamed into by `tool_delta`. `toolBlocks` maps the
+    // wire id (main-process-assigned, unique per run) to the block id, so
+    // the calls of one turn that run in parallel each land in their own
+    // block.
+    const toolBlocks = new Map<string, BlockId>();
+    const patchTool = (id: BlockId, output: string, ok?: boolean) => {
+      const current = snapshot.graph.blocks[id];
+      if (!current) return; // Deleted mid-stream.
+      commit(
+        {
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [id]: {
+              ...current,
+              data: {
+                ...current.data,
+                output,
+                ...(ok === undefined ? {} : { ok }),
+              },
+              modifiedAt: Date.now(),
+            },
+          },
+        },
+        true,
+      );
+    };
     const updateThinking = () => {
       if (thinkingId === null) {
         thinkingId = append(TEXT_KIND, { text: thinkingText }, "thinking", true);
@@ -532,18 +560,47 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               append(TEXT_KIND, { text: replyText }, "assistant");
             }
             resetStreaming();
-          } else if (event.type === "tool") {
+          } else if (event.type === "tool_start") {
             resetStreaming();
-            append(
+            const blockId = append(
               TOOL_KIND,
-              {
-                name: event.name,
-                args: event.args,
-                output: event.output,
-                ok: event.ok,
-              },
+              { name: event.name, args: event.args, output: "", ok: true },
               event.name,
             );
+            toolBlocks.set(event.id, blockId);
+          } else if (event.type === "tool_delta") {
+            // The main process diffs each partial snapshot before sending,
+            // so this is the call's output appended so far; the authoritative
+            // whole still arrives with the closing `tool` event.
+            const blockId = toolBlocks.get(event.id);
+            if (blockId === undefined) return;
+            const current = snapshot.graph.blocks[blockId];
+            if (!current) return; // Deleted mid-stream.
+            const output = typeof current.data.output === "string" ? current.data.output : "";
+            patchTool(blockId, output + event.text);
+          } else if (event.type === "tool") {
+            resetStreaming();
+            const blockId = toolBlocks.get(event.id);
+            if (blockId !== undefined) {
+              toolBlocks.delete(event.id);
+              // Authoritative: whatever the deltas said, this is what the
+              // call finished with.
+              patchTool(blockId, event.output, event.ok);
+            } else {
+              // No `tool_start` preceded this (a call whose start was
+              // skipped, or a remote that never streams), so append the
+              // block whole, as before streaming existed.
+              append(
+                TOOL_KIND,
+                {
+                  name: event.name,
+                  args: event.args,
+                  output: event.output,
+                  ok: event.ok,
+                },
+                event.name,
+              );
+            }
           } else if (event.type === "block") {
             resetStreaming();
             const target = kinds[event.kind];

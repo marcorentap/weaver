@@ -696,9 +696,16 @@ export async function runAgent(
     ctx.onSession?.(() => void session.abort());
 
     // Arguments arrive with the call and the result with its end, so they
-    // are paired by id. A tool block shows what was asked as well as what
-    // came back.
-    const pendingArgs = new Map<string, string>();
+    // are paired by the SDK's `toolCallId`; each entry also carries the
+    // wire id the `tool_start`/`tool_delta`/`tool` events share, a per-run
+    // counter that is unique without depending on anyone's id scheme. A
+    // tool block shows what was asked as well as what came back.
+    const pendingArgs = new Map<string, { id: string; args: string }>();
+    let nextToolId = 0;
+    // The SDK hands a streaming tool a full snapshot of its partial result
+    // on every update, so the last one seen per call is kept here and
+    // `tool_delta` ships only the growth.
+    const partialTexts = new Map<string, string>();
     // Accumulated so `registerInlineMedia` sees a URI as soon as its
     // `![...](file://...)` closes, not only once the whole message is
     // final; the renderer mirrors every delta into the live block, so an
@@ -707,7 +714,16 @@ export async function runAgent(
     let assistantText = "";
     const unsubscribe = session.subscribe((sessionEvent) => {
       if (sessionEvent.type === "tool_execution_start") {
-        pendingArgs.set(sessionEvent.toolCallId, JSON.stringify(sessionEvent.args ?? {}));
+        const entry = {
+          id: String(++nextToolId),
+          args: JSON.stringify(sessionEvent.args ?? {}),
+        };
+        pendingArgs.set(sessionEvent.toolCallId, entry);
+        // A successful `display_media` already emits its own block, so it
+        // opens none here; a failed one still records a `tool` block (see
+        // `tool_execution_end`) without a `tool_start` before it.
+        if (sessionEvent.toolName === displayMedia.name) return;
+        emit({ type: "tool_start", id: entry.id, name: sessionEvent.toolName, args: entry.args });
         return;
       }
       // Token-by-token streaming of the assistant's own words and, where
@@ -741,18 +757,40 @@ export async function runAgent(
         }
         return;
       }
+      // Streaming output from a tool that is still running. Only tools that
+      // update as they run emit these (the built-in bash does, chunk by
+      // chunk); the full, authoritative output still arrives with
+      // `tool_execution_end`.
+      if (sessionEvent.type === "tool_execution_update") {
+        const pending = pendingArgs.get(sessionEvent.toolCallId);
+        if (!pending) return;
+        const current = resultText(sessionEvent.partialResult);
+        const previous = partialTexts.get(sessionEvent.toolCallId) ?? "";
+        if (current.length > previous.length) {
+          partialTexts.set(sessionEvent.toolCallId, current);
+          emit({
+            type: "tool_delta",
+            id: pending.id,
+            text: current.slice(previous.length),
+          });
+        }
+        return;
+      }
       if (sessionEvent.type === "tool_execution_end") {
-        const args = pendingArgs.get(sessionEvent.toolCallId) ?? "";
+        const pending = pendingArgs.get(sessionEvent.toolCallId);
         pendingArgs.delete(sessionEvent.toolCallId);
+        partialTexts.delete(sessionEvent.toolCallId);
         // A successful `display_media` already emitted its block, so
         // recording the call as well would say nothing new. A rejected one
         // has nothing to show, and a silent failure is worse than a
-        // visible one.
+        // visible one; its `tool_start` was skipped, so its wire id is
+        // fresh and the renderer falls back to appending the block.
         if (sessionEvent.toolName === displayMedia.name && !sessionEvent.isError) return;
         emit({
           type: "tool",
+          id: pending?.id ?? String(++nextToolId),
           name: sessionEvent.toolName,
-          args,
+          args: pending?.args ?? "",
           output: resultText(sessionEvent.result),
           ok: !sessionEvent.isError,
         });
