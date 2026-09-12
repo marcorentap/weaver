@@ -168,7 +168,17 @@ function displayValue(def: SettingDef): string {
     case "number":
       return String(def.value);
     case "string":
-      return def.value ? (def.secret ? "•".repeat(8) : def.value) : "";
+      // Secrets mask with dots plus the last four characters, like a stored
+      // key shown for confirmation. A very short secret (4 chars or fewer)
+      // falls back to full masking, since its "last four" would reveal all
+      // of it.
+      return def.value
+        ? def.secret
+          ? def.value.length > 4
+            ? `••••${def.value.slice(-4)}`
+            : "•".repeat(8)
+          : def.value
+        : "";
     case "info":
     case "action":
     case "keys":
