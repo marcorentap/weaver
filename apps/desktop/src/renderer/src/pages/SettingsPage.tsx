@@ -9,6 +9,7 @@ import {
   type LineNumberMode,
   type WordWrapMode,
 } from "@/lib/settings";
+import { usePlugins } from "@/lib/plugins";
 import { useKeyLayer } from "@/lib/keymap";
 import { useViewportBindings } from "@/lib/viewport";
 import { providerUrl } from "@/lib/provider";
@@ -363,59 +364,11 @@ export default function SettingsPage() {
    *  collapsed group in chat (they keep no gutter number and no cursor). */
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
 
-  /** Loaded plugins and their setting values, fetched over IPC so the
-   *  Settings page reflects the plugins actually loaded, not a hardcoded
-   *  set. */
-  const [pluginList, setPluginList] = useState<PluginListResult | null>(null);
-  const [pluginValues, setPluginValues] = useState<
-    Record<string, Record<string, string>>
-  >({});
-
-  useEffect(() => {
-    void (async () => {
-      const result = await window.api.plugins.list();
-      setPluginList(result);
-      const values: Record<string, Record<string, string>> = {};
-      for (const plugin of result.plugins) {
-        const raw = await window.api.settings.get(`weaver.plugins.${plugin.id}`);
-        try {
-          const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-          if (
-            typeof parsed === "object" &&
-            parsed !== null &&
-            !Array.isArray(parsed)
-          ) {
-            values[plugin.id] = Object.fromEntries(
-              Object.entries(parsed).map(([key, value]) => [
-                key,
-                typeof value === "string" || typeof value === "number"
-                  ? String(value)
-                  : "",
-              ]),
-            );
-          }
-        } catch {
-          // Corrupt plugin settings are ignored, same as app settings.
-        }
-        values[plugin.id] ??= {};
-      }
-      setPluginValues(values);
-    })();
-  }, []);
-
-  /** Persist one plugin setting field and update the local copy. */
-  const setPluginField = (
-    pluginId: string,
-    key: string,
-    value: string,
-  ) => {
-    const next = { ...pluginValues[pluginId], [key]: value };
-    setPluginValues({ ...pluginValues, [pluginId]: next });
-    void window.api.settings.set(
-      `weaver.plugins.${pluginId}`,
-      JSON.stringify(next),
-    );
-  };
+  /** Loaded plugins and their saved setting values. Loaded once, at app
+   *  start, into the global plugins store — every Settings pane reads the
+   *  same already-fetched data instead of re-running `plugins:list` plus a
+   *  settings read per plugin on its own mount. */
+  const { plugins: pluginList, values: pluginValues, setValue, setDir } = usePlugins();
 
   /** A plugin setting field becomes one editable row, under the plugin's
    *  own section. */
@@ -438,7 +391,7 @@ export default function SettingsPage() {
         min: field.min,
         max: field.max,
         onChange: (next) =>
-          setPluginField(pluginId, field.key, String(next)),
+          setValue(pluginId, field.key, String(next)),
       };
     }
     if (field.kind === "option") {
@@ -451,7 +404,7 @@ export default function SettingsPage() {
         options: field.options ?? [],
         value,
         editable: field.editable,
-        onChange: (next) => setPluginField(pluginId, field.key, next),
+        onChange: (next) => setValue(pluginId, field.key, next),
       };
     }
     return {
@@ -461,7 +414,7 @@ export default function SettingsPage() {
       description: field.description,
       section,
       value,
-      onChange: (next) => setPluginField(pluginId, field.key, next),
+      onChange: (next) => setValue(pluginId, field.key, next),
       placeholder: field.placeholder,
       secret: field.secret,
     };
@@ -867,10 +820,7 @@ export default function SettingsPage() {
       description: "Directory holding plugin subdirectories.",
       section: "Plugins",
       value: pluginList.dir,
-      onChange: (value) => {
-        void window.api.settings.set("weaver.plugins.dir", value);
-        setPluginList({ ...pluginList, dir: value });
-      },
+      onChange: setDir,
     });
     for (const plugin of pluginList.plugins) {
       for (const field of plugin.settings ?? []) {

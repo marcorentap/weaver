@@ -27,11 +27,12 @@ import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { findScroller, scrollHalfPage, scrollToExtent } from "@/lib/viewport";
 import { useSettings } from "@/lib/settings";
+import { useChatStore } from "@/lib/chat-store";
 import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
 import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
-import { getLiveGraph, dropLiveGraph } from "@/lib/live-graph-registry";
+import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
 import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
 import { MEDIA_KIND, mediaState } from "@/blocks/media";
@@ -565,20 +566,19 @@ function ChatView({
   sessions,
   session,
   initialGraph,
-  refetchSessions,
 }: {
   sessions: ChatSessionSummary[];
   session: { id: string; name: string } | null;
   initialGraph: BlockGraph;
-  /** Re-fetches the sessions list (and the current session's own name)
-   *  after a mutation that changes them in place without navigating, a
-   *  rename. Create/delete already navigate to a different `?session=`,
-   *  which `ChatPage`'s own effect picks up and reloads for on its own, so
-   *  those two never need to call this. */
-  refetchSessions: () => Promise<void>;
 }) {
   const navigate = useNavigate();
   const [, startTransition] = useTransition();
+  const {
+    createChatSession: createSessionMutation,
+    duplicateChatSession: duplicateSessionMutation,
+    renameChatSession: renameSessionMutation,
+    deleteChatSession: deleteSessionMutation,
+  } = useChatStore();
   const [cursor, setCursor] = useState(0);
   /** The chat list root; page-up/page-down measures the rows inside it and
    *  the scroller that holds them (not guessed heights, since rows vary). */
@@ -1337,11 +1337,11 @@ function ChatView({
 
   /** Persists a new session, then switches to it. Mirrors the recent-
    *  sessions `run` below, just against a graph that did not exist yet.
-   *  Navigating to the new `?session=` is what makes `ChatPage` reload the
-   *  sessions list too, so nothing here needs to refetch it directly. */
+   *  The store seeds the new session from the create result, so the pane
+   *  that lands on it mounts against data that is already there. */
   const createSession = async () => {
     setSaving(true);
-    const result = await window.api.chat.createChatSession(newSessionTitle());
+    const result = await createSessionMutation(newSessionTitle());
     setSaving(false);
     if (result.error || !result.id) {
       setError(result.error ?? "failed to create session");
@@ -1353,14 +1353,13 @@ function ChatView({
     navigate(`/chat?session=${encodeURIComponent(result.id)}`);
   };
 
-  /** Forks the open session into a new one and switches to the copy.
-   *  Same task as `createSession` (writing the fork lives in the main
-   *  process), so navigating to the new `?session=` makes `ChatPage` reload
-   *  the sessions list on its own. */
+  /** Forks the open session into a new one and switches to the copy. The
+   *  store lists the copy right away and loads its graph once, single-
+   *  flighted, the first time a pane opens it. */
   const duplicateSession = async () => {
     if (!session) return;
     setSaving(true);
-    const result = await window.api.chat.duplicateChatSession(session.id);
+    const result = await duplicateSessionMutation(session.id);
     setSaving(false);
     if (result.error || !result.id) {
       setError(result.error ?? "failed to duplicate session");
@@ -1373,9 +1372,8 @@ function ChatView({
   };
 
   /** Renames the open session in place. Its id, and so the URL, never
-   *  changes, so nothing navigates. The sessions list (and this session's
-   *  own displayed name) would otherwise go stale, so this refetches it
-   *  directly instead. */
+   *  changes, so nothing navigates. The store updates the list and the
+   *  session's own name, so nothing goes stale. */
   const renameSession = async (name: string) => {
     if (!session) return;
     const trimmed = name.trim();
@@ -1388,14 +1386,13 @@ function ChatView({
       return;
     }
     setSaving(true);
-    const result = await window.api.chat.renameChatSession(session.id, trimmed);
+    const result = await renameSessionMutation(session.id, trimmed);
     setSaving(false);
     if (result.error) {
       setError(result.error);
       return;
     }
     setPopup(null);
-    void refetchSessions();
   };
 
   /**
@@ -1800,30 +1797,27 @@ function ChatView({
               setPopup(null);
               const graphId = session.id;
               // Same fire-and-forget shape as deleting a block, optimistic
-              // enough that there is nothing left to observe once gone.
-              // Drops the cached engine too, so a session id somehow
+              // enough that there is nothing left to observe once gone. The
+              // store drops the cached engine too, so a session id somehow
               // reused later starts clean rather than resuming whatever
               // was last streaming into this one.
-              dropLiveGraph(graphId);
               startTransition(() => {
                 // Deleting leaves nowhere to go: drop the user into a
                 // fresh session instead of the recent-session fallback or
-                // a dead-empty chat page. Same default name as a session
-                // whose pending name was never set.
-                void window.api.chat.deleteChatSession(graphId);
-                void window.api.chat
-                  .createChatSession(newSessionTitle())
-                  .then((result) => {
+                // a dead-empty chat page. The store seeds the replacement
+                // from the create result, so the pane lands on an
+                // already-loaded session.
+                void deleteSessionMutation(graphId).then(() =>
+                  createSessionMutation(newSessionTitle()).then((result) => {
                     if (result.error || !result.id) {
                       navigate("/chat");
                       return;
                     }
-                    // Identical to `createSession`'s landing, so the new
-                    // tab reloads the sessions list on its own too.
                     setCursor(0);
                     setExpanded(new Set());
                     navigate(`/chat?session=${encodeURIComponent(result.id)}`);
-                  });
+                  }),
+                );
               });
             },
           },
@@ -2085,35 +2079,36 @@ function ChatView({
 }
 
 /**
- * Data loading for `/chat`, replacing the old server component's
- * `getStore()` read on the main process's behalf. On mount, and whenever the
- * `?session=` query param changes, loads that session's graph (or the most
- * recent one, absent a param) over IPC. `ChatView` is keyed by session id,
- * same as the original server-rendered page keying its client component,
- * so switching sessions resets `ChatView`'s own local state (cursor,
- * expanded rows, popups) instead of carrying it over into a different
- * graph entirely.
+ * Data loading for `/chat`. The sessions list and per-session seed graphs
+ * live in the global chat store (loaded once at app start, kept current by
+ * the store's own create/rename/delete), so a pane mount here is a share of
+ * that store plus, at most once per session, a singleflight `loadGraph`
+ * round trip that panes of the same session all wait on together. `ChatView`
+ * is keyed by session id, so switching sessions resets `ChatView`'s own
+ * local state (cursor, expanded rows, popups) instead of carrying it over
+ * into a different graph entirely.
  */
 export default function ChatPage() {
   const [searchParams] = useSearchParams();
   const sessionId = searchParams.get("session") ?? undefined;
+  const { hydrated, sessions, ensureSessionGraph } = useChatStore();
   const [result, setResult] = useState<LoadGraphResult | null>(null);
 
-  const load = useCallback(async () => {
-    const next = await window.api.chat.loadGraph(sessionId);
-    setResult(next);
-  }, [sessionId]);
-
   useEffect(() => {
+    let alive = true;
     // This is exactly the "fetch data from an external system on mount"
-    // case effects are for. `setResult` only runs after the IPC round
-    // trip resolves, never synchronously within the effect body, so there
-    // is no cascading-render risk the rule is guarding against.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void load();
-  }, [load]);
+    // case effects are for. `setResult` only runs after the store's
+    // (possibly cached, possibly singleflight) promise resolves, never
+    // synchronously within the effect body.
+    void ensureSessionGraph(sessionId).then((next) => {
+      if (alive) setResult(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [sessionId, ensureSessionGraph]);
 
-  if (!result) {
+  if (!hydrated || !result) {
     return (
       <div className="flex min-h-full flex-col">
         <p className="p-3 text-muted-foreground">Loading…</p>
@@ -2124,10 +2119,9 @@ export default function ChatPage() {
   return (
     <ChatView
       key={result.session?.id ?? "none"}
-      sessions={result.sessions}
+      sessions={sessions}
       session={result.session}
       initialGraph={result.graph}
-      refetchSessions={load}
     />
   );
 }

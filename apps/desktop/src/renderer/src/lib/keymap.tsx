@@ -28,6 +28,14 @@ export type KeyBinding = {
    * declare `chord`, `keys`, or both.
    */
   chord?: readonly [string, string];
+  /**
+   * Keep the chord armed after a hit, so re-pressing the same follower
+   * repeats the action without a fresh leader (`ctrl+w alt+j` then `alt+j`
+   * keeps adding 10px). Chords without it clear after the first hit, so
+   * `ctrl+w h` moves focus once and the leader is gone. Auto-repeat holds
+   * count for exactly one action either way.
+   */
+  repeatable?: boolean;
   /** Listed in the help popup. Omit to keep a binding undocumented. */
   help?: { keys: string; label: string };
   /**
@@ -207,7 +215,9 @@ export function KeymapProvider({
     //    own keydown is what the main process swallows);
     // 2. as the leader of a modified chord (`ctrl+w`), parked until its
     //    plain follower (`v`, `s`, `h`, …) arrives as a normal keydown;
-    // 3. as a plain modified binding (`alt+h` resize, `ctrl+d` page-down).
+    // 3. as a plain modified binding (`ctrl+d` page-down). The `alt+h`
+    //    resizes are chord followers of the parked `ctrl+w` leader, matched
+    //    by their `alt+`-named combo.
     const dispatchModifiedCombo = (combo: string): boolean => {
       // A modified key arriving while a chord is pending resolves that
       // chord's follower (`ctrl+w ctrl+w` = next pane). A DOM keydown for
@@ -262,6 +272,14 @@ export function KeymapProvider({
     function onKeyDown(event: KeyboardEvent) {
       if (isTextEntry(event.target)) return;
 
+      // The bare modifier keypress (the `Alt` of `alt+h`, the `Shift` of
+      // `shift+j`) is never a follower and must not cancel a parked leader:
+      // without this, `ctrl+w` then `alt+h` would resolve/clear the chord
+      // on the `Alt` keydown and the `h` would land against nothing.
+      if (/^(Alt|Control|Meta|Shift|CapsLock|NumLock|Fn|OS|Super)$/i.test(event.key)) {
+        return;
+      }
+
       // This key the way bindings name it: plain keys by their `event.key`,
       // modified ones by their `ctrl+`- / `alt+`-prefixed name. The main
       // process leaves a ctrl/cmd+alt pairing alone, and so does this — an
@@ -273,25 +291,62 @@ export function KeymapProvider({
       });
 
       // A leader that consumed the previous keydown resolves against this
-      // key, hit or miss, matched by the follower's own name (a plain `v`,
-      // or a modified `ctrl+w`). A mistyped chord cancels instead of
-      // falling through to an unrelated single-key binding.
+      // key, hit or miss, matched by the follower's own name (a plain `v`, a
+      // modified `ctrl+w`). The follower names itself with the leader's own
+      // ctrl/cmd stripped — the leader is already held, so the DOM reports
+      // `ctrl+h` for a `ctrl+w` + `h` and a `ctrl+alt+h` pairing for
+      // `ctrl+w` + `alt+h` (which `keyComboName` otherwise refuses). A miss
+      // cancels the chord instead of falling through to an unrelated
+      // single-key binding.
+      //
+      // A HIT on a `repeatable` binding keeps the chord armed: re-pressing
+      // the same follower repeats the action without a fresh leader, so
+      // `ctrl+w alt+j` then `alt+j` `alt+j` keeps adding 10px. Non-repeatable
+      // chords (split, move, close) clear after the first hit. Auto-repeat
+      // keydowns (a held key) are ignored — they neither re-run the binding
+      // nor cancel the chord — so holding a follower produces exactly one
+      // action. Any other key expires the chord.
       if (pendingChord.current) {
         const leader = pendingChord.current;
-        clearChord();
         event.preventDefault();
-        if (event.key !== "Escape" && combo) {
-          forEachReachableLayer((layer) => {
-            const binding = layer.bindings.find(
-              (entry) =>
-                entry.chord?.[0] === leader && entry.chord[1] === combo,
-            );
-            if (!binding) return false;
-            binding.run();
-            return true;
-          });
-        }
         clearCount();
+        if (event.repeat) return;
+        if (event.key === "Escape") {
+          clearChord();
+          return;
+        }
+        const follower = keyComboName(event.key, {
+          ctrl: false,
+          meta: false,
+          alt: event.altKey,
+        });
+        if (!follower) {
+          clearChord();
+          return;
+        }
+        let hit: KeyBinding | undefined;
+        forEachReachableLayer((layer) => {
+          const binding = layer.bindings.find(
+            (entry) =>
+              entry.chord?.[0] === leader && entry.chord[1] === follower,
+          );
+          if (!binding) return false;
+          binding.run();
+          hit = binding;
+          return true;
+        });
+        if (!hit) {
+          clearChord();
+          return;
+        }
+        if (!hit.repeatable) {
+          clearChord();
+          return;
+        }
+        // Keep the leader armed for the next press of this follower, and
+        // rest the expiry timer from this press.
+        clearTimeout(chordTimer.current);
+        chordTimer.current = window.setTimeout(clearChord, 1500);
         return;
       }
 
@@ -312,7 +367,7 @@ export function KeymapProvider({
       // skips counts and digits entirely. `3ctrl+o` is not a thing; an
       // unclaimed browser shortcut must keep working. All modified-key
       // dispatch — a `ctrl+w` leader parked for its follower, a
-      // `ctrl+w ctrl+w` double-leader, `alt+h/j/k/l` resize — lives in
+      // `ctrl+w ctrl+w` double-leader, `ctrl+w` + `alt+h/j/k/l` resize — lives in
       // `dispatchModifiedCombo`, shared with the forwarded Ctrl+W leaders.
       if (event.ctrlKey || event.metaKey || event.altKey) {
         if (!combo) return;

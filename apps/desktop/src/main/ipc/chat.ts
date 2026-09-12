@@ -1,6 +1,12 @@
 import { ipcMain } from "electron";
 import type { Block, BlockGraph, Position } from "@repo/core";
-import { ENV_KIND, insertBlock, moveBlock, removeBlock, WEAVER_PWD } from "@repo/core";
+import {
+  ENV_KIND,
+  insertBlock,
+  moveBlock,
+  removeBlock,
+  WEAVER_PWD,
+} from "@repo/core";
 import { newId, type BlockInput, type Store } from "@repo/store";
 import { getStore } from "../lib/store.js";
 import { schemaMessage } from "../lib/schema-error.js";
@@ -48,7 +54,10 @@ function sessionGraph(store: Store, graphId: string): BlockGraph {
  */
 function ensureSessionRow(store: Store, graphId: string): void {
   if (store.getGraph(graphId)) return;
-  store.createGraphAt(graphId, pendingSessions.get(graphId)?.name ?? newSessionTitle());
+  store.createGraphAt(
+    graphId,
+    pendingSessions.get(graphId)?.name ?? newSessionTitle(),
+  );
 }
 
 /**
@@ -214,8 +223,9 @@ function defaultGraph(): BlockGraph {
  *  or any edit IPC), under the name remembered in `pendingSessions`. */
 function createChatSession(name: string): CreateSessionResult {
   const id = newId();
-  pendingSessions.set(id, { name, graph: defaultGraph() });
-  return { error: null, id };
+  const graph = defaultGraph();
+  pendingSessions.set(id, { name, graph });
+  return { error: null, id, graph };
 }
 
 /**
@@ -230,14 +240,15 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
   const source = store.getGraph(sourceId);
   const name = source ? `${source.name} copy` : newSessionTitle();
   const id = newId();
-  pendingSessions.set(id, { name, graph: defaultGraph() });
+  const graph = defaultGraph();
+  pendingSessions.set(id, { name, graph });
   try {
     const blocks = Object.values(store.loadGraph(sourceId).blocks);
     if (blocks.length === 0) {
       // The source has no content (a pending, never-written session): the
       // copy is just an empty session under its own name, pending until its
       // first block, exactly like `createChatSession`.
-      return { error: null, id };
+      return { error: null, id, graph };
     }
     const remap = new Map(blocks.map((block) => [block.id, newId()]));
     const copied: BlockInput[] = blocks.map((block) => ({
@@ -394,13 +405,19 @@ export function registerChatHandlers(): void {
   ipcMain.handle("chat:loadGraph", (_event, session?: string) =>
     loadGraph(session),
   );
-  ipcMain.handle("chat:deleteChatBlock", (_event, graphId: string, id: string) =>
-    deleteChatBlock(graphId, id),
+  ipcMain.handle(
+    "chat:deleteChatBlock",
+    (_event, graphId: string, id: string) => deleteChatBlock(graphId, id),
   );
   ipcMain.handle(
     "chat:updateBlockField",
-    (_event, graphId: string, blockId: string, name: string, value: string | number) =>
-      updateBlockField(graphId, blockId, name, value),
+    (
+      _event,
+      graphId: string,
+      blockId: string,
+      name: string,
+      value: string | number,
+    ) => updateBlockField(graphId, blockId, name, value),
   );
   ipcMain.handle(
     "chat:updateBlockLabel",
@@ -420,8 +437,9 @@ export function registerChatHandlers(): void {
   ipcMain.handle("chat:createChatSession", (_event, name: string) =>
     createChatSession(name),
   );
-  ipcMain.handle("chat:renameChatSession", (_event, graphId: string, name: string) =>
-    renameChatSession(graphId, name),
+  ipcMain.handle(
+    "chat:renameChatSession",
+    (_event, graphId: string, name: string) => renameChatSession(graphId, name),
   );
   ipcMain.handle("chat:duplicateChatSession", (_event, graphId: string) =>
     duplicateChatSession(graphId),
@@ -429,7 +447,9 @@ export function registerChatHandlers(): void {
   ipcMain.handle("chat:deleteChatSession", (_event, graphId: string) =>
     deleteChatSession(graphId),
   );
-  ipcMain.handle("chat:saveGraph", (_event, graphId: string, blocks: BlockInput[]) =>
-    saveGraph(graphId, blocks),
+  ipcMain.handle(
+    "chat:saveGraph",
+    (_event, graphId: string, blocks: BlockInput[]) =>
+      saveGraph(graphId, blocks),
   );
 }

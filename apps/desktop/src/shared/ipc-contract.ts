@@ -45,6 +45,10 @@ export interface MutationResult {
 
 export interface CreateSessionResult extends MutationResult {
   id: string | null;
+  /** The brand-new session's graph, as minted by the main process (the
+   *  default `environment` block). Returned with the create so the renderer
+   *  can seed a pane instantly without a follow-up `loadGraph` round trip. */
+  graph?: BlockGraph;
 }
 
 export interface CheckResult {
@@ -160,7 +164,10 @@ export interface WeaverApi {
     check(endpoint: string, apiKey: string): Promise<CheckResult>;
     /** Per-key usage and credit limit from OpenRouter's `GET /key`. Only
      *  meaningful when `endpoint` points at OpenRouter. */
-    providerUsage(endpoint: string, apiKey: string): Promise<ProviderUsageResult>;
+    providerUsage(
+      endpoint: string,
+      apiKey: string,
+    ): Promise<ProviderUsageResult>;
     /** Starts a run and subscribes `onEvent` to its events. Returns a
      *  `cancel` function that aborts the run and unsubscribes; also
      *  unsubscribes itself once a terminal (`done`/`error`) event arrives. */

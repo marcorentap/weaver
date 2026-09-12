@@ -9,7 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
-import { SettingsProvider } from "@/lib/settings";
+import { useChatStore } from "@/lib/chat-store";
 import { newSessionTitle } from "@shared/session-title.js";
 import {
   HELP_KEY,
@@ -61,6 +61,9 @@ function chatHref(id: string): string {
   return `/chat?session=${encodeURIComponent(id)}`;
 }
 
+/** How many pixels one `ctrl+w` + `alt+h/j/k/l` press moves a divider. */
+const PANE_RESIZE_PX = 10;
+
 /**
  * Normal mode stays the bottom of the keymap stack, live everywhere. Page
  * layers stack on top of it, so tab switching keeps working inside a page's
@@ -99,7 +102,7 @@ function NormalMode({
 
 /**
  * The pane layer: every tab's panes are steered from the same layer, all on
- * the `ctrl+w` leader (plus `alt+h/j/k/l` for resizing). The layout owns the
+ * the `ctrl+w` leader (`ctrl+w` + `alt+h/j/k/l` resizes). The layout owns the
  * panes, so the shortcuts always hit the active tab's active pane.
  */
 function PaneMode({
@@ -110,7 +113,7 @@ function PaneMode({
 }: {
   onSplit: (dir: "row" | "column") => void;
   onMove: (dir: "h" | "j" | "k" | "l" | "next") => void;
-  onResize: (axis: "row" | "column", sign: 1 | -1) => void;
+  onResize: (dir: "h" | "j" | "k" | "l") => void;
   onClosePane: () => void;
 }) {
   useKeyLayer({
@@ -157,24 +160,28 @@ function PaneMode({
         run: onClosePane,
       },
       {
-        keys: ["alt+h"],
-        help: { keys: "alt+h", label: "Shrink width" },
-        run: () => onResize("row", -1),
+        chord: ["ctrl+w", "alt+h"],
+        repeatable: true, // alt+h again keeps resizing
+        help: { keys: "ctrl+w alt+h", label: "Resize left" },
+        run: () => onResize("h"),
       },
       {
-        keys: ["alt+l"],
-        help: { keys: "alt+l", label: "Grow width" },
-        run: () => onResize("row", 1),
+        chord: ["ctrl+w", "alt+l"],
+        repeatable: true,
+        help: { keys: "ctrl+w alt+l", label: "Resize right" },
+        run: () => onResize("l"),
       },
       {
-        keys: ["alt+j"],
-        help: { keys: "alt+j", label: "Shrink height" },
-        run: () => onResize("column", -1),
+        chord: ["ctrl+w", "alt+j"],
+        repeatable: true,
+        help: { keys: "ctrl+w alt+j", label: "Resize down" },
+        run: () => onResize("j"),
       },
       {
-        keys: ["alt+k"],
-        help: { keys: "alt+k", label: "Grow height" },
-        run: () => onResize("column", 1),
+        chord: ["ctrl+w", "alt+k"],
+        repeatable: true,
+        help: { keys: "ctrl+w alt+k", label: "Resize up" },
+        run: () => onResize("k"),
       },
     ],
   });
@@ -295,7 +302,8 @@ function PaneSlot({
   // After that the pane's own router is authoritative: an in-pane navigation
   // is recorded back through onRecord.
   useEffect(() => {
-    const current = router.state.location.pathname + router.state.location.search;
+    const current =
+      router.state.location.pathname + router.state.location.search;
     if (current !== pane.to) {
       router.navigate(pane.to, { replace: true });
     }
@@ -307,7 +315,8 @@ function PaneSlot({
     return router.subscribe((state) => {
       const to = state.location.pathname + state.location.search;
       const pageId = pageIdForPath(state.location.pathname);
-      if (pageId !== pane.pageId || to !== pane.to) onRecord(pane.id, pageId, to);
+      if (pageId !== pane.pageId || to !== pane.to)
+        onRecord(pane.id, pageId, to);
     });
   }, [router, pane.id, pane.pageId, pane.to, onRecord]);
 
@@ -353,12 +362,15 @@ const startupPaneId = STARTUP_LAYOUT.tabs[0]!.activePaneId;
 
 export function AppShell() {
   const [layout, dispatch] = useReducer(reduceLayout, STARTUP_LAYOUT);
+  const { createChatSession } = useChatStore();
   const [pickerOpen, setPickerOpen] = useState(false);
   /** Whether the rename-tab dialog is up, over the popup layer. */
   const [renaming, setRenaming] = useState(false);
   /** Every live pane's router, keyed by pane id, so the shell can navigate a
    *  pane from outside of it. */
   const routers = useRef(new Map<string, PaneRouter>());
+  /** The pane area, measured so resize deltas are exact pixels. */
+  const paneAreaRef = useRef<HTMLDivElement | null>(null);
 
   const activeTab =
     layout.tabs.find((tab) => tab.id === layout.activeTabId) ?? layout.tabs[0];
@@ -366,29 +378,37 @@ export function AppShell() {
    *  the keymap's scoped dispatch and the pane pool's `focused` ring. */
   const focusedPaneId = activeTab ? activeTab.activePaneId : null;
 
-  // The startup tab is a fresh chat: create a session the shell has never
-  // shown and aim the startup pane at it, so boot is a brand-new session
-  // rather than the most recently modified one. The claim only sticks while
-  // the pane still sits on the untouched chat home page (the reducer guards
-  // that), so a failed session creation leaves a usable chat tab.
+  // The startup tab is a fresh chat: create a session (seeded by the global
+  // chat store, so no per-pane load) and aim the startup pane at it, so
+  // boot is a brand-new session rather than the most recently modified one.
+  // The claim only sticks while the pane still sits on the untouched chat
+  // home page (the reducer guards that), so a failed session creation leaves
+  // a usable chat tab.
   useEffect(() => {
     let cancelled = false;
-    void window.api.chat.createChatSession(newSessionTitle()).then((result) => {
+    void createChatSession(newSessionTitle()).then((result) => {
       if (cancelled || result.error || !result.id) return;
-      dispatch({ type: "retarget-pane", paneId: startupPaneId, to: chatHref(result.id) });
+      dispatch({
+        type: "retarget-pane",
+        paneId: startupPaneId,
+        to: chatHref(result.id),
+      });
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [createChatSession]);
 
   /** Aim `paneId` at a brand-new empty chat session once it exists. */
-  const aimPaneAtFreshChat = useCallback((paneId: string) => {
-    void window.api.chat.createChatSession(newSessionTitle()).then((result) => {
-      if (result.error || !result.id) return;
-      dispatch({ type: "retarget-pane", paneId, to: chatHref(result.id) });
-    });
-  }, []);
+  const aimPaneAtFreshChat = useCallback(
+    (paneId: string) => {
+      void createChatSession(newSessionTitle()).then((result) => {
+        if (result.error || !result.id) return;
+        dispatch({ type: "retarget-pane", paneId, to: chatHref(result.id) });
+      });
+    },
+    [createChatSession],
+  );
 
   /** The pane registry: register/deregister a pane's router. */
   const registerRouter = useCallback(
@@ -430,7 +450,8 @@ export function AppShell() {
         layout.tabs.findIndex((tab) => tab.id === layout.activeTabId),
         0,
       );
-      const next = layout.tabs[(index + delta + layout.tabs.length) % layout.tabs.length]!;
+      const next =
+        layout.tabs[(index + delta + layout.tabs.length) % layout.tabs.length]!;
       activateTab(next.id);
     },
     [layout.tabs, layout.activeTabId, activateTab],
@@ -475,20 +496,22 @@ export function AppShell() {
   );
 
   /** `ctrl+w h/j/k/l` (and `ctrl+w ctrl+w`): move pane focus. */
-  const movePane = useCallback(
-    (dir: "h" | "j" | "k" | "l" | "next") => {
-      dispatch({ type: "move-focus", dir });
-    },
-    [],
-  );
+  const movePane = useCallback((dir: "h" | "j" | "k" | "l" | "next") => {
+    dispatch({ type: "move-focus", dir });
+  }, []);
 
-  /** `alt+h/j/k/l`: resize the active pane along that axis. */
-  const resizePane = useCallback(
-    (axis: "row" | "column", sign: 1 | -1) => {
-      dispatch({ type: "resize-pane", axis, sign });
-    },
-    [],
-  );
+  /** `ctrl+w` + `alt+h/j/k/l`: nudge the active pane's divider 10px in the
+   *  pressed direction — whether the pane grows or shrinks depends on where
+   *  it sits, which the reducer decides. The pane area's measured extent
+   *  turns the pixel amount into the share change. */
+  const resizePane = useCallback((dir: "h" | "j" | "k" | "l") => {
+    const area = paneAreaRef.current;
+    if (!area) return;
+    const axis = dir === "h" || dir === "l" ? "row" : "column";
+    const size = axis === "row" ? area.clientWidth : area.clientHeight;
+    if (size <= 0) return;
+    dispatch({ type: "resize-pane", dir, delta: PANE_RESIZE_PX, size });
+  }, []);
 
   /** `ctrl+w q`: close the active pane, focusing the tree's first survivor.
    *  A tab's last pane closing is the tab closing (like `d` in the popup). */
@@ -547,86 +570,87 @@ export function AppShell() {
 
   return (
     <KeymapProvider activePaneId={focusedPaneId}>
-      <SettingsProvider>
-        <PaneMode
-          onSplit={splitPane}
-          onMove={movePane}
-          onResize={resizePane}
-          onClosePane={closePane}
-        />
-        <NormalMode onOpenTabs={() => setPickerOpen(true)} onSwitch={switchTab} />
+      <PaneMode
+        onSplit={splitPane}
+        onMove={movePane}
+        onResize={resizePane}
+        onClosePane={closePane}
+      />
+      <NormalMode onOpenTabs={() => setPickerOpen(true)} onSwitch={switchTab} />
 
-        {/* The pane area: every tab's panes stay mounted, keyed by pane id,
+      {/* The pane area: every tab's panes stay mounted, keyed by pane id,
             exactly one instance per pane for its whole life; hidden tabs
             merely lie `display:none`, so a tab switch never costs a session
             reload and a split never reshuffles live pages. Geometry (which
             pane sits where) comes from the tab's pane tree; each pane's
             `PaneSlot` is positioned absolutely by its rect. */}
-        <div className="relative min-h-0 flex-1 overflow-hidden">
-          {layout.tabs.map((tab) => {
-            const rects = paneGeometry(tab.root);
-            const visible = tab.id === layout.activeTabId;
-            return (
-              <div
-                key={tab.id}
-                className={cn(visible ? "absolute inset-0" : "hidden")}
-              >
-                {orderedPanes(tab.root).map((pane) => {
-                  const rect = rects.get(pane.id);
-                  if (!rect) return null;
-                  const focused = visible && pane.id === focusedPaneId;
-                  return (
-                    <PaneSlot
-                      key={pane.id}
-                      pane={pane}
-                      rect={rect}
-                      focused={focused}
-                      onFocus={() =>
-                        dispatch({ type: "focus-pane", paneId: pane.id })
-                      }
-                      onRecord={onPaneRecord}
-                      registerRouter={registerRouter}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
-        </div>
+      <div
+        ref={paneAreaRef}
+        className="relative min-h-0 flex-1 overflow-hidden"
+      >
+        {layout.tabs.map((tab) => {
+          const rects = paneGeometry(tab.root);
+          const visible = tab.id === layout.activeTabId;
+          return (
+            <div
+              key={tab.id}
+              className={cn(visible ? "absolute inset-0" : "hidden")}
+            >
+              {orderedPanes(tab.root).map((pane) => {
+                const rect = rects.get(pane.id);
+                if (!rect) return null;
+                const focused = visible && pane.id === focusedPaneId;
+                return (
+                  <PaneSlot
+                    key={pane.id}
+                    pane={pane}
+                    rect={rect}
+                    focused={focused}
+                    onFocus={() =>
+                      dispatch({ type: "focus-pane", paneId: pane.id })
+                    }
+                    onRecord={onPaneRecord}
+                    registerRouter={registerRouter}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
 
-        <TabBar layout={layout} onActivate={activateTab} />
-        {pickerOpen ? (
-          <KeyMenu
-            id="tabs"
-            title="Tabs"
-            meta={activeTab ? tabLabelOf(activeTab) : undefined}
-            items={pickerItems}
-            hint="NUM — switch to a tab"
-            onClose={() => setPickerOpen(false)}
-          />
-        ) : null}
-        {pickerOpen ? (
-          <TabNumbers count={layout.tabs.length} onPick={switchToNumber} />
-        ) : null}
-        {renaming && activeTab ? (
-          <FieldEditor
-            id="rename-tab"
-            title={`Rename ${tabLabelOf(activeTab)}`}
-            field={{
-              name: "label",
-              label: "tab label",
-              value: tabLabelOf(activeTab),
-            }}
-            error={null}
-            saving={false}
-            onSubmit={(value) => {
-              setRenaming(false);
-              renameTab(value);
-            }}
-            onCancel={() => setRenaming(false)}
-          />
-        ) : null}
-      </SettingsProvider>
+      <TabBar layout={layout} onActivate={activateTab} />
+      {pickerOpen ? (
+        <KeyMenu
+          id="tabs"
+          title="Tabs"
+          meta={activeTab ? tabLabelOf(activeTab) : undefined}
+          items={pickerItems}
+          hint="NUM — switch to a tab"
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
+      {pickerOpen ? (
+        <TabNumbers count={layout.tabs.length} onPick={switchToNumber} />
+      ) : null}
+      {renaming && activeTab ? (
+        <FieldEditor
+          id="rename-tab"
+          title={`Rename ${tabLabelOf(activeTab)}`}
+          field={{
+            name: "label",
+            label: "tab label",
+            value: tabLabelOf(activeTab),
+          }}
+          error={null}
+          saving={false}
+          onSubmit={(value) => {
+            setRenaming(false);
+            renameTab(value);
+          }}
+          onCancel={() => setRenaming(false)}
+        />
+      ) : null}
     </KeymapProvider>
   );
 }

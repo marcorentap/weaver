@@ -27,7 +27,8 @@ export type Pane = { id: PaneId; pageId: string; to: string };
  * A tab's pane tree. Leaves are panes; splits hold two or more children
  * along one axis (`row` = side-by-side across a vertical dividing line,
  * vim's vertical split; `column` = stacked, vim's horizontal split).
- * `weights` are each child's share of the split, nudged by `alt+h/j/k/l`.
+ * `weights` are each child's share of the split, resized by `ctrl+w` +
+ * `alt+h/j/k/l`. Each press moves the divider by a fixed pixel amount.
  * The tree is pure geometry and identity — real page state lives outside it,
  * keyed by pane id, so reshaping the tree never has to remount a page.
  */
@@ -204,16 +205,28 @@ export function removeLeaf(node: PaneNode, paneId: PaneId): PaneNode | null {
 }
 
 /**
- * `alt+h/j/k/l` resize: shift the active pane's share inside the nearest
- * split along that axis (`row` for h/l, `column` for j/k) one step in
- * `sign`. The weights stay relative, so it can never overshoot a sibling.
+ * `ctrl+w` + `alt+h/j/k/l` resize: push the divider in the nearest split
+ * along `dir`'s axis (`row` for h/l, `column` for j/k) `deltaPx` pixels in
+ * that key's direction, against the area's `sizePx` extent. Whether the
+ * active pane grows or shrinks is decided by where it sits, not by which
+ * key was pressed: with a neighbour in the pressed direction the pane grows
+ * into it (a top pane pressing `j` expands); pressed against an outer wall
+ * it shrinks instead (a bottom pane pressing `j` collapses, its far divider
+ * moving the same way). `paneGeometry` sizes every child as a share of the
+ * full area, so a `deltaPx` divider move is a `deltaPx / sizePx` share
+ * change. Only the active child's weight changes; siblings keep their
+ * weights relative to one another.
  */
 export function resizeWeights(
   node: PaneNode,
   paneId: PaneId,
-  axis: "row" | "column",
-  sign: 1 | -1,
+  dir: "h" | "j" | "k" | "l",
+  deltaPx: number,
+  sizePx: number,
 ): PaneNode {
+  if (sizePx <= 0) return node;
+  const axis = dir === "h" || dir === "l" ? "row" : "column";
+  const forward = dir === "l" || dir === "j";
   let done = false;
   const walkDown = (n: PaneNode): PaneNode => {
     if (n.kind === "leaf") return n;
@@ -223,11 +236,22 @@ export function resizeWeights(
     if (n.dir === axis && !done) {
       const index = children.findIndex((child) => containsPane(child, paneId));
       if (index >= 0) {
+        const last = children.length - 1;
+        // Push toward `dir`: a neighbour on that side means the pane grows
+        // into it; at the outer wall the pane shrinks (its far divider
+        // moves in the same direction). Both move the divider by `deltaPx`.
+        const sign = forward ? (index < last ? 1 : -1) : index > 0 ? 1 : -1;
         const weights = [...n.weights];
-        weights[index] = Math.max((weights[index] ?? 1) + sign, 0.05);
-        const sum = weights.reduce((a, b) => a + b, 0);
+        const weight = weights[index] ?? 1;
+        const share = weight / weights.reduce((a, b) => a + b, 0);
+        const nextShare = Math.min(
+          Math.max(share + (sign * deltaPx) / sizePx, 0.05),
+          0.95,
+        );
+        const rest = weights.reduce((a, b) => a + b, 0) - weight;
+        weights[index] = (nextShare * rest) / (1 - nextShare);
         done = true;
-        return { ...n, children, weights: weights.map((w) => w / sum) };
+        return { ...n, children, weights };
       }
     }
     return { ...n, children };
@@ -328,7 +352,10 @@ export type ShellAction =
   /** Close the active tab pane (pane focus included). */
   | { type: "close-pane" }
   | { type: "move-focus"; dir: "h" | "j" | "k" | "l" | "next" }
-  | { type: "resize-pane"; axis: "row" | "column"; sign: 1 | -1 }
+  /** `ctrl+w` + `alt+h/j/k/l`: nudge the active pane's divider `delta`
+   *  pixels in `dir`'s direction, `size` being the pane area's measured
+   *  extent along that axis. Which pane grows follows where it sits. */
+  | { type: "resize-pane"; dir: "h" | "j" | "k" | "l"; delta: number; size: number }
   /** A pane's router landed somewhere brand-new; keep the tab's record in
    *  step (drives the tab label). */
   | { type: "record-pane"; paneId: PaneId; pageId: string; to: string }
@@ -469,7 +496,13 @@ export function reduceLayout(layout: Layout, action: ShellAction): Layout {
     case "resize-pane": {
       const active = activeTabOf(layout);
       if (!active) return layout;
-      const root = resizeWeights(active.root, active.activePaneId, action.axis, action.sign);
+      const root = resizeWeights(
+        active.root,
+        active.activePaneId,
+        action.dir,
+        action.delta,
+        action.size,
+      );
       return mapTab(layout, active.id, (tab) => ({ ...tab, root }));
     }
 
