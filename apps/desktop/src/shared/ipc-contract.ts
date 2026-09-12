@@ -173,6 +173,16 @@ export interface WeaverApi {
     /** The configured plugin directory and every loaded plugin. */
     list(): Promise<PluginListResult>;
   };
+  keymap: {
+    /** A leader key the page's own keydown will never see because the main
+     *  process swallows it (so a menu accelerator or browser default can't
+     *  fire first — Ctrl+W closing the window), forwarded here instead to be
+     *  folded into the keymap's pending-chord state like a real keydown.
+     *  Which keys are swallowed and what they're called is the single shared
+     *  source in `keys.ts` (`SWALLOWED_KEYS`), so the two sides can't drift.
+     *  Returns an unsubscribe. */
+    onChordLeader(cb: (leader: string) => void): () => void;
+  };
   remote: {
     /** Does the connection to the configured instance actually work, and
      *  which role does the given key have there? */

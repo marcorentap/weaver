@@ -14,6 +14,7 @@ import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
 import { registerRemoteHandlers, startServerFromStoredSettings } from "./ipc/remote.js";
 import { ensurePluginsLoaded } from "./lib/plugins.js";
+import { CHORD_LEADER_CHANNEL, swallowedCombo } from "../shared/keys.js";
 
 // setName() only sets the display name now. WM_CLASS/app_id comes from
 // setDesktopName(), which must match the installed .desktop filename
@@ -121,23 +122,26 @@ function createWindow(): BrowserWindow {
     return { action: "deny" };
   });
 
-  // Ctrl+W is the default "Close" menu role and would silently kill the
-  // whole app mid-session, so swallow it before it reaches the menu. Unlike
-  // `installApplicationMenu`'s Ctrl+R handling, this key is owned by nobody
-  // in the renderer, so killing both the menu shortcut and the page keydown
-  // is exactly what we want. (before-input-event.preventDefault stops both.)
-  // The window still closes via the OS title bar / Alt+F4.
+  // Some keys must never reach the page's own keydown: the default Close
+  // accelerator (Ctrl+W) would silently kill the whole app mid-session, so
+  // it is swallowed before it hits the menu. But it is also the pane/chord
+  // leader the keymap binds, so the swallowed keystroke is forwarded to the
+  // page, where it feeds the pending-chord state exactly as a DOM keydown
+  // would.
+  //
+  // Which keys are swallowed, what they are called, and the channel they go
+  // out on all live in `shared/keys.ts` — the one place both processes agree.
+  // The interceptor here is a pure funnel: for every key in `SWALLOWED_KEYS`
+  // it preventDefaults and forwards in the same stroke, so a swallowed key
+  // can never silently fail to reach the keymap. Adding a new one is one
+  // entry in that file, with no copy of the logic here. The window still
+  // closes via the OS title bar / Alt+F4 / Quit.
   win.webContents.on("before-input-event", (event, input) => {
-    if (
-      input.type === "keyDown" &&
-      input.control &&
-      !input.alt &&
-      !input.shift &&
-      !input.meta &&
-      input.key.toLowerCase() === "w"
-    ) {
-      event.preventDefault();
-    }
+    if (input.type !== "keyDown") return;
+    const combo = swallowedCombo(input);
+    if (!combo) return;
+    event.preventDefault();
+    win.webContents.send(CHORD_LEADER_CHANNEL, combo);
   });
 
   if (isDev && process.env["ELECTRON_RENDERER_URL"]) {

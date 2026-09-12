@@ -20,6 +20,7 @@ import type {
   RemoteInstanceStatus,
   RemoteKeySummary,
 } from "../shared/remote.js";
+import { CHORD_LEADER_CHANNEL } from "../shared/keys.js";
 import type { BlockInput } from "@repo/store";
 import type { Position } from "@repo/core";
 
@@ -78,6 +79,14 @@ const api: WeaverApi = {
   plugins: {
     list: () =>
       ipcRenderer.invoke("plugins:list") as Promise<PluginListResult>,
+  },
+  keymap: {
+    onChordLeader: (cb) => {
+      const listener = (_event: Electron.IpcRendererEvent, leader: string) =>
+        cb(leader);
+      ipcRenderer.on(CHORD_LEADER_CHANNEL, listener);
+      return () => ipcRenderer.removeListener(CHORD_LEADER_CHANNEL, listener);
+    },
   },
   agent: {
     check: (endpoint, apiKey) =>

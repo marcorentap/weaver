@@ -1,24 +1,9 @@
-import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "@/components/app-shell";
-import ChatPage from "@/pages/ChatPage";
-import SettingsPage from "@/pages/SettingsPage";
-import ResourcesPage from "@/pages/ResourcesPage";
 
-// No server, so path-based routing needs no server-side rewrite support.
-// `HashRouter` works from a `file://`-loaded `index.html` in a packaged
-// Electron app, unlike `BrowserRouter`, which needs a server (or dev
-// middleware) to answer every path with the same document.
+// There is no single URL to route anymore: each tab owns a tree of panes,
+// and each pane mounts the app's pages in its own in-memory router (see
+// `lib/routes.ts` and `components/app-shell.tsx`), so a pane keeps its
+// session and history even while hidden behind a tab switch.
 export default function App() {
-  return (
-    <HashRouter>
-      <AppShell>
-        <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="/chat" element={<ChatPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/resources" element={<ResourcesPage />} />
-        </Routes>
-      </AppShell>
-    </HashRouter>
-  );
+  return <AppShell />;
 }

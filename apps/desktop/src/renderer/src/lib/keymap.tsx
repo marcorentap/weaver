@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { KeyHelp } from "@/components/key-help";
+import { keyComboName } from "@shared/keys.js";
 
 /**
  * Modal keyboard navigation. The UI is a stack of key layers, in the vim sense
@@ -26,8 +27,12 @@ export type KeyBinding = {
    */
   keys?: string[];
   /**
-   * A two-key sequence, `["Tab", "1"]` waiting for `Tab` then `1`, instead of
-   * a single key. A binding may declare `chord`, `keys`, or both.
+   * A two-key sequence, `["Tab", "1"]` waiting for `Tab` then `1`, or
+   * `["ctrl+w", "v"]` waiting for the modified key then a plain `v`, instead
+   * of a single key. Both elements are named like a single binding: plain
+   * keys by `event.key`, modified ones by their `ctrl+`- / `alt+`-prefixed
+   * name, so `ctrl+w ctrl+w` is a valid second element too. A binding may
+   * declare `chord`, `keys`, or both.
    */
   chord?: readonly [string, string];
   /** Listed in the help popup. Omit to keep a binding undocumented. */
@@ -146,37 +151,102 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       return undefined;
     }
 
+    // Modified-key dispatch, shared by the DOM keydown handler and the
+    // forwarded leaders (Ctrl+W, swallowed in the main process so the default
+    // Close accelerator can't kill the window, then sent here over IPC). A
+    // modified key lands in one of three places, in this order:
+    //
+    // 1. as the follower of a pending chord (`ctrl+w ctrl+w` = next pane —
+    //    a second modified leader only ever arrives this way; the page's own
+    //    keydown is what the main process swallows);
+    // 2. as the leader of a modified chord (`ctrl+w`), parked until its plain
+    //    follower (`v`, `s`, `h`, …) arrives as a normal keydown;
+    // 3. as a plain modified binding (`alt+h` resize, `ctrl+d` page-down).
+    const dispatchModifiedCombo = (combo: string): boolean => {
+      // A modified key arriving while a chord is pending resolves that
+      // chord's follower (`ctrl+w ctrl+w` = next pane). A DOM keydown for
+      // the only relevant modified leader (Ctrl+W) never reaches this
+      // branch — the page doesn't see it at all — so `ctrl+w ctrl+w`
+      // resolves here via the forwarded IPC event.
+      if (pendingChord.current) {
+        const leader = pendingChord.current;
+        clearChord();
+        let handled = false;
+        if (combo !== "Escape") {
+          forEachReachableLayer((layer) => {
+            const binding = layer.bindings.find(
+              (entry) =>
+                entry.chord?.[0] === leader && entry.chord[1] === combo,
+            );
+            if (!binding) return false;
+            binding.run();
+            handled = true;
+            return true;
+          });
+        }
+        clearCount();
+        return handled;
+      }
+      let leads = false;
+      forEachReachableLayer((layer) => {
+        if (!layer.bindings.some((entry) => entry.chord?.[0] === combo))
+          return false;
+        leads = true;
+        return true;
+      });
+      if (leads) {
+        pendingChord.current = combo;
+        clearTimeout(chordTimer.current);
+        chordTimer.current = window.setTimeout(clearChord, 1500);
+        return true;
+      }
+      let handled = false;
+      forEachReachableLayer((layer) => {
+        const binding = layer.bindings.find((entry) =>
+          entry.keys?.includes(combo),
+        );
+        if (!binding) return false;
+        binding.run();
+        handled = true;
+        return true;
+      });
+      return handled;
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (isTextEntry(event.target)) return;
 
-      // A modified key reaches only bindings that asked for it by name, and
-      // skips counts, chords and help entirely. `3ctrl+o` is not a thing,
-      // and an unclaimed browser shortcut must keep working.
-      if (event.ctrlKey || event.metaKey) {
-        if (event.altKey) return;
-        const combo = `ctrl+${event.key.toLowerCase()}`;
-        forEachReachableLayer((layer) => {
-          const binding = layer.bindings.find((entry) =>
-            entry.keys?.includes(combo),
-          );
-          if (!binding) return false;
-          event.preventDefault();
-          binding.run();
-          return true;
-        });
-        return;
-      }
-      if (event.altKey) {
-        const combo = `alt+${event.key.toLowerCase()}`;
-        forEachReachableLayer((layer) => {
-          const binding = layer.bindings.find((entry) =>
-            entry.keys?.includes(combo),
-          );
-          if (!binding) return false;
-          event.preventDefault();
-          binding.run();
-          return true;
-        });
+      // This key the way bindings name it, via the shared `keys.ts` recipe
+      // the main process uses for the keys it swallows: plain keys by their
+      // `event.key`, modified ones by their `ctrl+`- / `alt+`-prefixed name.
+      // The main process leaves a ctrl/cmd+alt pairing alone, and so does
+      // this — an unclaimed browser shortcut keeps working.
+      const combo = keyComboName(event.key, {
+        ctrl: event.ctrlKey,
+        meta: event.metaKey,
+        alt: event.altKey,
+      });
+
+      // A leader that consumed the previous keydown resolves against non-
+      // exactly this key, hit or miss, matched by the follower's own name
+      // (a plain `v`, or a modified `ctrl+w`). A mistyped chord cancels
+      // instead of falling through to an unrelated single-key binding.
+      if (pendingChord.current) {
+        const leader = pendingChord.current;
+        clearChord();
+        event.preventDefault();
+        if (event.key !== "Escape" && combo) {
+          forEachReachableLayer((layer) => {
+            const binding = layer.bindings.find(
+              (entry) =>
+                entry.chord?.[0] === leader && entry.chord[1] === combo,
+            );
+            if (!binding) return false;
+            binding.run();
+            return true;
+          });
+        }
+        clearCount();
         return;
       }
 
@@ -193,25 +263,15 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // A pending leader (e.g. `Tab`) resolves against exactly this key, hit
-      // or miss. A mistyped chord cancels instead of falling through to an
-      // unrelated single-key binding.
-      if (pendingChord.current) {
-        const leader = pendingChord.current;
-        clearChord();
-        event.preventDefault();
-        if (event.key !== "Escape") {
-          forEachReachableLayer((layer) => {
-            const binding = layer.bindings.find(
-              (entry) =>
-                entry.chord?.[0] === leader && entry.chord[1] === event.key,
-            );
-            if (!binding) return false;
-            binding.run();
-            return true;
-          });
-        }
-        clearCount();
+      // A modified key reaches only bindings that asked for it by name, and
+      // skips counts and digits entirely. `3ctrl+o` is not a thing; an
+      // unclaimed browser shortcut must keep working. All modified-key
+      // dispatch — a `ctrl+w` leader parked for its follower, a
+      // `ctrl+w ctrl+w` double-leader, `alt+h/j/k/l` resize — lives in
+      // `dispatchModifiedCombo`, shared with the forwarded Ctrl+W leaders.
+      if (event.ctrlKey || event.metaKey || event.altKey) {
+        if (!combo) return;
+        if (dispatchModifiedCombo(combo)) event.preventDefault();
         return;
       }
 
@@ -267,8 +327,34 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       if (!handled) clearCount();
     }
 
+    // Ctrl+W and friends never reach the page's keydown — the main process
+    // swallows them (so the default Close accelerator can't kill the window)
+    // and forwards them here, keyed by the same `SWALLOWED_KEYS` table in
+    // shared/keys.ts. Feed each through the same modified-key dispatch, with
+    // the same guards as the keydown path (help open, or focus in a text
+    // field, swallows it), so a leader can never arm a chord under a modal
+    // or while typing.
+    const removeForwardedKeys = window.api.keymap.onChordLeader((combo) => {
+      if (helpOpen) return;
+      if (isTextEntry(document.activeElement)) return;
+      const handled = dispatchModifiedCombo(combo);
+      // A swallowed key that no reachable layer bound the old design would
+      // have suffered silently: the main process eats the key AND the keymap
+      // has nothing to do with it, so the press just vanishes. Make it loud —
+      // either SWALLOWED_KEYS was added without a binding, the binding's
+      // layer unmounted, or a modal is standing in the way.
+      if (!handled) {
+        console.warn(
+          `[keymap] swallowed key "${combo}" reached the page but no reachable layer binds it — check SWALLOWED_KEYS in shared/keys.ts`,
+        );
+      }
+    });
+
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      removeForwardedKeys();
+      window.removeEventListener("keydown", onKeyDown);
+    };
   }, [stack, layers, helpOpen]);
 
   const toggleHelp = useCallback(() => setHelpOpen((open) => !open), []);
