@@ -172,22 +172,41 @@ function messageThinking(message: unknown): string {
     .join("\n\n");
 }
 
+/** The finish reasons that count as a normal end of a turn. Anything a
+ *  `message_end` reports outside this set is a failure and gets surfaced as
+ *  an error block instead of silently closing the turn. This matches the
+ *  SDK's own `done` event (`stop | length | toolUse | deferred`); the
+ *  providers weaver mounts already fold unrecognized `finish_reason`s
+ *  (`content_filter`, `network_error`, anything custom) into an `error`
+ *  stop reason, so this set is the safety net for anything that slips past
+ *  them — an unexpected `pending`, a leftover streaming reason, and so on.
+ *  `"aborted"` stays normal: that is Ctrl+C, a deliberate stop, not a
+ *  failure. */
+const NORMAL_STOP_REASONS: ReadonlySet<string> = new Set([
+  "stop", // the model finished its turn
+  "toolUse", // the turn ended to run tool calls
+  "length", // output hit the token cap; pi still counts it as a done event
+  "deferred", // an async completion handle; kept for parity with the SDK
+  "aborted", // the user cancelled; bring up no error for it
+]);
+
 /** A failed turn's own message, not a thrown error: the agent SDK encodes
- *  a rejected request (bad routing, provider error, and so on) as a
- *  normal `message_end` with `stopReason: "error"` and `errorMessage` set,
- *  rather than throwing. Without reading this, that message's `content`
- *  is typically empty and the run silently produces nothing. `"aborted"`
- *  is excluded: that is Ctrl+C, not a failure. */
+ *  a rejected request (bad routing, provider error, an unrecognized
+ *  `finish_reason`, and so on) as a `message_end` whose `stopReason` is
+ *  not one of `NORMAL_STOP_REASONS`, with `errorMessage` set. Without
+ *  reading that, the message's `content` is typically empty and the run
+ *  silently produces nothing. */
 function messageFailure(message: unknown): string | null {
   const parsed = contentParts.safeParse(message);
-  if (
-    !parsed.success ||
-    parsed.data.role !== "assistant" ||
-    parsed.data.stopReason !== "error"
-  ) {
+  if (!parsed.success || parsed.data.role !== "assistant") return null;
+  const stopReason = parsed.data.stopReason;
+  if (stopReason === undefined || NORMAL_STOP_REASONS.has(stopReason)) {
     return null;
   }
-  return parsed.data.errorMessage ?? "inference failed";
+  return (
+    parsed.data.errorMessage ??
+    `inference ended with an unexpected finish reason: ${stopReason}`
+  );
 }
 
 /** `shared/provider-routing.ts`'s "Thinking level" values, structurally
