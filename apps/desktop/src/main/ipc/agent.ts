@@ -455,12 +455,12 @@ async function runAgent(
       name: "read",
       label: "Read",
       description: [
-        "Use this to check what's actually in a file or directory, or to visit or fetch a webpage, instead of guessing. Windows the result by line or by byte.",
-        "`path` is a filesystem path (relative to the project root, or absolute) or a URI: file://, http://, https://, or ssh://[user@]host[:port]/path.",
-        "A local path, file:// URI, or ssh:// URI naming a directory lists its immediate entries, one per line, subdirectories marked with a trailing /; http(s):// only reads files.",
+        "Check what's actually in a file or directory, or fetch a webpage, instead of guessing. Every result is capped at about 4KB, so never expect a whole file's content.",
+        "`path` is a filesystem path (relative to the project root, or absolute) or a URI: file://, http(s)://, ssh://[user@]host[:port]/path.",
+        "Reading a whole code file (no window parameters) returns a symbol index: each top-level function, class, type, and so on, with its line number. Read the sections you need afterwards with `offset`/`limit`; the index tells you which lines to ask for.",
+        "Reading a whole non-code file returns its first page, marked truncated when the file is longer. A directory lists its immediate entries, one per line, subdirectories marked with a trailing /; http(s):// only reads files.",
         "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
-        "Default is line mode: `offset`/`limit` window onto 1-indexed lines (also the entries of a directory listing).",
-        "Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both; neither applies to a directory.",
+        "Default is line mode: 1-indexed `offset`/`limit`. Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both; neither applies to a directory.",
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
@@ -501,7 +501,9 @@ async function runAgent(
           ? ""
           : result.byteStart !== undefined
             ? `[bytes ${result.byteStart}-${result.byteEnd}]\n\n`
-            : `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}]\n\n`;
+            : result.totalLines !== undefined
+              ? `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}]\n\n`
+              : `[lines ${result.startLine}-${result.endLine}+]\n\n`;
         return {
           content: [
             { type: "text" as const, text: `${header}${result.content}` },

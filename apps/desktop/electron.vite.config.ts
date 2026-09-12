@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import babel from "vite-plugin-babel";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 import tailwindcss from "@tailwindcss/postcss";
+import { WASM_ASSETS } from "./src/main/lib/symbol-index";
 
 const reactCompilerConfig = {
   target: "19",
@@ -41,6 +42,24 @@ export default defineConfig({
             dest: "agent",
             rename: { stripBase: true },
           },
+          // Symbol indexing (src/main/lib/symbol-index.ts) loads these at
+          // run time with `readFileSync(import.meta.dirname/wasm, ...)`, so
+          // they must land next to the bundled `out/main/index.js` under a
+          // stable directory. The runtime wasm is
+          // `web-tree-sitter/tree-sitter.wasm`, the rest are the
+          // per-language grammars from `tree-sitter-wasms/out`.
+          {
+            src: resolve("node_modules/web-tree-sitter/tree-sitter.wasm"),
+            dest: "wasm",
+            rename: { stripBase: true },
+          },
+          ...WASM_ASSETS.filter((wasm) => wasm !== "tree-sitter.wasm").map(
+            (wasm) => ({
+              src: resolve("node_modules/tree-sitter-wasms/out", wasm),
+              dest: "wasm",
+              rename: { stripBase: true },
+            }),
+          ),
         ],
       }),
     ],
