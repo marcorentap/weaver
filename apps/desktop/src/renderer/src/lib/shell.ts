@@ -78,11 +78,10 @@ export function makePane(pageId: string, to: string): Pane {
   return { id: newPaneId(), pageId, to };
 }
 
-/** A brand-new tab with a single pane on the chat home page (no session
- *  yet — the shell aims it at a fresh session as the session creation
- *  resolves). */
-export function makeTab(): Tab {
-  const pane = makePane(CHAT_PAGE.id, CHAT_PAGE.href);
+/** A brand-new tab with a single pane: the given one, or the chat home
+ *  page (no session yet) by default. A tab whose pane is handed a session's
+ *  href directly mounts on it in one pass, with nothing to retarget. */
+export function makeTab(pane: Pane = makePane(CHAT_PAGE.id, CHAT_PAGE.href)): Tab {
   return {
     id: `tab-${crypto.randomUUID()}`,
     root: { kind: "leaf", pane },

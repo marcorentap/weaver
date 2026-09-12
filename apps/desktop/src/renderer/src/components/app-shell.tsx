@@ -399,16 +399,20 @@ export function AppShell() {
     };
   }, [createChatSession]);
 
-  /** Aim `paneId` at a brand-new empty chat session once it exists. */
-  const aimPaneAtFreshChat = useCallback(
-    (paneId: string) => {
-      void createChatSession(newSessionTitle()).then((result) => {
-        if (result.error || !result.id) return;
-        dispatch({ type: "retarget-pane", paneId, to: chatHref(result.id) });
-      });
-    },
-    [createChatSession],
-  );
+  /** Mint a brand-new empty chat session — seeded by the global chat store,
+   *  so the pane that gets it mounts with zero IPC — and build a pane aimed
+   *  straight at it. A tab or split built from this renders the session
+   *  once, on the chat it owns, instead of first mounting the most recent
+   *  session at `/chat` and being retargeted a moment later (two full chat
+   *  mounts and a flash of the previous session per pane). If creation
+   *  fails, the pane falls back to the chat home page, still usable. */
+  const freshChatPane = useCallback(async (): Promise<Pane> => {
+    const result = await createChatSession(newSessionTitle());
+    return makePane(
+      CHAT_PAGE.id,
+      result.error || !result.id ? CHAT_PAGE.href : chatHref(result.id),
+    );
+  }, [createChatSession]);
 
   /** The pane registry: register/deregister a pane's router. */
   const registerRouter = useCallback(
@@ -427,15 +431,15 @@ export function AppShell() {
     [],
   );
 
-  /** n in the popup: a fresh tab on a brand-new empty session, activated at
-   *  once. The tab appears immediately on the chat home page and the pane is
-   *  aimed at the new session when it lands. */
-  const newTab = useCallback(() => {
+  /** n in the popup: mint a brand-new empty session, then open the tab with
+   *  its pane already on that session — the pane mounts once, on its own
+   *  empty chat, with no flash of the previous session and nothing to
+   *  retarget. A failed session creation still opens a usable chat tab on
+   *  the chat home page. */
+  const newTab = useCallback(async () => {
     setPickerOpen(false);
-    const tab = makeTab();
-    dispatch({ type: "new-tab", tab });
-    aimPaneAtFreshChat(tab.activePaneId);
-  }, [aimPaneAtFreshChat]);
+    dispatch({ type: "new-tab", tab: makeTab(await freshChatPane()) });
+  }, [freshChatPane]);
 
   /** `tab`/`space`'s result and the tab bar's click: show the tab. */
   const activateTab = useCallback((tabId: string) => {
@@ -475,24 +479,22 @@ export function AppShell() {
   }, [layout.activeTabId]);
 
   /** `ctrl+w v` / `ctrl+w s`: split the active pane and move to the fresh
-   *  one. A chat split also spawns the new pane's own session. */
+   *  one. A chat split mints the new pane's own session first, so the fresh
+   *  pane mounts directly on it — one chat mount, zero flash, and never two
+   *  live graphs sharing a session (the new pane lands on its session, not
+   *  partway through the active one's). */
   const splitPane = useCallback(
-    (dir: "row" | "column") => {
+    async (dir: "row" | "column") => {
       if (!activeTab) return;
       const pane = findPane(activeTab.root, activeTab.activePaneId);
       if (!pane) return;
-      // The fresh pane starts on the splitting pane's own page — but a chat
-      // pane starts on the chat home page, and its brand-new session arrives
-      // a moment later (via aimPaneAtFreshChat), so a split never mounts two
-      // live graphs on the same session.
-      const fresh: Pane = makePane(
-        pane.pageId,
-        pane.pageId === CHAT_PAGE.id ? CHAT_PAGE.href : pane.to,
-      );
+      const fresh =
+        pane.pageId === CHAT_PAGE.id
+          ? await freshChatPane()
+          : makePane(pane.pageId, pane.to);
       dispatch({ type: "split-pane", dir, fresh });
-      if (pane.pageId === CHAT_PAGE.id) aimPaneAtFreshChat(fresh.id);
     },
-    [activeTab, aimPaneAtFreshChat],
+    [activeTab, freshChatPane],
   );
 
   /** `ctrl+w h/j/k/l` (and `ctrl+w ctrl+w`): move pane focus. */
