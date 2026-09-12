@@ -225,7 +225,7 @@ function createChatSession(name: string): CreateSessionResult {
   const id = newId();
   const graph = defaultGraph();
   pendingSessions.set(id, { name, graph });
-  return { error: null, id, graph };
+  return { error: null, id, name, graph };
 }
 
 /**
@@ -248,7 +248,7 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
       // The source has no content (a pending, never-written session): the
       // copy is just an empty session under its own name, pending until its
       // first block, exactly like `createChatSession`.
-      return { error: null, id, graph };
+      return { error: null, id, name, graph };
     }
     const remap = new Map(blocks.map((block) => [block.id, newId()]));
     const copied: BlockInput[] = blocks.map((block) => ({
@@ -264,7 +264,7 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
     ensureSessionRow(store, id);
     store.writeGraph(id, copied);
     pendingSessions.delete(id);
-    return { error: null, id };
+    return { error: null, id, name };
   } catch (error) {
     pendingSessions.delete(id);
     return { error: schemaMessage(error), id: null };

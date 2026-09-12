@@ -578,6 +578,7 @@ function ChatView({
     duplicateChatSession: duplicateSessionMutation,
     renameChatSession: renameSessionMutation,
     deleteChatSession: deleteSessionMutation,
+    saveChatGraph: saveGraphMutation,
   } = useChatStore();
   const [cursor, setCursor] = useState(0);
   /** The chat list root; page-up/page-down measures the rows inside it and
@@ -676,7 +677,7 @@ function ChatView({
   // call the latest closure (current `session`, current engine).
   const performSave = useCallback(async (): Promise<void> => {
     if (!session) return;
-    const result = await window.api.chat.saveGraph(
+    const result = await saveGraphMutation(
       session.id,
       engine.toBlockInputs(),
     );
@@ -686,7 +687,7 @@ function ChatView({
       return;
     }
     engine.markSaved();
-  }, [session, engine]);
+  }, [session, engine, saveGraphMutation]);
 
   const performSaveRef = useRef(performSave);
   useEffect(() => {

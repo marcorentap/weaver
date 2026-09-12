@@ -45,9 +45,15 @@ export interface MutationResult {
 
 export interface CreateSessionResult extends MutationResult {
   id: string | null;
+  /** The name the session carries in the store. Present on create/duplicate
+   *  so the renderer's chat store can seed the summary before any write
+   *  exists. */
+  name?: string;
   /** The brand-new session's graph, as minted by the main process (the
    *  default `environment` block). Returned with the create so the renderer
-   *  can seed a pane instantly without a follow-up `loadGraph` round trip. */
+   *  can seed a pane instantly without a follow-up `loadGraph` round trip.
+   *  Only a *pending* (not-yet-written) session carries one; a duplicate of
+   *  a written session is written immediately and loads on demand. */
   graph?: BlockGraph;
 }
 

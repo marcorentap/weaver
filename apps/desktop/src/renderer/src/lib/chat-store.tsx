@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { BlockGraph } from "@repo/core";
+import type { BlockInput } from "@repo/store";
 import { dropLiveGraph } from "@/lib/live-graph-registry";
 import type {
   ChatSessionSummary,
@@ -22,6 +23,14 @@ import type {
  * at most once per session (singleflight, shared across panes). A pane
  * mounts against this store: creating a fresh session seeds its graph
  * directly from the create result, so the pane renders with zero IPC.
+ *
+ * The `sessions` list only shows what is actually persisted: a brand-new
+ * session is *pending* (seeded and usable, but it has no row on disk until
+ * its first block is written), so it is not listed in the recent-sessions
+ * menu. `createChatSession` seeds it for instant pane rendering;
+ * `saveChatGraph` lists it the moment the first write lands, and unlists it
+ * again when its last block is deleted (main drops empty sessions). A quiet
+ * never-edited session never reads as an existing one.
  *
  * The live graph itself (edits, hooks, inference runs) still lives in
  * `lib/live-graph-registry`, keyed by session id at module scope; this
@@ -64,16 +73,12 @@ function subscribe(listener: () => void) {
 }
 
 function upsertSessions(sessions: ChatSessionSummary[]) {
-  // The main process's list is authoritative for sessions it knows, but it
-  // cannot see brand-new pending sessions (their row does not exist until
-  // the first write), so merge: keep anything we have that main did not
-  // report, sorted newest-first alongside the authoritative entries.
-  const merged = [...sessions];
-  for (const entry of current.sessions) {
-    if (!merged.some((s) => s.id === entry.id)) merged.push(entry);
-  }
-  merged.sort((a, b) => b.modifiedAt - a.modifiedAt);
-  commit({ sessions: merged });
+  // Main's list is authoritative: a `loadGraph` sweeps and drops emptied
+  // sessions and publishes every persisted row, and this store reflects
+  // in-memory changes (a first write, a rename, a delete) through its own
+  // mutations, so sessions main does not report are not persisted and do
+  // not get listed. Replace ours wholesale.
+  commit({ sessions: sessions });
 }
 
 function loadSessionGraph(sessionId: string): Promise<LoadGraphResult> {
@@ -113,8 +118,12 @@ function ensureSessionGraph(sessionId?: string): Promise<LoadGraphResult> {
   });
 }
 
-/** A fresh session, written to main; seeds its graph so the pane aimed at
- *  it renders immediately. */
+/** A fresh session, written to main. It is *pending* — main holds only a
+ *  name and a minted default graph, and creates the row together with the
+ *  first real write (`saveChatGraph`) — so it is seeded here for instant
+ *  pane rendering but deliberately NOT listed as a session yet. A quiet
+ *  never-edited session must not read as an existing session in the recent
+ *  menu; it appears there the first time its first block is saved. */
 async function createSession(name: string): Promise<CreateSessionResult> {
   const result = await window.api.chat.createChatSession(name);
   if (result.error || !result.id || !result.graph) return result;
@@ -123,33 +132,32 @@ async function createSession(name: string): Promise<CreateSessionResult> {
   seeds.set(result.id, {
     graph: result.graph,
     sessions: current.sessions,
-    session: { id: result.id, name },
+    session: { id: result.id, name: result.name ?? name },
   });
-  upsertSessionSummary({ id: result.id, name, modifiedAt: Date.now() });
   return result;
 }
 
-/** Forks a session; the copy shows up in the list right away, its graph is
- *  loaded (singleflight) the first time a pane opens it. */
+/** Forks a session, then switches to the copy. A copy of a written session
+ *  is written to main immediately (a real persisted session — listed); a
+ *  copy of a pending, never-written source is itself pending (seeded, not
+ *  listed) until its first block is saved, exactly like `createSession`. */
 async function duplicateSession(
   sourceId: string,
 ): Promise<CreateSessionResult> {
   const result = await window.api.chat.duplicateChatSession(sourceId);
   if (result.error || !result.id) return result;
+  const name = result.name ?? summaryNameOf(result.id);
   if (result.graph) {
-    // An empty source duplicates into a fresh pending session whose graph
-    // main already minted — seed it like a plain create.
+    // Pending source: seed the minted graph like a plain create.
     seeds.set(result.id, {
       graph: result.graph,
       sessions: current.sessions,
-      session: { id: result.id, name: summaryNameOf(result.id) },
+      session: { id: result.id, name },
     });
+  } else {
+    // Already written by main — a real persisted session, list it now.
+    upsertSessionSummary({ id: result.id, name, modifiedAt: Date.now() });
   }
-  upsertSessionSummary({
-    id: result.id,
-    name: summaryNameOf(result.id),
-    modifiedAt: Date.now(),
-  });
   return result;
 }
 
@@ -162,7 +170,9 @@ function summaryNameOf(id: string): string {
 }
 
 /** Renames in place; the list and the seed's name both follow, so no pane
- *  needs to refetch anything. */
+ *  needs to refetch anything. A pending session is not in the list, but
+ *  its seed's name is updated so it persists under the new name at its
+ *  first write. */
 async function renameSession(
   graphId: string,
   name: string,
@@ -191,6 +201,33 @@ async function deleteSession(graphId: string): Promise<MutationResult> {
   return result;
 }
 
+/** Persists a session's whole live graph (autosave, and the manual `s`
+ *  shortcut). Routed through the store so the sessions list tracks what is
+ *  actually on disk instead of what a fresh pane merely created in memory:
+ *  - a session's first real write creates its row in main, so it enters
+ *    the list right there (this is when a pending session "becomes real");
+ *  - writing away its last block leaves an empty session, which main drops
+ *    (the row only exists while it has blocks), so it leaves the list again
+ *    even though the engine still holds the empty graph in memory. */
+async function saveSession(
+  graphId: string,
+  blocks: BlockInput[],
+): Promise<MutationResult> {
+  const result = await window.api.chat.saveGraph(graphId, blocks);
+  if (result.error) return result;
+  if (blocks.length === 0) {
+    const sessions = current.sessions.filter((s) => s.id !== graphId);
+    if (sessions.length !== current.sessions.length) commit({ sessions });
+  } else {
+    upsertSessionSummary({
+      id: graphId,
+      name: summaryNameOf(graphId),
+      modifiedAt: Date.now(),
+    });
+  }
+  return result;
+}
+
 function upsertSessionSummary(entry: ChatSessionSummary) {
   commit({
     sessions: [
@@ -208,6 +245,7 @@ type ChatStoreValue = {
   duplicateChatSession: (sourceId: string) => Promise<CreateSessionResult>;
   renameChatSession: (graphId: string, name: string) => Promise<MutationResult>;
   deleteChatSession: (graphId: string) => Promise<MutationResult>;
+  saveChatGraph: (graphId: string, blocks: BlockInput[]) => Promise<MutationResult>;
 };
 
 const context = createContext<ChatStoreValue | null>(null);
@@ -250,6 +288,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       duplicateChatSession: duplicateSession,
       renameChatSession: renameSession,
       deleteChatSession: deleteSession,
+      saveChatGraph: saveSession,
     }),
     [snapshot],
   );
