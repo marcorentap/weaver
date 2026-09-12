@@ -9,12 +9,14 @@ export type Page = {
   id: string;
   /** Shown in the tab bar and in the `tab`/`space` popup. */
   label: string;
+  /** The popup's shortcut letter — `c` chat, `r` resources, `s` settings. */
+  key: string;
   /** Where the page lives; a tab pointed at it navigates here. */
   href: string;
 };
 
 export const PAGES: Page[] = [
-  { id: "chat", label: "Chat", href: "/chat" },
-  { id: "resources", label: "Resources", href: "/resources" },
-  { id: "settings", label: "Settings", href: "/settings" },
+  { id: "chat", label: "Chat", key: "c", href: "/chat" },
+  { id: "resources", label: "Resources", key: "r", href: "/resources" },
+  { id: "settings", label: "Settings", key: "s", href: "/settings" },
 ];

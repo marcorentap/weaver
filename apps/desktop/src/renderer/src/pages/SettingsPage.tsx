@@ -1380,6 +1380,7 @@ export default function SettingsPage() {
                           }}
                           className={cn(
                             "w-56 truncate tabular-nums text-right",
+                            entry.kind === "option" && "text-left",
                             entry.kind === "string" && "text-left",
                             isEditable(entry)
                               ? "cursor-text hover:text-foreground"

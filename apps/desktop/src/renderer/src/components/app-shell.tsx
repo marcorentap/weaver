@@ -347,11 +347,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   // The popup `tab`/`space` opens, the shell's answer to chat's sessions
-  // menu. Like sessions, the actions carry letters (`n` new tab, `r` rename
-  // tab, `d` close tab); the pages, picked with the cursor, point the active
-  // tab at themselves. The open tabs are not listed here — a number key
-  // switches straight to one (see `TabNumbers`), and the tab bar shows the
-  // order.
+  // menu. Like sessions, the actions carry letters (`n` new tab, `d` close
+  // tab; `r` is reserved for Resources below); each page has a letter of its
+  // own (`c` chat, `r` resources, `s` settings), pointing the active tab at
+  // itself. Rename keeps no letter — the row is still there to pick. The
+  // open tabs are not listed here — a number key switches straight to one
+  // (see `TabNumbers`), and the tab bar shows the order.
   const pickerItems: KeyMenuItem[] = [
     {
       key: "n",
@@ -359,7 +360,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       run: newTab,
     },
     {
-      key: "r",
       label: "Rename tab",
       detail: activeTab ? tabLabel(activeTab) : undefined,
       run: () => {
@@ -375,6 +375,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       run: () => closeTab(),
     },
     ...PAGES.map((page) => ({
+      key: page.key,
       label: page.label,
       detail: "Open in this tab",
       run: () => openPage(page),
