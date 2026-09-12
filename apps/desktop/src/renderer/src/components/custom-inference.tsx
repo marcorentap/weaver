@@ -189,8 +189,8 @@ export function CustomInferenceDialog({
       label: "Pi extensions",
       description: "Load pi extensions (slash commands, hooks, tools).",
       options: ON_OFF_OPTIONS,
-      value: noExtensions ? "on" : "off",
-      onChange: (value) => setNoExtensions(value === "on"),
+      value: noExtensions ? "off" : "on",
+      onChange: (value) => setNoExtensions(value === "off"),
     },
     {
       key: "noSkills",
@@ -198,8 +198,8 @@ export function CustomInferenceDialog({
       label: "Skills",
       description: "Load SKILL.md files from the agent and project directories.",
       options: ON_OFF_OPTIONS,
-      value: noSkills ? "on" : "off",
-      onChange: (value) => setNoSkills(value === "on"),
+      value: noSkills ? "off" : "on",
+      onChange: (value) => setNoSkills(value === "off"),
     },
     {
       key: "noPromptTemplates",
@@ -207,8 +207,8 @@ export function CustomInferenceDialog({
       label: "Prompt templates",
       description: "Load pi prompt templates (/agent, /session, system personas).",
       options: ON_OFF_OPTIONS,
-      value: noPromptTemplates ? "on" : "off",
-      onChange: (value) => setNoPromptTemplates(value === "on"),
+      value: noPromptTemplates ? "off" : "on",
+      onChange: (value) => setNoPromptTemplates(value === "off"),
     },
     {
       key: "noThemes",
@@ -216,8 +216,8 @@ export function CustomInferenceDialog({
       label: "Themes",
       description: "Load pi themes.",
       options: ON_OFF_OPTIONS,
-      value: noThemes ? "on" : "off",
-      onChange: (value) => setNoThemes(value === "on"),
+      value: noThemes ? "off" : "on",
+      onChange: (value) => setNoThemes(value === "off"),
     },
     {
       key: "noContextFiles",
@@ -225,8 +225,8 @@ export function CustomInferenceDialog({
       label: "Context files",
       description: "Load project context files (CONTEXT.md / AGENTS.md).",
       options: ON_OFF_OPTIONS,
-      value: noContextFiles ? "on" : "off",
-      onChange: (value) => setNoContextFiles(value === "on"),
+      value: noContextFiles ? "off" : "on",
+      onChange: (value) => setNoContextFiles(value === "off"),
     },
     ...(provider?.fields ?? []).map(
       (field: ProviderField): RowDef =>
