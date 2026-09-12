@@ -23,6 +23,7 @@ import {
   mediaSrc,
   mediaState,
   parseMediaUri,
+  resolveMediaUri,
 } from "./media";
 import { TOOL_KIND, toolLanguage, toolState, USER_KIND, userState } from "@plugins/rich-media";
 import type { ToolState } from "@plugins/rich-media";
@@ -382,18 +383,21 @@ export const blockViews: Record<string, BlockView> = {
     ),
     // "Open in new tab" goes through `shell.openExternal`, the OS browser,
     // so it should get an address the browser can load on its own. An
-    // http(s) URI is that address as written; the `weaver-media://` proxy
-    // `mediaSrc` builds is there because a renderer `<img>` or `<pre>`
-    // cannot read cross-origin text or `file://` bytes, constraints the OS
-    // browser does not share. The YouTube embed URL is likewise for the
-    // iframe only, not the watch page.
+    // http(s) URI — a YouTube watch page included — is that address as
+    // written. A local file is the opposite case: the `weaver-media://`
+    // proxy `mediaSrc` builds exists only because a renderer `<img>` or
+    // `<pre>` cannot read cross-origin text or `file://` bytes, constraints
+    // the OS browser does not have — and it has no handler for the proxy
+    // scheme, so feeding it one opens nothing. A `file://` URI passes
+    // through; a scheme-less path resolves against `WEAVER_PWD` (as it
+    // does for rendering) to a `file://` URL the OS can hand off.
     raw: (block, graph) => {
       const uri = mediaState.parse(block.data).uri;
       const url = parseMediaUri(uri);
       return url &&
         (url.protocol === "http:" || url.protocol === "https:")
         ? uri
-        : mediaSrc(uri, envPwd(graph, block));
+        : (resolveMediaUri(uri, envPwd(graph, block)) ?? uri);
     },
   },
 
