@@ -2,13 +2,23 @@ import { open, readdir, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSsh, shellQuote, sshPath } from "./ssh.js";
+import { MAX_READ_BYTES, buildSymbolIndex } from "./symbol-index.js";
 
 /** Schemes this reads directly; anything else is a bare filesystem path. */
 const SCHEMES = new Set(["file:", "http:", "https:", "ssh:"]);
 
-/** Default read cap, and the ceiling an explicit `byteLength` is clamped
- *  to. Plenty for a tool result; a whole log file would flood the model. */
-const MAX_BYTES = 256 * 1024;
+/**
+ * Read budget: the ceiling an explicit `byteLength` is clamped to, the page
+ * size a line window is scanned in, and what a whole-file content read of a
+ * non-code file returns. A read result never exceeds this, so the worst
+ * case one tool call injects into context is about 1k tokens.
+ */
+const MAX_BYTES = MAX_READ_BYTES;
+
+/** Internal cap on how far a line-window scan pages forward. Only the
+ *  window's own lines are returned (still within `MAX_BYTES`); this bounds
+ *  how much IO a window deep in a large file costs. */
+const MAX_SCAN_BYTES = 8 * 1024 * 1024;
 
 function parseSource(source: string): URL | null {
   // A bare filesystem path is legal input and is not a URI, so this only
@@ -194,10 +204,11 @@ function windowLines(
  * `ssh://` URI. A local path, `file://` URI, or `ssh://` URI naming a
  * directory lists its immediate entries instead, one per line, sorted,
  * subdirectories marked with a trailing `/`; `http(s)://` sources are read
- * as files only. Otherwise the read is windowed either by line
- * (`offset`/`limit`, the default) or by byte (`byteOffset`/`byteLength`,
- * for content a line boundary can't usefully cut). `cwd` anchors a bare
- * relative path; every URI form is self-contained.
+ * as files only. A whole-file read (no window) of a local code file returns
+ * a tree-sitter symbol index with line numbers; any other whole-file read
+ * is bounded to the first `MAX_BYTES`. Windowed reads return the requested
+ * lines or bytes, still bounded by `MAX_BYTES`, and never a whole file.
+ * `cwd` anchors a bare relative path; every URI form is self-contained.
  */
 export async function readSource(
   source: string,
@@ -246,6 +257,71 @@ export async function readSource(
     };
   }
 
-  const buf = await fetchRange(backend, 0, MAX_BYTES);
-  return windowLines(buf.toString("utf8").split("\n"), offset, limit);
+  // Whole-file read. A local code file yields a tree-sitter symbol index
+  // (see symbol-index.ts) instead of content, and any other whole-file read
+  // is bounded to the first page, so no read ever returns a whole file.
+  if (offset === undefined && limit === undefined) {
+    if (backend.kind === "local") {
+      const index = await buildSymbolIndex(backend.path);
+      if (index) {
+        return { content: index.content, truncated: false, totalLines: index.totalLines };
+      }
+    }
+    const firstPage = await scanText(backend, null);
+    const result = windowLines(firstPage.text.split("\n"), undefined, undefined);
+    if (!firstPage.eof) {
+      result.truncated = true;
+      result.totalLines = undefined;
+    }
+    return result;
+  }
+
+  // Windowed read: scan forward until the window is covered, then slice.
+  // `totalLines` is only known once the scan reaches EOF (small files,
+  // windows near the end); a scan stopped at the IO cap reports no total.
+  const until = limit === undefined ? Number.MAX_SAFE_INTEGER : (offset ?? 1) - 1 + limit;
+  const scanned = await scanText(backend, until);
+  const result = windowLines(scanned.text.split("\n"), offset, limit);
+  if (!scanned.eof) {
+    result.truncated = true;
+    result.totalLines = undefined;
+  }
+  return result;
+}
+
+/**
+ * Pages through a source until `until` newlines have passed (or EOF, or the
+ * internal `MAX_SCAN_BYTES` cap), so a line window deep in a large file can
+ * be served without shipping the whole file's content to the caller. `until
+ * === null` returns the first page only, the whole-file bounded read. Local
+ * files page in `MAX_BYTES` chunks (cheap seeks); remote ones use one larger
+ * chunk per page so a deep window costs a bounded number of round trips.
+ * `eof` reports whether the end of the source was reached, which is what
+ * lets the caller say "there is more" past a capped scan.
+ */
+async function scanText(
+  backend: Backend,
+  until: number | null,
+): Promise<{ text: string; eof: boolean }> {
+  const chunks: Buffer[] = [];
+  let pos = 0;
+  let newlines = 0;
+  const pageSize = until === null || backend.kind === "local" ? MAX_BYTES : 256 * 1024;
+  while (true) {
+    const remaining = MAX_SCAN_BYTES - pos;
+    if (remaining <= 0) break;
+    const length = Math.min(pageSize, remaining);
+    const buf = await fetchRange(backend, pos, length);
+    chunks.push(buf);
+    if (buf.length < length) {
+      return { text: Buffer.concat(chunks).toString("utf8"), eof: true };
+    }
+    if (until === null) break;
+    for (const byte of buf) {
+      if (byte === 10) newlines++;
+    }
+    if (newlines >= until) break;
+    pos += buf.length;
+  }
+  return { text: Buffer.concat(chunks).toString("utf8"), eof: false };
 }
