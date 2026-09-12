@@ -421,6 +421,15 @@ export const blockViews: Record<string, BlockView> = {
         multiline: true,
       },
     ],
+    // A user message previews exactly like a text block's does — the same
+    // markdown-rendered frame, so what you see in preview is what the agent
+    // saw as input.
+    Preview: ({ block }) => (
+      <MarkdownText
+        text={userState.parse(block.data).text}
+        className="h-[70vh] w-full overflow-auto overscroll-contain"
+      />
+    ),
   },
 
   [TOOL_KIND]: {
