@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { Block, BlockGraph } from "@repo/core";
 import {
+  ENV_KIND,
+  envState,
   GROUP_KIND,
   mergedEnvironment,
   TEXT_KIND,
@@ -316,6 +318,37 @@ export const blockViews: Record<string, BlockView> = {
       />
     ),
     raw: (block) => textBlobUrl(textState.parse(block.data).text),
+  },
+
+  // An environment block is `.env` config, not prose: it renders as a code
+  // block the way the file it configures does, not as markdown. The
+  // `ini` grammar is the closest lowlight has to `KEY=value` lines; an
+  // unknown grammar would simply render plain.
+  [ENV_KIND]: {
+    Row: ({ block }) => (
+      <CodeBlock
+        code={envState.parse(block.data).text}
+        language="ini"
+        clips
+        className="flex-1 text-muted-foreground"
+      />
+    ),
+    fields: (block) => [
+      {
+        name: "text",
+        label: ".env",
+        value: envState.parse(block.data).text,
+        multiline: true,
+      },
+    ],
+    Preview: ({ block }) => (
+      <CodeBlock
+        code={envState.parse(block.data).text}
+        language="ini"
+        className="h-[70vh] w-full overflow-auto overscroll-contain"
+      />
+    ),
+    raw: (block) => textBlobUrl(envState.parse(block.data).text),
   },
 
   [GROUP_KIND]: {
