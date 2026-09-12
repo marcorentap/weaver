@@ -85,9 +85,13 @@ const toolRunContext: ToolRunContext = {
 };
 
 /**
- * Appended to the SDK's own system prompt (see `resourceLoader` below).
- * Everything here is what's specific to running as one block in a weaver
- * graph rather than as a general-purpose repo-editing CLI agent. Kept as its
+ * Replaces the SDK's own system prompt entirely (see `resourceLoader`
+ * below), so a weaver block's instructions are exactly what's here plus the
+ * graph above it. The parts of pi's default prompt that still apply when
+ * running as one block in a weaver graph — the expert-assistant framing,
+ * "be concise", "show file paths clearly", the pointer to pi's docs — are
+ * extracted into this file; the rest (CLI-agent framing, SDK-built tool
+ * list fine for the API's own tool array) is dropped. Kept as its
  * own committed file rather than an inline string so it reads and diffs like
  * prose, not code.
  *
@@ -206,6 +210,15 @@ const THINKING_LEVELS = [
  *  ("asap"). */
 const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
 
+/** OpenRouter's app attribution: the `HTTP-Referer` header names this app
+ *  on openrouter.ai and `X-Title` gives it a title; the docs require the
+ *  two together (https://openrouter.ai/docs/app-attribution). Sent on
+ *  every request to OpenRouter so usage lands under weaver's app page. */
+const OPENROUTER_ATTRIBUTION = {
+  "HTTP-Referer": "https://weaver.marcorentap.com",
+  "X-Title": "Weaver",
+} as const;
+
 /** Turns the renderer's `providerId`/`providerSettings` into that
  *  provider's request tuning. OpenRouter's `only`/`sort` become the
  *  `provider` routing object; its reasoning effort needs
@@ -310,6 +323,13 @@ async function runAgent(
       baseUrl: body.endpoint,
       apiKey: body.apiKey,
       api: "openai-completions",
+      // The register config's `headers` become request headers on every
+      // call (see provider-composer's `resolveCompatibilityRequestConfig`),
+      // so OpenRouter sees the app attribution on each request its usage
+      // panel counts. Harmless anywhere else, but only OpenRouter asks.
+      ...(body.providerId === "openrouter"
+        ? { headers: OPENROUTER_ATTRIBUTION }
+        : {}),
       models: [
         {
           id: body.model,
@@ -435,11 +455,11 @@ async function runAgent(
       noPromptTemplates: true,
       noThemes: true,
       noContextFiles: true,
-      // Appended, not a replacement. The SDK's own prompt already lists
-      // the enabled tools and default guidelines from `tools` below; this
-      // only adds what is specific to running as a weaver block instead
-      // of a repo-editing CLI agent.
-      appendSystemPrompt: [WEAVER_SYSTEM_PROMPT],
+      // A replacement, not an append: pi's default prompt (CLI-agent
+      // phrasing, SDK-built tool list) is replaced wholesale; this file is
+      // the whole system prompt. Tools still reach the model through the
+      // API's own tool array, so nothing about the tool list is lost.
+      systemPrompt: WEAVER_SYSTEM_PROMPT,
     });
     await resourceLoader.reload();
 
@@ -702,9 +722,9 @@ async function runAgent(
 
     const prompt = body.context
       ? [
-          "This is the context that comes before you in the graph:",
-          "",
+          "<weaver_graph>",
           body.context,
+          "</weaver_graph>",
           "",
           "---",
           "",
