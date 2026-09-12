@@ -27,6 +27,15 @@ export type Block<D extends BlockData = BlockData> = {
   /** First nested block, or null when nothing is nested here. */
   children: BlockId | null;
   data: D;
+  /**
+   * Hidden from the rendered list and from the agent's context. A hidden
+   * block stays in the graph — it and its subtree are excluded from every
+   * snapshot (`snapshotBlock`/`snapshotAbove`/`snapshotGraph`) and from
+   * the merged environment, but nothing is deleted — so it can be shown
+   * again later. Absent is the same as `false`; newly minted blocks are
+   * never hidden.
+   */
+  hidden?: boolean;
 };
 
 /** Every block, plus the head of the top-level chain. */
@@ -282,12 +291,15 @@ export function assertTree(graph: BlockGraph): void {
  * Flatten a block into its LLM string, prefixed with the block's own label
  * (`label: body`) so an agent reading the flattened graph can tell blocks
  * apart by who or what produced them, not just by juxtaposition. A block
- * with no label, or whose kind snapshots to "", is returned unprefixed: an
- * empty snapshot means "nothing to show", not "a label with nothing after
+ * with no label, or whose kind snapshots to "", is returned unprefixed:
+ * an empty snapshot means "nothing to show", not "a label with nothing after
  * it", and a checked-empty prompt (e.g. an empty trigger block) must stay
  * checkably empty. Unknown kinds throw rather than guess: silently wrong
  * context is worse than a loud failure, and a purely visual block can
  * register a snapshot that returns "".
+ *
+ * A hidden block snapshots to "" without recursing, so its subtree never
+ * reaches the agent either: hiding a block hides what is nested under it.
  */
 export function snapshotBlock(
   graph: BlockGraph,
@@ -295,6 +307,7 @@ export function snapshotBlock(
   registry: KindRegistry,
 ): string {
   const block = getBlock(graph, id);
+  if (block.hidden) return "";
   const kind = registry[block.kind];
   if (!kind) {
     throw new Error(`no kind registered for block kind: ${block.kind}`);
@@ -308,12 +321,14 @@ export function snapshotBlock(
   return `${block.label}: ${body}`;
 }
 
-/** Snapshot the whole graph: every top-level block, in order. */
+/** Snapshot the whole graph: every top-level block, in order, hidden ones
+ *  left out entirely rather than snapshot as empty lines. */
 export function snapshotGraph(
   graph: BlockGraph,
   registry: KindRegistry,
 ): string {
   return topLevelBlockIds(graph)
+    .filter((id) => !getBlock(graph, id).hidden)
     .map((id) => snapshotBlock(graph, id, registry))
     .join("\n");
 }
@@ -365,7 +380,10 @@ export function snapshotAbove(
   id: BlockId,
   registry: KindRegistry,
 ): string {
+  // Hidden blocks are dropped before mapping, so they contribute nothing,
+  // not even the blank line an empty snapshot would join in as.
   return precedingBlockIds(graph, id)
+    .filter((sibling) => !graph.blocks[sibling]?.hidden)
     .map((sibling) => snapshotBlock(graph, sibling, registry))
     .join("\n");
 }

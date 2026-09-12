@@ -88,6 +88,12 @@ export type LiveGraph = {
   /** Apply an already-persisted label edit locally. The label lives at the
    *  top level of a block, not inside `data`. */
   updateLabel: (id: BlockId, label: string) => void;
+  /** Toggle a block's `hidden` flag locally, so it drops out of the rows
+   *  and of the next agent serialization immediately; the autosave the
+   *  dirty flag triggers persists it (and replays the whole graph) just
+   *  like any other local edit. No-ops, returning false, if `id` is
+   *  locked. */
+  setHidden: (id: BlockId, hidden: boolean) => boolean;
   /** Abort the inference anchored at `id`, if one is in flight. */
   abortRun: (id: BlockId) => boolean;
   /** Link an already-persisted new block into the tree at `at`. No-ops,
@@ -505,6 +511,22 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         },
         snapshot.dirty,
       );
+    },
+    setHidden(id, hidden) {
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return false;
+      const current = snapshot.graph.blocks[id];
+      if (!current || (current.hidden ?? false) === hidden) return false;
+      commit(
+        {
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [id]: { ...current, hidden, modifiedAt: Date.now() },
+          },
+        },
+        true,
+      );
+      return true;
     },
     addBlock(block, at) {
       if (

@@ -8,7 +8,7 @@ import {
   useTransition,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronDown, ChevronRight, Lock, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, EyeOff, Lock, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
@@ -188,6 +188,7 @@ function BlockRow({
   running,
   flashing,
   locked,
+  hidden,
   gutter,
   shown,
   graph,
@@ -213,6 +214,9 @@ function BlockRow({
   /** Whether a still-running inference already appended this block, so
    *  its edit/delete/configure affordances are unavailable right now. */
   locked: boolean;
+  /** Whether this block is hidden from the agent: it stays in the list,
+   *  rendered disabled, but is left out of serialized context. */
+  hidden: boolean;
   /** Whether the gutter column is enabled at all (hidden pre-hydration). */
   gutter: boolean;
   /** Whether this row's content is shown in full rather than clipped. */
@@ -296,6 +300,7 @@ function BlockRow({
           : inSelection
             ? "bg-muted/40"
             : undefined,
+        hidden && "opacity-60",
       )}
     >
       {flashing ? (
@@ -345,6 +350,12 @@ function BlockRow({
           <Lock
             className="size-3 shrink-0 text-muted-foreground"
             aria-label="Locked while streaming in"
+          />
+        ) : null}
+        {hidden ? (
+          <EyeOff
+            className="size-3 shrink-0 text-muted-foreground"
+            aria-label="Hidden from agent context"
           />
         ) : null}
       </span>
@@ -1429,6 +1440,25 @@ function ChatView({
             ? []
             : [
                 {
+                  // A hidden block stays in the list rendered disabled;
+                  // the same key toggles it back to visible.
+                  label: row.block.hidden ? "Show block" : "Hide block",
+                  key: "h",
+                  detail: row.block.hidden
+                    ? "hidden from agent context"
+                    : undefined,
+                  run: () => {
+                    const id = row.block.id;
+                    const hidden = !row.block.hidden;
+                    setPopup(null);
+                    engine.setHidden(id, hidden);
+                  },
+                },
+              ]),
+          ...(locked
+            ? []
+            : [
+                {
                   label: `Delete ${row.block.label}`,
                   key: "d",
                   destructive: true,
@@ -1501,6 +1531,21 @@ function ChatView({
                           void window.api.chat.deleteChatBlock(graphId, id);
                       });
                     }
+                  },
+                },
+              ]),
+          ...(selectionLocked
+            ? []
+            : [
+                {
+                  label: `Hide ${selectedRows.length} blocks`,
+                  key: "h",
+                  detail: "kept in the graph, hidden from agent context",
+                  run: () => {
+                    setPopup(null);
+                    setVisualAnchor(null);
+                    for (const entry of selectedRows)
+                      engine.setHidden(entry.block.id, true);
                   },
                 },
               ]),
@@ -1777,6 +1822,7 @@ function ChatView({
                 running={running.has(entry.block.id)}
                 flashing={runningTailIds.has(entry.block.id)}
                 locked={lockedIds.has(entry.block.id)}
+                hidden={Boolean(entry.block.hidden)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
                   setShown((current) =>

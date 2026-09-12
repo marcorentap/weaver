@@ -24,6 +24,7 @@ const blockRowSchema = z.object({
   next_id: z.string().nullable(),
   children_id: z.string().nullable(),
   data: z.string(),
+  hidden: z.number().int(),
 });
 
 const graphRowSchema = z.object({
@@ -70,6 +71,9 @@ export type BlockInput = {
   next?: BlockId | null;
   children?: BlockId | null;
   data?: BlockData;
+  /** Whether the block is hidden (kept in the graph, left out of the
+   *  renderer and of agent context). Absent means visible, same as `false`. */
+  hidden?: boolean;
 };
 
 export type Store = {
@@ -128,9 +132,18 @@ export function openStore(options: StoreOptions = {}): Store {
     db.exec(SCHEMA_SQL);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   } else if (version !== SCHEMA_VERSION) {
-    throw new Error(
-      `store at ${path} has schema version ${version}, expected ${SCHEMA_VERSION}`,
-    );
+    // A database from an older schema is migrated forward, not rejected.
+    // The current migration adds `hidden` to `block`; anything older
+    // predates it, so one ALTER TABLE brings every stored block forward
+    // as visible.
+    if (version < 6) {
+      db.exec("ALTER TABLE block ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
+    } else {
+      throw new Error(
+        `store at ${path} has schema version ${version}, expected ${SCHEMA_VERSION}`,
+      );
+    }
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
 
   const selectGraphs = db.prepare(
@@ -149,14 +162,14 @@ export function openStore(options: StoreOptions = {}): Store {
   const deleteGraphStmt = db.prepare("DELETE FROM graph WHERE id = ?");
 
   const selectBlocks = db.prepare(`
-    SELECT id, kind, label, created_at, modified_at, next_id, children_id, data
+    SELECT id, kind, label, created_at, modified_at, next_id, children_id, data, hidden
     FROM block WHERE graph_id = ?
   `);
   const selectBlockIds = db.prepare("SELECT id FROM block WHERE graph_id = ?");
   const upsertBlock = db.prepare(`
     INSERT INTO block
-      (id, graph_id, kind, label, created_at, modified_at, next_id, children_id, data)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, graph_id, kind, label, created_at, modified_at, next_id, children_id, data, hidden)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       kind = excluded.kind,
       label = excluded.label,
@@ -165,6 +178,7 @@ export function openStore(options: StoreOptions = {}): Store {
       next_id = excluded.next_id,
       children_id = excluded.children_id,
       data = excluded.data,
+      hidden = excluded.hidden,
       revision = block.revision + 1
   `);
   const deleteBlockStmt = db.prepare("DELETE FROM block WHERE id = ?");
@@ -188,6 +202,7 @@ export function openStore(options: StoreOptions = {}): Store {
         next: row.next_id,
         children: row.children_id,
         data: blockDataSchema.parse(JSON.parse(row.data)),
+        hidden: row.hidden === 1,
       };
     }
     return { blocks, root: rootOf(blocks) };
@@ -269,6 +284,7 @@ export function openStore(options: StoreOptions = {}): Store {
             input.next ?? null,
             input.children ?? null,
             JSON.stringify(input.data ?? {}),
+            input.hidden ? 1 : 0,
           );
         }
         touchGraph.run(now, graphId);

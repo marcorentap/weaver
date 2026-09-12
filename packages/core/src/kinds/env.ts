@@ -88,10 +88,12 @@ export function mergedEnvironment(
   const merged: Record<string, string> = {};
   // Merge `blockId`'s environment in. `Object.entries` order on a plain
   // object is insertion order, so a closer block's own lines overwrite its
-  // farther duplicate keys exactly as written.
+  // farther duplicate keys exactly as written. A hidden block is muted
+  // here too: it is not serialized to the agent in any form, environment
+  // included, until it is shown again.
   const apply = (blockId: BlockId): void => {
     const block = graph.blocks[blockId];
-    if (!block || block.kind !== ENV_KIND) return;
+    if (!block || block.hidden || block.kind !== ENV_KIND) return;
     const state = envState.safeParse(block.data);
     if (!state.success) return;
     Object.assign(merged, parseEnv(state.data.text));

@@ -173,7 +173,7 @@ function createChatSession(name: string): CreateSessionResult {
   const envBlock: BlockInput = {
     id: newId(),
     kind: ENV_KIND,
-    label: "",
+    label: "env",
     createdAt: now,
     data: { text: `${WEAVER_PWD}=${process.cwd()}` },
   };
@@ -215,6 +215,7 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
       next: block.next ? remap.get(block.next) : null,
       children: block.children ? remap.get(block.children) : null,
       data: structuredClone(block.data),
+      hidden: block.hidden,
     }));
     ensureSessionRow(store, id);
     store.writeGraph(id, copied);
