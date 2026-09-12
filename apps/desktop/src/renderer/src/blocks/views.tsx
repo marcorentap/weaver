@@ -300,7 +300,7 @@ export const blockViews: Record<string, BlockView> = {
     Row: ({ block }) => (
       <MarkdownText
         text={textState.parse(block.data).text}
-        className="flex-1 text-muted-foreground"
+        className="flex-1"
       />
     ),
     fields: (block) => [

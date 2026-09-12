@@ -155,6 +155,7 @@ function originClass(block: Block): string {
   if (block.kind === TOOL_KIND || block.label === "assistant") {
     return "text-emerald-400";
   }
+  if (block.label === "thinking") return "text-muted-foreground";
   return "";
 }
 

@@ -304,7 +304,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
 
     const parentId = findParent(snapshot.graph, id);
     let afterId: BlockId | null = id;
-    const append = (kind: string, data: BlockData, label: string) => {
+    const append = (
+      kind: string,
+      data: BlockData,
+      label: string,
+      hidden?: boolean,
+    ) => {
       const newId = crypto.randomUUID();
       const now = Date.now();
       const child: Block = {
@@ -316,54 +321,62 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         next: null,
         children: null,
         data,
+        ...(hidden ? { hidden: true } : {}),
       };
       commit(insertBlock(snapshot.graph, child, { parentId, afterId }), true);
       afterId = newId;
       setAppendTail(id, newId);
       return newId;
     };
-    // The block a run's `text_delta`/`thinking_delta` chunks are currently
-    // landing in. Null between messages, so the first delta of a new one
-    // starts a fresh block instead of gluing onto whatever came before it,
-    // such as a tool result, a displayed block, or an earlier reply in the
-    // same run. Reasoning and reply share one block: the model's reasoning
-    // reads as part of its own answer, not as a separate turn, so it is
-    // italicized markdown ahead of the reply rather than its own block.
-    let streamingId: BlockId | null = null;
+    // A run's deltas land in two text blocks: the model's reasoning labeled
+    // "thinking" and its answer labeled "assistant". Both are plain text
+    // kind — text is text whether it is a chain of thought or a reply — but
+    // they are separate blocks, because the reply is the answer the user
+    // asked for and the reasoning is the work that produced it. Each is null
+    // between messages, so the first delta of a new one starts a fresh block
+    // instead of gluing onto whatever came before it, such as a tool result,
+    // a displayed block, or an earlier reply in the same run. Reasoning also
+    // starts hidden (`enter` → `h` shows it): it stays out of the rendered
+    // list and out of the agent's context until the user unfolds it, so the
+    // reply reads as the answer without the chain of thought behind it.
+    let thinkingId: BlockId | null = null;
+    let replyId: BlockId | null = null;
     let thinkingText = "";
     let replyText = "";
-    const composeText = () => {
-      if (!thinkingText) return replyText;
-      const italic = thinkingText
-        .split("\n")
-        .map((line) => (line.trim().length > 0 ? `*${line}*` : ""))
-        .join("\n");
-      return replyText ? `${italic}\n\n${replyText}` : italic;
-    };
-    const updateStreaming = () => {
-      if (streamingId === null) {
-        streamingId = append(TEXT_KIND, { text: composeText() }, "assistant");
-        return;
-      }
-      const current = snapshot.graph.blocks[streamingId];
+    /** Push `text` into an already-open block, or start one if its stream
+     *  has not yet. `id` is written back through the same `snapshot` so a
+     *  run of updates each sees the previous one. */
+    const patchText = (id: BlockId, text: string) => {
+      const current = snapshot.graph.blocks[id];
       if (!current) return; // Deleted mid-stream.
       commit(
         {
           ...snapshot.graph,
           blocks: {
             ...snapshot.graph.blocks,
-            [streamingId]: {
-              ...current,
-              data: { text: composeText() },
-              modifiedAt: Date.now(),
-            },
+            [id]: { ...current, data: { text }, modifiedAt: Date.now() },
           },
         },
         true,
       );
     };
+    const updateThinking = () => {
+      if (thinkingId === null) {
+        thinkingId = append(TEXT_KIND, { text: thinkingText }, "thinking", true);
+      } else {
+        patchText(thinkingId, thinkingText);
+      }
+    };
+    const updateReply = () => {
+      if (replyId === null) {
+        replyId = append(TEXT_KIND, { text: replyText }, "assistant");
+      } else {
+        patchText(replyId, replyText);
+      }
+    };
     const resetStreaming = () => {
-      streamingId = null;
+      thinkingId = null;
+      replyId = null;
       thinkingText = "";
       replyText = "";
     };
@@ -398,24 +411,27 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         (event) => {
           if (event.type === "thinking_delta") {
             thinkingText += event.text;
-            updateStreaming();
+            updateThinking();
           } else if (event.type === "thinking") {
             // Deltas already streamed this into the block; only a
             // non-streaming provider's whole-reasoning event needs to set
             // it here, ahead of the `text` event that follows.
-            if (streamingId === null) thinkingText = event.text;
+            if (thinkingId === null) {
+              thinkingText = event.text;
+              updateThinking();
+            }
           } else if (event.type === "text_delta") {
             replyText += event.text;
-            updateStreaming();
+            updateReply();
           } else if (event.type === "text") {
-            // Deltas already streamed this message in, so the block already holds
-            // it; this only ends the stream rather than appending a duplicate.
-            // If no deltas arrived (a non-streaming provider, or text that
-            // came with no preceding delta at all), append the message whole,
-            // exactly as before deltas existed.
-            if (streamingId === null) {
+            // Deltas already streamed this message in, so the reply block
+            // already holds it; this only ends the stream rather than
+            // appending a duplicate. If no deltas arrived (a non-streaming
+            // provider, or text that came with no preceding delta at all),
+            // append the message whole, exactly as before deltas existed.
+            if (replyId === null) {
               replyText = event.text;
-              append(TEXT_KIND, { text: composeText() }, "assistant");
+              append(TEXT_KIND, { text: replyText }, "assistant");
             }
             resetStreaming();
           } else if (event.type === "tool") {
