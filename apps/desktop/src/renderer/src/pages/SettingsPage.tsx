@@ -1231,10 +1231,15 @@ export default function SettingsPage() {
                 )}
               </span>
               {entry.kind === "action" ? (
-                <span className="flex min-w-0 flex-1 items-start gap-3">
+                <span className="flex min-w-0 flex-1 items-center gap-3">
                   <span className="min-w-0 flex-1 text-muted-foreground">
                     {entry.description}
                   </span>
+                  {/* The button sits in the same fixed-width, centered column
+                   *  as the rows' value boxes (chevron + w-56 + chevron), so
+                   *  the action item's control lines up with every other
+                   *  setting's value. */}
+                  <span className="flex w-64 shrink-0 justify-center">
                   <button
                     type="button"
                     onClick={(event) => {
@@ -1251,6 +1256,7 @@ export default function SettingsPage() {
                   >
                     {entry.actionLabel}
                   </button>
+                  </span>
                 </span>
               ) : entry.kind === "keys" ? (
                 <span className="flex min-w-0 flex-1 flex-col items-start">
@@ -1374,10 +1380,7 @@ export default function SettingsPage() {
                             }
                           }}
                           className={cn(
-                            "w-56 border-b border-foreground/40 bg-transparent outline-none placeholder:text-muted-foreground/50",
-                            entry.kind === "string"
-                              ? "text-left"
-                              : "text-center",
+                            "w-56 border-b border-foreground/40 bg-transparent text-center outline-none placeholder:text-muted-foreground/50",
                           )}
                         />
                       ) : (
@@ -1389,9 +1392,7 @@ export default function SettingsPage() {
                             startEdit(entry);
                           }}
                           className={cn(
-                            "w-56 truncate tabular-nums text-right",
-                            entry.kind === "option" && "text-left",
-                            entry.kind === "string" && "text-left",
+                            "w-56 truncate tabular-nums text-center",
                             isEditable(entry)
                               ? "cursor-text hover:text-foreground"
                               : "",
