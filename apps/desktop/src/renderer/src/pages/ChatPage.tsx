@@ -47,7 +47,6 @@ type Popup =
   | { kind: "createKind" }
   | { kind: "createUser" }
   | { kind: "createLabel" }
-  | { kind: "createSession" }
   | { kind: "renameSession" }
   | null;
 
@@ -1283,14 +1282,9 @@ function ChatView({
    *  sessions `run` below, just against a graph that did not exist yet.
    *  Navigating to the new `?session=` is what makes `ChatPage` reload the
    *  sessions list too, so nothing here needs to refetch it directly. */
-  const createSession = async (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError("name is required");
-      return;
-    }
+  const createSession = async () => {
     setSaving(true);
-    const result = await window.api.chat.createChatSession(trimmed);
+    const result = await window.api.chat.createChatSession("New chat");
     setSaving(false);
     if (result.error || !result.id) {
       setError(result.error ?? "failed to create session");
@@ -1700,7 +1694,7 @@ function ChatView({
       key: "n",
       run: () => {
         setError(null);
-        setPopup({ kind: "createSession" });
+        void createSession();
       },
     },
     ...(session
@@ -1976,18 +1970,6 @@ function ChatView({
             setPendingKind(null);
             setPopup(null);
           }}
-        />
-      ) : null}
-
-      {popup?.kind === "createSession" ? (
-        <FieldEditor
-          id="create-session"
-          title="New session"
-          field={{ name: "name", label: "name", value: "" }}
-          error={error}
-          saving={saving}
-          onSubmit={(value) => void createSession(value)}
-          onCancel={() => setPopup(null)}
         />
       ) : null}
 
