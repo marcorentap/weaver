@@ -1,6 +1,6 @@
 import { ipcMain } from "electron";
 import type { Block, BlockGraph, Position } from "@repo/core";
-import { insertBlock, moveBlock, removeBlock } from "@repo/core";
+import { ENV_KIND, insertBlock, moveBlock, removeBlock, WEAVER_PWD } from "@repo/core";
 import { newId, type BlockInput, type Store } from "@repo/store";
 import { getStore } from "../lib/store.js";
 import { schemaMessage } from "../lib/schema-error.js";
@@ -158,10 +158,30 @@ function moveChatBlock(
 
 /** Creates a new, empty session (graph). The id it returns, not the name,
  *  is what callers should navigate with. Names are display-only and need
- *  not be unique. */
+ *  not be unique.
+ *
+ *  A fresh session is not quite empty: it starts with one `environment`
+ *  block pinning `WEAVER_PWD` to the weaver process's own working
+ *  directory, so relative media paths and agent runs in the new session
+ *  resolve exactly where the user launched weaver. A duplicate keeps its
+ *  source's blocks instead, so this default only lands on genuinely new
+ *  sessions. */
 function createChatSession(name: string): CreateSessionResult {
   const id = newId();
   pendingSessions.set(id, name);
+  const now = Date.now();
+  const envBlock: BlockInput = {
+    id: newId(),
+    kind: ENV_KIND,
+    label: "",
+    createdAt: now,
+    data: { text: `${WEAVER_PWD}=${process.cwd()}` },
+  };
+  const result = createChatBlock(id, envBlock, {
+    parentId: null,
+    afterId: null,
+  });
+  if (result.error) return { error: result.error, id: null };
   return { error: null, id };
 }
 
