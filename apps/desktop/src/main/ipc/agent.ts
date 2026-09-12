@@ -210,13 +210,17 @@ const THINKING_LEVELS = [
  *  ("asap"). */
 const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
 
-/** OpenRouter's app attribution: the `HTTP-Referer` header names this app
- *  on openrouter.ai and `X-Title` gives it a title; the docs require the
- *  two together (https://openrouter.ai/docs/app-attribution). Sent on
- *  every request to OpenRouter so usage lands under weaver's app page. */
+/** OpenRouter's attribution: `HTTP-Referer` names this app on openrouter.ai
+ *  and `X-OpenRouter-Title` sets its display name; the docs require them
+ *  together (https://openrouter.ai/docs/app-attribution) and `pi-coding-agent`
+ *  adds its own defaults (HTTP-Referer https://pi.dev, X-OpenRouter-Title pi,
+ *  X-OpenRouter-Categories cli-agent) that our request headers override via
+ *  the merge. Sent on every request to OpenRouter so usage lands under
+ *  weaver's app page. */
 const OPENROUTER_ATTRIBUTION = {
   "HTTP-Referer": "https://weaver.marcorentap.com",
-  "X-Title": "Weaver",
+  "X-OpenRouter-Title": "Weaver",
+  "X-OpenRouter-Categories": "personal-agent",
 } as const;
 
 /** Turns the renderer's `providerId`/`providerSettings` into that
