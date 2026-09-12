@@ -4,6 +4,7 @@ import { ENV_KIND, insertBlock, moveBlock, removeBlock, WEAVER_PWD } from "@repo
 import { newId, type BlockInput, type Store } from "@repo/store";
 import { getStore } from "../lib/store.js";
 import { schemaMessage } from "../lib/schema-error.js";
+import { newSessionTitle } from "../../shared/session-title.js";
 import type {
   ChatSessionSummary,
   CreateSessionResult,
@@ -47,7 +48,7 @@ function sessionGraph(store: Store, graphId: string): BlockGraph {
  */
 function ensureSessionRow(store: Store, graphId: string): void {
   if (store.getGraph(graphId)) return;
-  store.createGraphAt(graphId, pendingSessions.get(graphId)?.name ?? "New chat");
+  store.createGraphAt(graphId, pendingSessions.get(graphId)?.name ?? newSessionTitle());
 }
 
 /**
@@ -227,7 +228,7 @@ function createChatSession(name: string): CreateSessionResult {
 function duplicateChatSession(sourceId: string): CreateSessionResult {
   const store = getStore();
   const source = store.getGraph(sourceId);
-  const name = source ? `${source.name} copy` : "New chat";
+  const name = source ? `${source.name} copy` : newSessionTitle();
   const id = newId();
   pendingSessions.set(id, { name, graph: defaultGraph() });
   try {
@@ -314,7 +315,7 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
       const name =
         store.getGraph(graphId)?.name ??
         pendingSessions.get(graphId)?.name ??
-        "New chat";
+        newSessionTitle();
       pendingSessions.set(graphId, { name, graph: defaultGraph() });
       store.deleteGraph(graphId);
       return { error: null };

@@ -61,13 +61,21 @@ export const CHORD_LEADER_CHANNEL = "keymap:chord-leader";
 
 /**
  * Whether a `before-input-event` payload is one of the shell's swallowed
- * keys, returning the canonical combo name to forward (or null to let the
- * key flow normally). Today the shell swallows only the bare Ctrl+letter
- * shape — no meta/alt/shift held — so Ctrl+Shift+W, say, keeps flowing to
- * the page where it lands in the keymap as the same `"ctrl+w"` combo via
- * the DOM path. If a future key needs a different modifier shape, grow the
- * match here, never in main/index.ts, so "prevented and forwarded
- * together" stays true in exactly one place.
+ * keys. Returns the canonical combo to swallow plus whether it should also
+ * be forwarded to the page (or `null` to let the key flow normally). Today
+ * the shell swallows only the bare Ctrl+letter shape — no meta/alt/shift
+ * held — so Ctrl+Shift+W, say, keeps flowing to the page where it lands in
+ * the keymap as the same `"ctrl+w"` combo via the DOM path. If a future key
+ * needs a different modifier shape, grow the match here, never in
+ * main/index.ts, so "prevented and forwarded together" stays true in
+ * exactly one place.
+ *
+ * The auto-repeat carve-out: holding a leader (Ctrl+W) makes the OS repost
+ * the keydown. Every repeat must still be swallowed (or the menu's Close
+ * accelerator could fire on it), but only the FIRST press is forwarded. A
+ * forwarded repeat would resolve the very chord it armed — `ctrl+w q` held
+ * a moment too long would dispatch the follow-up `ctrl+w` as its own
+ * follower, turning the hold into `ctrl+w ctrl+w` = "next pane".
  */
 export function swallowedCombo(input: {
   key: string;
@@ -75,12 +83,14 @@ export function swallowedCombo(input: {
   meta: boolean;
   alt: boolean;
   shift: boolean;
-}): string | null {
+  isAutoRepeat?: boolean;
+}): { combo: string; forward: boolean } | null {
   if (!input.control || input.meta || input.alt || input.shift) return null;
   const name = keyComboName(input.key, {
     ctrl: true,
     meta: false,
     alt: false,
   });
-  return name && name in SWALLOWED_KEYS ? name : null;
+  if (!name || !(name in SWALLOWED_KEYS)) return null;
+  return { combo: name, forward: !input.isAutoRepeat };
 }

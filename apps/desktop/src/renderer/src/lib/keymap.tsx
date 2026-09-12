@@ -6,18 +6,11 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { KeyHelp } from "@/components/key-help";
 import { keyComboName } from "@shared/keys.js";
 
-/**
- * Modal keyboard navigation. The UI is a stack of key layers, in the vim sense
- * of modes: the bottom layer is normal mode (global keys, always live), each
- * page pushes its own layer, and a dialog pushes a modal layer on top.
- *
- * A layer's lifetime is its component's lifetime, so a mode can never be left
- * dangling by a route change or an unmounted dialog.
- */
 export type KeyBinding = {
   /**
    * Matched against `KeyboardEvent.key`, so "Enter" and "s" both work. A
@@ -48,9 +41,9 @@ export type KeyLayer = {
   /** Unique per mounted layer; also the mode name shown in help. */
   id: string;
   /**
-   * Modal layers swallow keys they do not bind. Non-modal layers fall through,
-   * which is how `tab` + digits and `[`/`]` keep switching tabs while a page
-   * layer is active.
+   * Modal layers swallow keys they do not bind. Non-modal layers fall
+   * through, which is how `tab` + digits and `[`/`]` keep switching tabs
+   * while a page layer is active.
    */
   modal?: boolean;
   bindings: KeyBinding[];
@@ -59,6 +52,13 @@ export type KeyLayer = {
    * owns them, like a text input, which the keymap deliberately ignores.
    */
   docs?: { keys: string; label: string }[];
+  /**
+   * The pane this layer belongs to, stamped by `useKeyLayer` when the
+   * component sits under a `KeyFrameProvider`. A scoped layer dispatches
+   * only while its pane is the one `KeymapProvider` was told has focus;
+   * scope-less layers (chrome, normal mode) are always reachable.
+   */
+  scope?: string;
 };
 
 /** Reserved by the harness, so it works even inside a modal layer. */
@@ -67,8 +67,8 @@ export const HELP_KEY = "?";
 type KeymapContext = {
   /**
    * Live layers, rewritten after every render of their owner. Bindings close
-   * over component state, so dispatch must read the newest object rather than
-   * one captured when the layer was pushed.
+   * over component state, so dispatch must read the newest object rather
+   * than one captured when the layer was pushed.
    */
   layers: Map<string, KeyLayer>;
   push: (id: string) => () => void;
@@ -84,6 +84,32 @@ function useKeymapContext(): KeymapContext {
   return value;
 }
 
+/**
+ * Pane scoping. Every mounted pane registers the key layers of the page it
+ * renders — a chat's chat mode, a settings form, a preview modal — under the
+ * same flat ids. With two panes alive those ids would collide in the shared
+ * registry and the last writer would own the keys of every pane showing that
+ * page. A `KeyFrameProvider` scopes its whole subtree to the pane's id,
+ * making each pane's layers distinct: the full id becomes `paneId::layerId`
+ * and the layer carries the pane's `scope`.
+ */
+const scopeContext = createContext<string | null>(null);
+
+/** Give a pane's subtree a key-scope. Every `useKeyLayer` below it is
+ *  scoped to this pane id, so two panes can never share a layer id, and it
+ *  dispatches only while this pane is the focused one. `KeymapProvider` is
+ *  told the focused id as a prop, so "which pane may dispatch" is a plain
+ *  value derived from the layout — not a side effect that can race a key. */
+export function KeyFrameProvider({
+  id,
+  children,
+}: {
+  id: string;
+  children: ReactNode;
+}) {
+  return <scopeContext.Provider value={id}>{children}</scopeContext.Provider>;
+}
+
 /** Open or close the help popup from outside the keymap. */
 export function useToggleHelp(): () => void {
   return useKeymapContext().toggleHelp;
@@ -97,7 +123,18 @@ function isTextEntry(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
-export function KeymapProvider({ children }: { children: React.ReactNode }) {
+export function KeymapProvider({
+  activePaneId,
+  children,
+}: {
+  /**
+   * The pane keyboard focus sits in, or null when nothing is focused (no
+   * active tab). The layout owns this value; scoped layers dispatch only
+   * while their scope equals it.
+   */
+  activePaneId: string | null;
+  children: ReactNode;
+}) {
   const [stack, setStack] = useState<string[]>([]);
   const [layers] = useState(() => new Map<string, KeyLayer>());
   const [helpOpen, setHelpOpen] = useState(false);
@@ -110,10 +147,13 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
   const countTimer = useRef<number | undefined>(undefined);
   const chordTimer = useRef<number | undefined>(undefined);
 
-  const push = useCallback((id: string) => {
-    setStack((current) => [...current, id]);
-    return () => setStack((current) => current.filter((entry) => entry !== id));
-  }, []);
+  const push = useCallback(
+    (id: string) => {
+      setStack((current) => [...current, id]);
+      return () => setStack((current) => current.filter((entry) => entry !== id));
+    },
+    [],
+  );
 
   useEffect(() => {
     function clearCount() {
@@ -129,38 +169,44 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Innermost layer first; a modal layer swallows the key even when it
-    // doesn't bind it, same as plain dispatch below.
+    // doesn't bind it, same as plain dispatch below. A scoped layer (a page
+    // inside a pane) counts only while its pane is the focused one — a
+    // hidden tab's panes can never match, because their ids differ.
+    const scopeLive = (layer: KeyLayer) =>
+      !layer.scope || layer.scope === activePaneId;
+
     function forEachReachableLayer(visit: (layer: KeyLayer) => boolean) {
       for (let i = stack.length - 1; i >= 0; i -= 1) {
         const layer = layers.get(stack[i] as string);
-        if (!layer) continue;
+        if (!layer || !scopeLive(layer)) continue;
         if (visit(layer)) return;
         if (layer.modal) return;
       }
     }
 
-    // The innermost modal layer, if any. Count prefixes are a non-modal-mode
-    // feature, so their presence turns digits back into ordinary keys, which
-    // a popup is then free to bind (a tab menu offering "1".."9").
+    // The innermost modal layer, if any. Count prefixes are a
+    // non-modal-mode feature, so their presence turns digits back into
+    // ordinary keys, which a popup is then free to bind (a tab menu
+    // offering "1".."9").
     function topModal(): KeyLayer | undefined {
       for (let i = stack.length - 1; i >= 0; i -= 1) {
         const layer = layers.get(stack[i] as string);
-        if (!layer) continue;
+        if (!layer || !scopeLive(layer)) continue;
         if (layer.modal) return layer;
       }
       return undefined;
     }
 
     // Modified-key dispatch, shared by the DOM keydown handler and the
-    // forwarded leaders (Ctrl+W, swallowed in the main process so the default
-    // Close accelerator can't kill the window, then sent here over IPC). A
-    // modified key lands in one of three places, in this order:
+    // forwarded leaders (Ctrl+W, swallowed in the main process so the
+    // default Close accelerator can't kill the window, then sent here over
+    // IPC). A modified key lands in one of three places, in this order:
     //
     // 1. as the follower of a pending chord (`ctrl+w ctrl+w` = next pane —
-    //    a second modified leader only ever arrives this way; the page's own
-    //    keydown is what the main process swallows);
-    // 2. as the leader of a modified chord (`ctrl+w`), parked until its plain
-    //    follower (`v`, `s`, `h`, …) arrives as a normal keydown;
+    //    a second modified leader only ever arrives this way; the page's
+    //    own keydown is what the main process swallows);
+    // 2. as the leader of a modified chord (`ctrl+w`), parked until its
+    //    plain follower (`v`, `s`, `h`, …) arrives as a normal keydown;
     // 3. as a plain modified binding (`alt+h` resize, `ctrl+d` page-down).
     const dispatchModifiedCombo = (combo: string): boolean => {
       // A modified key arriving while a chord is pending resolves that
@@ -211,26 +257,25 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
         return true;
       });
       return handled;
-    }
+    };
 
     function onKeyDown(event: KeyboardEvent) {
       if (isTextEntry(event.target)) return;
 
-      // This key the way bindings name it, via the shared `keys.ts` recipe
-      // the main process uses for the keys it swallows: plain keys by their
-      // `event.key`, modified ones by their `ctrl+`- / `alt+`-prefixed name.
-      // The main process leaves a ctrl/cmd+alt pairing alone, and so does
-      // this — an unclaimed browser shortcut keeps working.
+      // This key the way bindings name it: plain keys by their `event.key`,
+      // modified ones by their `ctrl+`- / `alt+`-prefixed name. The main
+      // process leaves a ctrl/cmd+alt pairing alone, and so does this — an
+      // unclaimed browser shortcut keeps working.
       const combo = keyComboName(event.key, {
         ctrl: event.ctrlKey,
         meta: event.metaKey,
         alt: event.altKey,
       });
 
-      // A leader that consumed the previous keydown resolves against non-
-      // exactly this key, hit or miss, matched by the follower's own name
-      // (a plain `v`, or a modified `ctrl+w`). A mistyped chord cancels
-      // instead of falling through to an unrelated single-key binding.
+      // A leader that consumed the previous keydown resolves against this
+      // key, hit or miss, matched by the follower's own name (a plain `v`,
+      // or a modified `ctrl+w`). A mistyped chord cancels instead of
+      // falling through to an unrelated single-key binding.
       if (pendingChord.current) {
         const leader = pendingChord.current;
         clearChord();
@@ -339,10 +384,10 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       if (isTextEntry(document.activeElement)) return;
       const handled = dispatchModifiedCombo(combo);
       // A swallowed key that no reachable layer bound the old design would
-      // have suffered silently: the main process eats the key AND the keymap
-      // has nothing to do with it, so the press just vanishes. Make it loud —
-      // either SWALLOWED_KEYS was added without a binding, the binding's
-      // layer unmounted, or a modal is standing in the way.
+      // have suffered silently: the main process eats the key AND the
+      // keymap has nothing to do with it, so the press just vanishes. Make
+      // it loud — either SWALLOWED_KEYS was added without a binding, the
+      // binding's layer unmounted, or a modal is standing in the way.
       if (!handled) {
         console.warn(
           `[keymap] swallowed key "${combo}" reached the page but no reachable layer binds it — check SWALLOWED_KEYS in shared/keys.ts`,
@@ -355,7 +400,7 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
       removeForwardedKeys();
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [stack, layers, helpOpen]);
+  }, [stack, layers, helpOpen, activePaneId]);
 
   const toggleHelp = useCallback(() => setHelpOpen((open) => !open), []);
 
@@ -365,11 +410,14 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Only the layers a key can actually reach, matching dispatch, everything
-  // from the innermost modal layer up.
+  // from the innermost modal layer up. Scoped layers of non-focused panes
+  // are skipped, so the popup shows only the pane under the cursor's modes.
   const reachable = stack
     .flatMap((id) => {
       const layer = layers.get(id);
-      return layer ? [layer] : [];
+      return layer && (!layer.scope || layer.scope === activePaneId)
+        ? [layer]
+        : [];
     })
     .reduce<KeyLayer[]>(
       (kept, layer) => (layer.modal ? [layer] : [...kept, layer]),
@@ -401,17 +449,24 @@ export function KeymapProvider({ children }: { children: React.ReactNode }) {
 export function useKeyLayer(layer: KeyLayer): void {
   const { layers, push } = useKeymapContext();
 
+  // Under a pane's `KeyFrameProvider`, scope the layer to that pane so its
+  // id is unique app-wide and it dispatches only while that pane is the
+  // active one (see `KeymapProvider`'s `activePaneId`).
+  const scope = useContext(scopeContext);
+  const fullId = scope ? `${scope}::${layer.id}` : layer.id;
+  const scoped: KeyLayer = scope ? { ...layer, scope } : layer;
+
   // Runs on every render, before the push below on mount, so the layer is
   // always current by the time a key is dispatched to it.
   useEffect(() => {
-    layers.set(layer.id, layer);
+    layers.set(fullId, scoped);
   });
 
   useEffect(() => {
-    const pop = push(layer.id);
+    const pop = push(fullId);
     return () => {
-      layers.delete(layer.id);
+      layers.delete(fullId);
       pop();
     };
-  }, [layers, push, layer.id]);
+  }, [layers, push, fullId]);
 }

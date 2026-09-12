@@ -13,6 +13,7 @@ import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { ChatSessionSummary, LoadGraphResult } from "@shared/ipc-contract.js";
+import { newSessionTitle } from "@shared/session-title.js";
 import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -1340,7 +1341,7 @@ function ChatView({
    *  sessions list too, so nothing here needs to refetch it directly. */
   const createSession = async () => {
     setSaving(true);
-    const result = await window.api.chat.createChatSession("New chat");
+    const result = await window.api.chat.createChatSession(newSessionTitle());
     setSaving(false);
     if (result.error || !result.id) {
       setError(result.error ?? "failed to create session");
@@ -1811,7 +1812,7 @@ function ChatView({
                 // whose pending name was never set.
                 void window.api.chat.deleteChatSession(graphId);
                 void window.api.chat
-                  .createChatSession("New chat")
+                  .createChatSession(newSessionTitle())
                   .then((result) => {
                     if (result.error || !result.id) {
                       navigate("/chat");

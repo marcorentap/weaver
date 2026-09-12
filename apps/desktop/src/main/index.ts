@@ -138,10 +138,16 @@ function createWindow(): BrowserWindow {
   // closes via the OS title bar / Alt+F4 / Quit.
   win.webContents.on("before-input-event", (event, input) => {
     if (input.type !== "keyDown") return;
-    const combo = swallowedCombo(input);
-    if (!combo) return;
+    const swallowed = swallowedCombo(input);
+    if (!swallowed) return;
     event.preventDefault();
-    win.webContents.send(CHORD_LEADER_CHANNEL, combo);
+    // Only the first press of a held leader is forwarded; the OS auto-repeat
+    // keydowns are still swallowed (so nothing else can react to them) but
+    // never sent, so a repeat can't resolve the chord it armed (see
+    // `swallowedCombo`).
+    if (swallowed.forward) {
+      win.webContents.send(CHORD_LEADER_CHANNEL, swallowed.combo);
+    }
   });
 
   if (isDev && process.env["ELECTRON_RENDERER_URL"]) {
