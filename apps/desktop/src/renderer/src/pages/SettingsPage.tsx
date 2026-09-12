@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   LINE_NUMBER_OPTIONS,
   MAX_FONT_SIZE,
@@ -10,6 +10,7 @@ import {
   type WordWrapMode,
 } from "@/lib/settings";
 import { useKeyLayer } from "@/lib/keymap";
+import { useViewportBindings } from "@/lib/viewport";
 import { providerUrl } from "@/lib/provider";
 import { cn } from "@/lib/utils";
 import type {
@@ -21,6 +22,11 @@ import type { RemoteInstanceStatus, RemoteKeySummary } from "@shared/remote.js";
 import { detectProvider } from "@shared/provider-routing.js";
 import { MarkdownText } from "@/components/markdown";
 import { ShellHeader } from "@/components/app-shell";
+import { Gutter } from "@/components/gutter";
+
+/** Rows nested under a group fold one notch right of the group header,
+ *  the same indent step chat's blocks use. */
+const INDENT_REM = 1;
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -119,6 +125,38 @@ type SettingDef =
       /** While a revoke is in flight, that key's button yields. */
       revokingId?: string | null;
     };
+
+/** One visible row of the settings list, mirroring a chat page row: a
+ *  line-number gutter, a label column, and the entry's own content. A
+ *  section header renders as a group row (the same shape chat gives a
+ *  group block), and the settings under it fold one notch deeper. */
+type Row =
+  | { kind: "group"; title: string }
+  | { kind: "entry"; def: SettingDef };
+
+/** Flatten the flat `defs` list into groups. Each definition carrying a
+ *  `section` starts a new group row; the definitions after it (until the
+ *  next one that names a section, or the end) become that group's rows.
+ *  `closed` holds the titles of groups folded like chat's collapsed
+ *  groups: their rows are left out of the list entirely (they get no
+ *  gutter number and no cursor), and reopening them reflows the numbers. */
+function flattenRows(defs: SettingDef[], closed: ReadonlySet<string>): Row[] {
+  const rows: Row[] = [];
+  let current: string | null = null;
+  for (const def of defs) {
+    if (def.section !== undefined) {
+      current = def.section;
+      rows.push({ kind: "group", title: def.section });
+      if (!closed.has(def.section)) rows.push({ kind: "entry", def });
+    } else if (current !== null) {
+      if (!closed.has(current)) rows.push({ kind: "entry", def });
+    } else {
+      // A definition before any section marker still renders, at top level.
+      rows.push({ kind: "entry", def });
+    }
+  }
+  return rows;
+}
 
 function displayValue(def: SettingDef): string {
   switch (def.kind) {
@@ -306,7 +344,14 @@ export default function SettingsPage() {
   const [keyError, setKeyError] = useState<string | null>(null);
   const [keyBusy, setKeyBusy] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
-const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  /** Anchors the shared page-scroll keys (`ctrl+d` / `ctrl+u` / `G` / `gg`)
+   *  to the scrolling box this page lives in, the shell's `<main>`. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const viewport = useViewportBindings(rootRef);
+  /** Sections the user has folded shut; their rows leave the list, like a
+   *  collapsed group in chat (they keep no gutter number and no cursor). */
+  const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
 
   /** Loaded plugins and their setting values, fetched over IPC so the
    *  Settings page reflects the plugins actually loaded, not a hardcoded
@@ -527,7 +572,7 @@ const inputRef = useRef<HTMLInputElement>(null);
       kind: "option",
       key: "lineNumber",
       label: "Line number",
-      description: "Show each block's position in the gutter.",
+      description: "Show each row's position in the gutter.",
       section: "Appearance",
       options: LINE_NUMBER_OPTIONS,
       value: settings.lineNumber,
@@ -824,12 +869,36 @@ const inputRef = useRef<HTMLInputElement>(null);
     }
   }
 
-  const index = Math.min(cursor, Math.max(defs.length - 1, 0));
-  const def = defs[index];
-  /** The row currently under the cursor, so the page follows it. A
-   *  callback ref because the row is a `<div>` in most branches but a
-   *  `<button>` in the action branch, and one `HTMLDivElement` ref can't
-   *  typecheck against both. */
+  /** Fold or unfold a section (its title is the group's key). */
+  const toggleGroup = (title: string) => {
+    setClosed((previous) => {
+      const next = new Set(previous);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  };
+
+  const rows = flattenRows(defs, closed);
+  const index = Math.min(cursor, Math.max(rows.length - 1, 0));
+  const row = rows[index];
+  /** The setting under the cursor; undefined while a group header is. */
+  const def = row?.kind === "entry" ? row.def : undefined;
+  /** Whether the gutter column is live at all (hidden before hydration so
+   *  the stored preference never flashes in with the wrong mode). */
+  const gutter = hydrated && settings.lineNumber !== "off";
+  /** Number for a row. Absolute is its 1-based position; relative is its
+   *  distance from the cursor, except the selected row, which reads its own
+   *  1-based position instead of the useless anchor `0`. Group headers
+   *  count as rows, exactly like chat's group blocks. */
+  const lineNumber = (i: number): number | null =>
+    gutter
+      ? settings.lineNumber === "relative" && i !== index
+        ? Math.abs(i - index)
+        : i + 1
+      : null;
+  /** The row currently under the cursor, so the page follows it. Every
+   *  branch renders a `<div>`, so one shared `HTMLDivElement` ref works. */
   const selectedRef = useRef<HTMLElement | null>(null);
   const setSelectedRef = useCallback((element: HTMLElement | null) => {
     selectedRef.current = element;
@@ -838,15 +907,15 @@ const inputRef = useRef<HTMLInputElement>(null);
   // Keep the selected row in view as the cursor moves. `block: "nearest"`
   // scrolls only when the row is actually off screen, so navigating near the
   // top or bottom never lurches the page. Also fires on remounts (the
-  // page re-renders when `defs` grows, e.g. plugins load) so a jump to the
-  // last row still lands on screen.
+  // page re-renders when `defs` grows, e.g. plugins load, or a group folds,
+  // changing the row count) so a jump to a row still lands on screen.
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: "nearest" });
-  }, [index, defs.length]);
+  }, [index, rows.length, closed]);
 
   const move = (delta: number) => {
-    if (defs.length === 0) return;
-    setCursor(Math.min(Math.max(index + delta, 0), defs.length - 1));
+    if (rows.length === 0) return;
+    setCursor(Math.min(Math.max(index + delta, 0), rows.length - 1));
   };
 
   const startEdit = (target: SettingDef) => {
@@ -983,6 +1052,9 @@ const inputRef = useRef<HTMLInputElement>(null);
   useKeyLayer({
     id: "settings",
     bindings: [
+      // The page-scroll keys every page shares: half a viewport with
+      // `ctrl+d`/`ctrl+u`, `G` to the bottom, `gg` to the top.
+      ...viewport,
       {
         keys: ["ArrowDown", "j"],
         help: { keys: "↓ / j", label: "Next setting" },
@@ -995,21 +1067,52 @@ const inputRef = useRef<HTMLInputElement>(null);
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: { keys: "← / h", label: "Previous value" },
-        run: () => def && cycle(def, -1),
+        help: {
+          keys: "← / h",
+          label: row?.kind === "group" ? "Close section" : "Previous value",
+        },
+        run: () => {
+          if (row?.kind === "group") {
+            // Only closing shuts a section; `h` on an already folded group
+            // is a no-op, the way chat's step-out is.
+            if (!closed.has(row.title)) toggleGroup(row.title);
+            return;
+          }
+          if (def) cycle(def, -1);
+        },
       },
       {
         keys: ["ArrowRight", "l"],
-        help: { keys: "→ / l", label: "Next value" },
-        run: () => def && cycle(def, 1),
+        help: {
+          keys: "→ / l",
+          label: row?.kind === "group" ? "Open section" : "Next value",
+        },
+        run: () => {
+          if (row?.kind === "group") {
+            // Unfold, or step into the first row once it is already open,
+            // chat's `l`-on-a-group "open then step in".
+            if (closed.has(row.title)) toggleGroup(row.title);
+            else move(1);
+            return;
+          }
+          if (def) cycle(def, 1);
+        },
       },
       {
         keys: ["Enter"],
         help: {
           keys: "enter",
-          label: def?.kind === "action" ? "Run" : "Type a value",
+          label:
+            row?.kind === "group"
+              ? "Fold / unfold section"
+              : def?.kind === "action"
+                ? "Run"
+                : "Type a value",
         },
-        run: () => def && (def.kind === "action" ? def.onRun() : startEdit(def)),
+        run: () =>
+          row?.kind === "group"
+            ? toggleGroup(row.title)
+            : def && (def.kind === "action" ? def.onRun() : startEdit(def)),
       },
     ],
   });
@@ -1029,7 +1132,7 @@ const inputRef = useRef<HTMLInputElement>(null);
   });
 
   return (
-    <div className="flex min-h-full flex-col">
+    <div ref={rootRef} className="flex min-h-full flex-col">
       {/* Rendered through the shell's header slot (like ChatPage) so the
        *  "Settings" line stays visible above the scroll area instead of
        *  scrolling out of view with the rows. */}
@@ -1040,302 +1143,322 @@ const inputRef = useRef<HTMLInputElement>(null);
       </ShellHeader>
 
       <div className="py-1">
-        {defs.map((entry, i) => {
+        {rows.map((row, i) => {
           const selected = i === index;
+          if (row.kind === "group") {
+            const folded = closed.has(row.title);
+            return (
+              <div
+                key={`group:${row.title}`}
+                ref={selected ? setSelectedRef : undefined}
+                aria-selected={selected}
+                aria-expanded={!folded}
+                onClick={() => setCursor(i)}
+                className={cn(
+                  "flex cursor-pointer items-start gap-3 py-1 pl-1 pr-3",
+                  selected && "bg-muted",
+                )}
+              >
+                <Gutter line={lineNumber(i)} show={gutter} current={selected} />
+                <span className="flex w-52 shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label={folded ? "Expand section" : "Collapse section"}
+                    // The row itself is the selection target, so the chevron
+                    // has to keep its click to itself, padded past the glyph.
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      toggleGroup(row.title);
+                    }}
+                    className="-my-1 shrink-0 p-1 text-muted-foreground hover:text-foreground"
+                  >
+                    {folded ? (
+                      <ChevronRight className="size-4" />
+                    ) : (
+                      <ChevronDown className="size-4" />
+                    )}
+                  </button>
+                  <span className="min-w-0 truncate font-medium text-muted-foreground">
+                    {row.title}
+                  </span>
+                </span>
+                {/* The content column stays empty; a section header carries
+                 *  no value of its own. */}
+                <span className="flex min-w-0 flex-1 items-start" />
+              </div>
+            );
+          }
+
+          const entry = row.def;
           const isEditing = editing === entry.key;
           const showPlaceholder =
             entry.kind === "string" &&
             !entry.value &&
             !isEditing &&
             entry.placeholder;
-          return entry.kind === "action" ? (
-            // The wrapper owns the scroll target so the section header
-            // (rendered above the row) is kept in view with the row, same
-            // as a chat block's header riding with its row.
-            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
-              {entry.section ? (
-                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
-                  {entry.section}
-                </div>
-              ) : null}
-              <button
-                type="button"
-                aria-selected={selected}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setCursor(i);
-                  entry.onRun();
-                }}
-                className={cn(
-                  "flex w-full cursor-pointer items-center gap-3 py-1 pl-1 pr-3 text-left",
-                  selected && "bg-muted",
-                )}
+          return (
+            <div
+              key={entry.key}
+              ref={selected ? setSelectedRef : undefined}
+              aria-selected={selected}
+              onClick={() => setCursor(i)}
+              className={cn(
+                "flex cursor-pointer items-start gap-3 py-1 pl-1 pr-3",
+                selected && "bg-muted",
+              )}
+            >
+              <Gutter line={lineNumber(i)} show={gutter} current={selected} />
+              {/* The label column, indented one notch because every setting
+               *  lives inside a section group, the chat page's group step. */}
+              <span
+                className="flex w-52 shrink-0 items-center gap-1"
+                style={{ paddingLeft: `${INDENT_REM}rem` }}
               >
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{entry.label}</span>
-                  <span className="block text-muted-foreground">
+                {entry.kind === "info" || entry.kind === "keys" ? null : (
+                  <span className="min-w-0 truncate font-medium">
+                    {entry.label}
+                  </span>
+                )}
+              </span>
+              {entry.kind === "action" ? (
+                <span className="flex min-w-0 flex-1 items-start gap-3">
+                  <span className="min-w-0 flex-1 text-muted-foreground">
                     {entry.description}
                   </span>
-                </span>
-                <span
-                  className={cn(
-                    "shrink-0 rounded border px-2 py-0.5 text-xs",
-                    entry.disabled
-                      ? "border-border/60 text-muted-foreground/50"
-                      : "border-foreground/30",
-                  )}
-                >
-                  {entry.actionLabel}
-                </span>
-              </button>
-            </div>
-          ) : entry.kind === "keys" ? (
-            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
-              {entry.section ? (
-                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
-                  {entry.section}
-                </div>
-              ) : null}
-              <div
-                aria-selected={selected}
-                onClick={() => setCursor(i)}
-                className={cn("px-1 py-1", selected && "bg-muted")}
-              >
-                <div className="text-muted-foreground">{entry.intro}</div>
-                {entry.keys.length === 0 ? (
-                  <div className="mt-1 text-muted-foreground">
-                    No keys yet — create one above.
-                  </div>
-                ) : (
-                  <div className="mt-1">
-                    {entry.keys.map((key) => {
-                      const expired =
-                        key.expiresAt !== null && key.expiresAt <= Date.now();
-                      const active = !key.revokedAt && !expired;
-                      const expires = key.expiresAt
-                        ? new Date(key.expiresAt).toLocaleDateString()
-                        : null;
-                      return (
-                        <div
-                          key={key.id}
-                          className="flex items-center gap-2 border-b border-border/60 py-1 last:border-b-0"
-                        >
-                          <span
-                            className={cn(
-                              "min-w-0 flex-1 truncate font-mono text-xs",
-                              !active && "text-muted-foreground line-through",
-                            )}
-                          >
-                            {key.name}
-                          </span>
-                          {key.admin ? (
-                            <span className="shrink-0 text-[10px] text-muted-foreground">
-                              admin
-                            </span>
-                          ) : null}
-                          <span className="shrink-0 text-[10px] text-muted-foreground">
-                            {key.revokedAt
-                              ? "revoked"
-                              : expired
-                                ? "expired"
-                                : expires
-                                  ? `until ${expires}`
-                                  : "no expiry"}
-                          </span>
-                          {active ? (
-                            <button
-                              type="button"
-                              disabled={entry.revokingId === key.id}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                void entry.onRevoke(key.id);
-                              }}
-                              className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-destructive disabled:cursor-wait disabled:opacity-40"
-                            >
-                              Revoke
-                            </button>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : entry.kind === "info" ? (
-            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
-              {entry.section ? (
-                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
-                  {entry.section}
-                </div>
-              ) : null}
-              <div
-                aria-selected={selected}
-                onClick={() => setCursor(i)}
-                className={cn(
-                  "cursor-pointer px-1 py-1",
-                  selected && "bg-muted",
-                )}
-              >
-                <MarkdownText text={entry.content} />
-              </div>
-            </div>
-          ) : (
-            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
-              {entry.section ? (
-                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
-                  {entry.section}
-                </div>
-              ) : null}
-              <div
-                aria-selected={selected}
-                onClick={() => setCursor(i)}
-                className={cn(
-                  "flex cursor-pointer items-center gap-3 py-1 pl-1 pr-3",
-                  selected && "bg-muted",
-                )}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{entry.label}</span>
-                  <span className="block text-muted-foreground">
-                    {entry.description}
-                  </span>
-                </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  <span className="flex size-4 shrink-0 items-center justify-center">
-                    {entry.kind === "string" ? null : (
-                      <button
-                        type="button"
-                        aria-label="Previous value"
-                        disabled={!hydrated}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setCursor(i);
-                          cycle(entry, -1);
-                        }}
-                        className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        <ChevronLeft className="size-4" />
-                      </button>
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setCursor(i);
+                      entry.onRun();
+                    }}
+                    className={cn(
+                      "shrink-0 cursor-pointer rounded border px-2 py-0.5 text-xs",
+                      entry.disabled
+                        ? "border-border/60 text-muted-foreground/50"
+                        : "border-foreground/30",
                     )}
-                  </span>
-                  {isEditing ? (
-                    <input
-                      ref={inputRef}
-                      value={draft}
-                      type={
-                        entry.kind === "string" && entry.secret
-                          ? "password"
-                          : "text"
-                      }
-                      placeholder={
-                        entry.kind === "string" ? entry.placeholder : undefined
-                      }
-                      inputMode={entry.kind === "number" ? "decimal" : "text"}
-                      spellCheck={false}
-                      onClick={(event) => event.stopPropagation()}
-                      onChange={(event) => setDraft(event.target.value)}
-                      onBlur={finishEdit}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          finishEdit();
-                        } else if (event.key === "Escape") {
-                          event.preventDefault();
-                          setFieldError(null);
-                          setEditing(null);
-                        }
-                      }}
-                      className={cn(
-                        "w-56 border-b border-foreground/40 bg-transparent outline-none placeholder:text-muted-foreground/50",
-                        entry.kind === "string" ? "text-left" : "text-center",
-                      )}
-                    />
+                  >
+                    {entry.actionLabel}
+                  </button>
+                </span>
+              ) : entry.kind === "keys" ? (
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="text-muted-foreground">{entry.intro}</span>
+                  {entry.keys.length === 0 ? (
+                    <span className="mt-1 text-muted-foreground">
+                      No keys yet — create one above.
+                    </span>
                   ) : (
-                    <span
-                      onClick={(event) => {
-                        if (!isEditable(entry)) return;
-                        event.stopPropagation();
-                        setCursor(i);
-                        startEdit(entry);
-                      }}
-                      className={cn(
-                        "w-56 truncate tabular-nums",
-                        entry.kind === "string" ? "text-left" : "text-center",
-                        isEditable(entry)
-                          ? "cursor-text hover:text-foreground"
-                          : "",
-                      )}
-                    >
-                      {hydrated
-                        ? showPlaceholder
-                          ? (
-                              <span className="text-muted-foreground/50">
-                                {entry.placeholder}
+                    <span className="mt-1 w-full">
+                      {entry.keys.map((key) => {
+                        const expired =
+                          key.expiresAt !== null && key.expiresAt <= Date.now();
+                        const active = !key.revokedAt && !expired;
+                        const expires = key.expiresAt
+                          ? new Date(key.expiresAt).toLocaleDateString()
+                          : null;
+                        return (
+                          <span
+                            key={key.id}
+                            className="flex w-full items-center gap-2 border-b border-border/60 py-1 last:border-b-0"
+                          >
+                            <span
+                              className={cn(
+                                "min-w-0 flex-1 truncate font-mono text-xs",
+                                !active && "text-muted-foreground line-through",
+                              )}
+                            >
+                              {key.name}
+                            </span>
+                            {key.admin ? (
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
+                                admin
                               </span>
-                            )
-                          : displayValue(entry)
-                        : ""}
+                            ) : null}
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {key.revokedAt
+                                ? "revoked"
+                                : expired
+                                  ? "expired"
+                                  : expires
+                                    ? `until ${expires}`
+                                    : "no expiry"}
+                            </span>
+                            {active ? (
+                              <button
+                                type="button"
+                                disabled={entry.revokingId === key.id}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void entry.onRevoke(key.id);
+                                }}
+                                className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-destructive disabled:cursor-wait disabled:opacity-40"
+                              >
+                                Revoke
+                              </button>
+                            ) : null}
+                          </span>
+                        );
+                      })}
                     </span>
                   )}
-                  <span className="flex size-4 shrink-0 items-center justify-center">
-                    {entry.kind === "string" ? null : (
-                      <button
-                        type="button"
-                        aria-label="Next value"
-                        disabled={!hydrated}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setCursor(i);
-                          cycle(entry, 1);
-                        }}
-                        className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-                      >
-                        <ChevronRight className="size-4" />
-                      </button>
-                    )}
-                  </span>
                 </span>
-              </div>
-              {isEditing && fieldError ? (
-                <div className="px-1 pb-1 pl-1 text-destructive">
-                  {entry.label}: {fieldError}
-                </div>
-              ) : null}
-              {!isEditing && entry.kind === "option" && entry.warning ? (
-                <div className="px-1 pb-1 pl-1 text-destructive">
-                  {entry.label}: {entry.warning}
-                </div>
-              ) : null}
-              {entry.kind === "string" && entry.key === "aiApiKey" && probe ? (
-                <div
-                  className={cn(
-                    "px-1 pb-1 pl-1",
-                    probe.ok === false
-                      ? "text-destructive"
-                      : "text-muted-foreground",
-                  )}
-                >
-                  Provider: {probe.message}
-                </div>
-              ) : null}
-              {entry.kind === "string" &&
-              entry.key === "aiDefaultModel" &&
-              probe?.models?.length ? (
-                <div className="py-1 pl-1 pr-3">
-                  <span className="block font-medium">Available models</span>
-                  <div className="mt-1 max-h-40 overflow-auto rounded border border-border font-mono text-xs text-muted-foreground">
-                    {probe.models.map((model) => (
-                      <div
-                        key={model}
-                        className="border-b border-border/60 px-2 py-1 last:border-b-0"
-                      >
-                        {model}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              ) : entry.kind === "info" ? (
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <MarkdownText text={entry.content} />
+                </span>
+              ) : (
+                <span className="flex min-w-0 flex-1 flex-col items-start">
+                  <span className="flex w-full items-start gap-3">
+                    <span className="min-w-0 flex-1 text-muted-foreground">
+                      {entry.description}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="flex size-4 shrink-0 items-center justify-center">
+                        {entry.kind === "string" ? null : (
+                          <button
+                            type="button"
+                            aria-label="Previous value"
+                            disabled={!hydrated}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setCursor(i);
+                              cycle(entry, -1);
+                            }}
+                            className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            <ChevronLeft className="size-4" />
+                          </button>
+                        )}
+                      </span>
+                      {isEditing ? (
+                        <input
+                          ref={inputRef}
+                          value={draft}
+                          type={
+                            entry.kind === "string" && entry.secret
+                              ? "password"
+                              : "text"
+                          }
+                          placeholder={
+                            entry.kind === "string"
+                              ? entry.placeholder
+                              : undefined
+                          }
+                          inputMode={
+                            entry.kind === "number" ? "decimal" : "text"
+                          }
+                          spellCheck={false}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => setDraft(event.target.value)}
+                          onBlur={finishEdit}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              finishEdit();
+                            } else if (event.key === "Escape") {
+                              event.preventDefault();
+                              setFieldError(null);
+                              setEditing(null);
+                            }
+                          }}
+                          className={cn(
+                            "w-56 border-b border-foreground/40 bg-transparent outline-none placeholder:text-muted-foreground/50",
+                            entry.kind === "string"
+                              ? "text-left"
+                              : "text-center",
+                          )}
+                        />
+                      ) : (
+                        <span
+                          onClick={(event) => {
+                            if (!isEditable(entry)) return;
+                            event.stopPropagation();
+                            setCursor(i);
+                            startEdit(entry);
+                          }}
+                          className={cn(
+                            "w-56 truncate tabular-nums text-right",
+                            entry.kind === "string" && "text-left",
+                            isEditable(entry)
+                              ? "cursor-text hover:text-foreground"
+                              : "",
+                          )}
+                        >
+                          {hydrated
+                            ? showPlaceholder
+                              ? (
+                                  <span className="text-muted-foreground/50">
+                                    {entry.placeholder}
+                                  </span>
+                                )
+                              : displayValue(entry)
+                            : ""}
+                        </span>
+                      )}
+                      <span className="flex size-4 shrink-0 items-center justify-center">
+                        {entry.kind === "string" ? null : (
+                          <button
+                            type="button"
+                            aria-label="Next value"
+                            disabled={!hydrated}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setCursor(i);
+                              cycle(entry, 1);
+                            }}
+                            className="text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                          >
+                            <ChevronRight className="size-4" />
+                          </button>
+                        )}
+                      </span>
+                    </span>
+                  </span>
+                  {isEditing && fieldError ? (
+                    <span className="mt-0.5 text-destructive">
+                      {entry.label}: {fieldError}
+                    </span>
+                  ) : null}
+                  {!isEditing && entry.kind === "option" && entry.warning ? (
+                    <span className="mt-0.5 text-destructive">
+                      {entry.label}: {entry.warning}
+                    </span>
+                  ) : null}
+                  {entry.kind === "string" && entry.key === "aiApiKey" && probe ? (
+                    <span
+                      className={cn(
+                        "text-xs",
+                        probe.ok === false
+                          ? "text-destructive"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      Provider: {probe.message}
+                    </span>
+                  ) : null}
+                  {entry.kind === "string" &&
+                  entry.key === "aiDefaultModel" &&
+                  probe?.models?.length ? (
+                    <span className="w-full py-1">
+                      <span className="block font-medium">
+                        Available models
+                      </span>
+                      <span className="mt-1 block max-h-40 overflow-auto rounded border border-border font-mono text-xs text-muted-foreground">
+                        {probe.models.map((model) => (
+                          <span
+                            key={model}
+                            className="block border-b border-border/60 px-2 py-1 last:border-b-0"
+                          >
+                            {model}
+                          </span>
+                        ))}
+                      </span>
+                    </span>
+                  ) : null}
+                </span>
+              )}
             </div>
           );
         })}

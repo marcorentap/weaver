@@ -23,6 +23,7 @@ import type { KeyMenuItem } from "@/components/key-menu";
 import { KeyMenu } from "@/components/key-menu";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
+import { findScroller, scrollHalfPage, scrollToExtent } from "@/lib/viewport";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
@@ -423,21 +424,25 @@ function PreviewModal({
     scroller()?.scrollBy({ top: lines * 20 });
   };
 
-  /** Half a viewport at a time — vim's Ctrl-D/Ctrl-U scroll step. */
+  /** Half a viewport at a time — vim's Ctrl-D/Ctrl-U scroll step, the same
+   *  step every page's `useViewportBindings` shares. */
   const scrollPage = (direction: 1 | -1) => {
     const element = scroller();
-    element?.scrollBy({ top: (direction * element.clientHeight) / 2 });
+    if (element) scrollHalfPage(element, direction);
   };
 
   /** `G` jumps to the bottom, `gg` back to the top. (The preview is a
    *  modal layer, so the keymap never feeds it a count prefix — `<n>G`
-   *  stays a plain `G`.) */
+   *  stays a plain `G`.) A bare `G` reuses the shared bottom jump; a
+   *  line number is the preview's own, one 20px line per step. */
   const jumpTo = (line: number | undefined) => {
     const element = scroller();
     if (!element) return;
-    element.scrollTo({
-      top: line === undefined ? element.scrollHeight : (line - 1) * 20,
-    });
+    if (line === undefined) {
+      scrollToExtent(element, true);
+      return;
+    }
+    element.scrollTo({ top: (line - 1) * 20 });
   };
 
   useKeyLayer({
@@ -757,12 +762,10 @@ function ChatView({
     if (rows.length === 0) return;
     const root = listRef.current;
     if (!root) return;
-    // The nearest ancestor that actually scrolls, AppShell's `<main>`. With
-    // nothing to scroll, a page is the whole list, so jump to the ends.
-    let scroller: HTMLElement | null = root;
-    while (scroller && scroller.scrollHeight <= scroller.clientHeight) {
-      scroller = scroller.parentElement;
-    }
+    // The nearest ancestor that actually scrolls, AppShell's `<main>`,
+    // found by the shared viewport module. With nothing to scroll, a page
+    // is the whole list, so jump to the ends.
+    const scroller = findScroller(root);
     const items = Array.from(
       root.querySelectorAll<HTMLElement>("[data-index]"),
     ).sort(
