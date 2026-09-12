@@ -1062,14 +1062,6 @@ function ChatView({
         },
       },
       {
-        keys: ["X"],
-        help: { keys: "X", label: "Run custom inference" },
-        run: () => {
-          if (visualAnchor === null && row)
-            setPopup({ kind: "customInference" });
-        },
-      },
-      {
         keys: ["v"],
         help: { keys: "v", label: "Toggle visual selection" },
         run: () =>
