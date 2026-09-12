@@ -5,6 +5,7 @@ import { registerChatHandlers } from "./ipc/chat.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
+import { registerRemoteHandlers, startServerFromStoredSettings } from "./ipc/remote.js";
 import { ensurePluginsLoaded } from "./lib/plugins.js";
 
 // setName() only sets the display name now. WM_CLASS/app_id comes from
@@ -63,6 +64,10 @@ void app.whenReady().then(async () => {
   registerAgentHandlers();
   registerSettingsHandlers();
   registerPluginHandlers();
+  registerRemoteHandlers();
+  // If the operator left this machine's server on, bring it back up before
+  // the window opens so a remote peer is never left hanging on a restart.
+  startServerFromStoredSettings();
 
   createWindow();
 

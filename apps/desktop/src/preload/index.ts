@@ -12,6 +12,14 @@ import type {
   ProviderUsageResult,
   WeaverApi,
 } from "../shared/ipc-contract.js";
+import type {
+  RemoteCheckResult,
+  RemoteCreateKeyRequest,
+  RemoteCreateKeyResult,
+  RemoteInstanceResult,
+  RemoteInstanceStatus,
+  RemoteKeySummary,
+} from "../shared/remote.js";
 import type { BlockInput } from "@repo/store";
 import type { Position } from "@repo/core";
 
@@ -95,6 +103,30 @@ const api: WeaverApi = {
         void ipcRenderer.invoke("agent:run:cancel", runId);
         cleanup();
       };
+    },
+  },
+  remote: {
+    check: (host, port, key) =>
+      ipcRenderer.invoke("remote:check", host, port, key) as Promise<RemoteCheckResult>,
+    instance: {
+      status: () =>
+        ipcRenderer.invoke("remote:instance:status") as Promise<RemoteInstanceStatus>,
+      start: (port, host) =>
+        ipcRenderer.invoke(
+          "remote:instance:start",
+          port,
+          host,
+        ) as Promise<RemoteInstanceResult>,
+      stop: () =>
+        ipcRenderer.invoke("remote:instance:stop") as Promise<void>,
+    },
+    keys: {
+      list: () =>
+        ipcRenderer.invoke("remote:keys:list") as Promise<RemoteKeySummary[]>,
+      create: (request: RemoteCreateKeyRequest) =>
+        ipcRenderer.invoke("remote:keys:create", request) as Promise<RemoteCreateKeyResult>,
+      revoke: (id: string) =>
+        ipcRenderer.invoke("remote:keys:revoke", id) as Promise<void>,
     },
   },
 };

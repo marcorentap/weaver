@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   LINE_NUMBER_OPTIONS,
@@ -17,8 +17,10 @@ import type {
   PluginSettingFieldWire,
   ProviderUsageResult,
 } from "@shared/ipc-contract.js";
+import type { RemoteInstanceStatus, RemoteKeySummary } from "@shared/remote.js";
 import { detectProvider } from "@shared/provider-routing.js";
 import { MarkdownText } from "@/components/markdown";
+import { ShellHeader } from "@/components/app-shell";
 
 /**
  * A setting's shape decides how it is displayed and edited:
@@ -91,6 +93,31 @@ type SettingDef =
       key: string;
       section?: string;
       content: string;
+    }
+  | {
+      /** An action rather than a value: create a key, start the server, or
+       *  whatever else a settings row needs. Enter clicks it. */
+      kind: "action";
+      key: string;
+      label: string;
+      description: string;
+      section?: string;
+      /** Label of the button on the row, e.g. "Create". */
+      actionLabel: string;
+      onRun: () => void;
+      disabled?: boolean;
+    }
+  | {
+      /** The keys a machine's own instance has issued, with a revoke
+       *  button on each. Not a value to set; the row just is the list. */
+      kind: "keys";
+      key: string;
+      section?: string;
+      intro: string;
+      keys: RemoteKeySummary[];
+      onRevoke: (id: string) => Promise<void> | void;
+      /** While a revoke is in flight, that key's button yields. */
+      revokingId?: string | null;
     };
 
 function displayValue(def: SettingDef): string {
@@ -105,6 +132,8 @@ function displayValue(def: SettingDef): string {
     case "string":
       return def.value ? (def.secret ? "•".repeat(8) : def.value) : "";
     case "info":
+    case "action":
+    case "keys":
       return "";
   }
 }
@@ -156,6 +185,53 @@ function commitEdit(def: EditableSettingDef, raw: string) {
   }
 }
 
+/** On/off choice used by the remote toggles. */
+const ON_OFF_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+] as const;
+
+/** Lifetimes offered when creating a key, and their seconds. */
+const KEY_LIFETIME_OPTIONS = [
+  { value: "never", label: "Never" },
+  { value: "1h", label: "1 hour" },
+  { value: "12h", label: "12 hours" },
+  { value: "24h", label: "1 day" },
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+  { value: "90d", label: "90 days" },
+] as const;
+
+const KEY_LIFETIME_SECONDS: Readonly<Record<string, number | null>> = {
+  never: null,
+  "1h": 3600,
+  "12h": 43200,
+  "24h": 86400,
+  "7d": 604800,
+  "30d": 2592000,
+  "90d": 7776000,
+};
+
+const YES_NO_OPTIONS = [
+  { value: "no", label: "No" },
+  { value: "yes", label: "Yes" },
+] as const;
+
+/** Whether a host string is a usable http(s) base URL. */
+function hostOk(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      Boolean(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** OpenRouter's key usage, as a markdown table for the "info" row under
  *  provider settings. Credits are USD, 1:1. */
 function usageMarkdown(usage: NonNullable<ProviderUsageResult["usage"]>): string {
@@ -185,6 +261,13 @@ export default function SettingsPage() {
     setAiApiKey,
     setAiDefaultModel,
     setProviderField,
+    setRemoteEnabled,
+    setRemoteHost,
+    setRemotePort,
+    setRemoteKey,
+    setRemoteServerEnabled,
+    setRemoteServerHost,
+    setRemoteServerPort,
   } = useSettings();
   const [cursor, setCursor] = useState(0);
   const [editing, setEditing] = useState<string | null>(null);
@@ -201,6 +284,28 @@ export default function SettingsPage() {
   /** OpenRouter's own per-key usage; unrelated to `probe`, `null` when not
    *  applicable or not fetched yet. */
   const [usage, setUsage] = useState<ProviderUsageResult | null>(null);
+  /** Result of the last remote connection probe; `ok: null` in flight. */
+  const [remoteProbe, setRemoteProbe] = useState<{
+    ok: boolean | null;
+    message: string;
+    admin: boolean;
+  } | null>(null);
+  /** Status of this machine's own server and a message from its last
+   *  start/stop (a bind error, say). */
+  const [instanceStatus, setInstanceStatus] = useState<
+    RemoteInstanceStatus | null
+  >(null);
+  const [instanceMessage, setInstanceMessage] = useState<string | null>(null);
+  /** Keys this machine has issued. */
+  const [remoteKeys, setRemoteKeys] = useState<RemoteKeySummary[]>([]);
+  /** New-key form state; only the newest token is shown, once. */
+  const [keyName, setKeyName] = useState("");
+  const [keyLifetime, setKeyLifetime] = useState("24h");
+  const [keyAdmin, setKeyAdmin] = useState(false);
+  const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
 const inputRef = useRef<HTMLInputElement>(null);
 
   /** Loaded plugins and their setting values, fetched over IPC so the
@@ -308,6 +413,114 @@ const inputRef = useRef<HTMLInputElement>(null);
   }
 
   const provider = detectProvider(settings.aiEndpoint);
+
+  /** Re-read this machine's server status and its keys. */
+  const refreshRemoteState = useCallback(async () => {
+    const [status, keys] = await Promise.all([
+      window.api.remote.instance.status(),
+      window.api.remote.keys.list(),
+    ]);
+    setInstanceStatus(status);
+    setRemoteKeys(keys);
+  }, []);
+
+  /** Turn the machine's own server on or off. */
+  const toggleServer = async (next: boolean) => {
+    setRemoteServerEnabled(next);
+    if (next) {
+      const result = await window.api.remote.instance.start(
+        settings.remoteServerPort,
+        settings.remoteServerHost,
+      );
+      setInstanceMessage(result.ok ? null : result.message);
+    } else {
+      await window.api.remote.instance.stop();
+      setInstanceMessage(null);
+    }
+    setInstanceStatus(await window.api.remote.instance.status());
+  };
+
+  /** Create a key with the form's name/lifetime/admin, then show its token
+   *  exactly once. */
+  const createKey = async () => {
+    if (keyBusy) return;
+    setKeyBusy(true);
+    setKeyError(null);
+    try {
+      const result = await window.api.remote.keys.create({
+        name: keyName.trim() || undefined,
+        lifetimeSeconds: KEY_LIFETIME_SECONDS[keyLifetime] ?? null,
+        admin: keyAdmin,
+      });
+      setCreatedKey(result.key);
+      setKeyName("");
+      setRemoteKeys(await window.api.remote.keys.list());
+    } catch (error) {
+      setKeyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setKeyBusy(false);
+    }
+  };
+
+  const revokeKey = async (id: string) => {
+    setRevokingId(id);
+    setKeyError(null);
+    try {
+      await window.api.remote.keys.revoke(id);
+      setRemoteKeys(await window.api.remote.keys.list());
+    } catch (error) {
+      setKeyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  /** Asks the remote instance whether the current credentials work, for the
+   *  connection row; runs on every committed host/port/key change. */
+  const checkRemoteConnection = useCallback(
+    async (host: string, port: number, key: string) => {
+      if (!host.trim() && !key.trim()) {
+        setRemoteProbe(null);
+        return;
+      }
+      setRemoteProbe({ ok: null, message: "checking…", admin: false });
+      try {
+        const verdict = await window.api.remote.check(host, port, key);
+        setRemoteProbe({
+          ok: verdict.ok,
+          message: verdict.message,
+          admin: verdict.admin,
+        });
+      } catch (error) {
+        setRemoteProbe({
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+          admin: false,
+        });
+      }
+    },
+    [],
+  );
+
+  const remoteConnectionText = remoteProbe
+    ? remoteProbe.ok === null
+      ? "Checking…"
+      : `${remoteProbe.ok ? "Connected" : "Failed"}: ${remoteProbe.message}${remoteProbe.admin ? " (admin)" : ""}`
+    : "Not checked.";
+
+  const serverStatusText = instanceStatus?.running
+    ? `Running at ${instanceStatus.url}${instanceMessage ? ` — ${instanceMessage}` : ""}.`
+    : instanceMessage
+      ? `Stopped (${instanceMessage}).`
+      : "Stopped.";
+
+  const createdKeyText = createdKey
+    ? `**Copy it now — shown once**: \`${createdKey}\``
+    : "";
+
+  const keyErrorText = keyError
+    ? `⚠ ${keyError}`
+    : "";
 
   const defs: SettingDef[] = [
     {
@@ -442,6 +655,149 @@ const inputRef = useRef<HTMLInputElement>(null);
           },
         ]
       : []),
+
+    // Remote: where this app sends its agent runs when the toggle is on.
+    {
+      kind: "option",
+      key: "remoteEnabled",
+      label: "Use remote instance",
+      description: "Run agent blocks on another weaver instance.",
+      section: "Remote",
+      options: ON_OFF_OPTIONS,
+      value: settings.remoteEnabled ? "on" : "off",
+      onChange: (value) => setRemoteEnabled(value === "on"),
+    },
+    {
+      kind: "string",
+      key: "remoteHost",
+      label: "URL",
+      description: "Base URL of the instance.",
+      value: settings.remoteHost,
+      onChange: setRemoteHost,
+      placeholder: "http://192.168.1.20",
+      validate: (value) =>
+        hostOk(value) ? null : "needs a scheme and host, e.g. http://192.168.1.20",
+    },
+    {
+      kind: "number",
+      key: "remotePort",
+      label: "Port",
+      description: "Connection port.",
+      value: settings.remotePort,
+      step: 1,
+      min: 1,
+      max: 65535,
+      onChange: setRemotePort,
+    },
+    {
+      kind: "string",
+      key: "remoteKey",
+      label: "Key",
+      description: "Key issued by the instance.",
+      value: settings.remoteKey,
+      onChange: setRemoteKey,
+      secret: true,
+      placeholder: "wrk_...",
+    },
+    {
+      kind: "info",
+      key: "remoteConnection",
+      section: undefined,
+      content: !settings.remoteHost.trim() && !settings.remoteKey.trim()
+        ? "Not configured."
+        : remoteConnectionText,
+    },
+
+    // This machine's own server: the toggle is also the start/stop.
+    {
+      kind: "option",
+      key: "remoteServerEnabled",
+      label: "Serve this machine",
+      description: "Accept connections from other weaver apps.",
+      section: "Remote server",
+      options: ON_OFF_OPTIONS,
+      value: settings.remoteServerEnabled ? "on" : "off",
+      // Not a plain setter: the switch is a live start/stop, and only
+      // reports back once the instance has actually come up.
+      onChange: (value) => void toggleServer(value === "on"),
+    },
+    {
+      kind: "string",
+      key: "remoteServerHost",
+      label: "Listen host",
+      description: "Interface to listen on.",
+      value: settings.remoteServerHost,
+      onChange: setRemoteServerHost,
+      placeholder: "0.0.0.0",
+    },
+    {
+      kind: "number",
+      key: "remoteServerPort",
+      label: "Listen port",
+      description: "Port others connect to.",
+      value: settings.remoteServerPort,
+      step: 1,
+      min: 1,
+      max: 65535,
+      onChange: setRemoteServerPort,
+    },
+    {
+      kind: "info",
+      key: "remoteServerStatus",
+      content: serverStatusText,
+    },
+
+    // Keys this machine has issued.
+    {
+      kind: "string",
+      key: "remoteNewKeyName",
+      label: "Name",
+      description: "Key name.",
+      section: "Remote keys",
+      value: keyName,
+      onChange: setKeyName,
+      placeholder: "laptop",
+    },
+    {
+      kind: "option",
+      key: "remoteNewKeyLifetime",
+      label: "Lifetime",
+      description: "How long the key is valid.",
+      options: KEY_LIFETIME_OPTIONS,
+      value: keyLifetime,
+      onChange: setKeyLifetime,
+    },
+    {
+      kind: "option",
+      key: "remoteNewKeyAdmin",
+      label: "Admin",
+      description: "Mark the key as admin.",
+      options: YES_NO_OPTIONS,
+      value: keyAdmin ? "yes" : "no",
+      onChange: (value) => setKeyAdmin(value === "yes"),
+    },
+    {
+      kind: "action",
+      key: "remoteCreateKey",
+      label: "Create key",
+      description: "Issue a new key.",
+      actionLabel: keyBusy ? "…" : "Create",
+      disabled: keyBusy,
+      onRun: () => void createKey(),
+    },
+    {
+      kind: "info",
+      key: "remoteKeyResult",
+      content: keyErrorText || createdKeyText,
+    },
+    {
+      kind: "keys",
+      key: "remoteKeysList",
+      intro: "Key tokens show once, at creation. Create a new key if you lost one.",
+      keys: remoteKeys,
+      revokingId,
+      onRevoke: revokeKey,
+    },
   ];
 
   // Plugin contributions come last: a "Plugins" section for the directory
@@ -470,6 +826,23 @@ const inputRef = useRef<HTMLInputElement>(null);
 
   const index = Math.min(cursor, Math.max(defs.length - 1, 0));
   const def = defs[index];
+  /** The row currently under the cursor, so the page follows it. A
+   *  callback ref because the row is a `<div>` in most branches but a
+   *  `<button>` in the action branch, and one `HTMLDivElement` ref can't
+   *  typecheck against both. */
+  const selectedRef = useRef<HTMLElement | null>(null);
+  const setSelectedRef = useCallback((element: HTMLElement | null) => {
+    selectedRef.current = element;
+  }, []);
+
+  // Keep the selected row in view as the cursor moves. `block: "nearest"`
+  // scrolls only when the row is actually off screen, so navigating near the
+  // top or bottom never lurches the page. Also fires on remounts (the
+  // page re-renders when `defs` grows, e.g. plugins load) so a jump to the
+  // last row still lands on screen.
+  useEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, [index, defs.length]);
 
   const move = (delta: number) => {
     if (defs.length === 0) return;
@@ -551,6 +924,36 @@ const inputRef = useRef<HTMLInputElement>(null);
     return () => clearTimeout(timer);
   }, [hydrated, provider?.id, settings.aiEndpoint, settings.aiApiKey, fetchUsage]);
 
+  // Remote: read this machine's server status and keys once on visit.
+  useEffect(() => {
+    const timer = setTimeout(() => void refreshRemoteState(), 0);
+    return () => clearTimeout(timer);
+  }, [refreshRemoteState]);
+
+  // Probe the remote connection whenever its host/port/key changes, the
+  // same deferred-out-of-the-effect shape as the provider probe above.
+  useEffect(() => {
+    if (!hydrated) return;
+    const timer = setTimeout(() => {
+      if (!settings.remoteHost.trim() && !settings.remoteKey.trim()) {
+        setRemoteProbe(null);
+        return;
+      }
+      void checkRemoteConnection(
+        settings.remoteHost,
+        settings.remotePort,
+        settings.remoteKey,
+      );
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [
+    hydrated,
+    settings.remoteHost,
+    settings.remotePort,
+    settings.remoteKey,
+    checkRemoteConnection,
+  ]);
+
   const finishEdit = () => {
     if (!editing || !def || def.key !== editing || !isEditable(def)) {
       setEditing(null);
@@ -602,8 +1005,11 @@ const inputRef = useRef<HTMLInputElement>(null);
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "Type a value" },
-        run: () => def && startEdit(def),
+        help: {
+          keys: "enter",
+          label: def?.kind === "action" ? "Run" : "Type a value",
+        },
+        run: () => def && (def.kind === "action" ? def.onRun() : startEdit(def)),
       },
     ],
   });
@@ -624,9 +1030,14 @@ const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="border-b px-3 py-1">
-        <span className="font-semibold">Settings</span>
-      </header>
+      {/* Rendered through the shell's header slot (like ChatPage) so the
+       *  "Settings" line stays visible above the scroll area instead of
+       *  scrolling out of view with the rows. */}
+      <ShellHeader>
+        <header className="border-b px-3 py-1">
+          <span className="font-semibold">Settings</span>
+        </header>
+      </ShellHeader>
 
       <div className="py-1">
         {defs.map((entry, i) => {
@@ -637,8 +1048,122 @@ const inputRef = useRef<HTMLInputElement>(null);
             !entry.value &&
             !isEditing &&
             entry.placeholder;
-          return entry.kind === "info" ? (
-            <Fragment key={entry.key}>
+          return entry.kind === "action" ? (
+            // The wrapper owns the scroll target so the section header
+            // (rendered above the row) is kept in view with the row, same
+            // as a chat block's header riding with its row.
+            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
+              {entry.section ? (
+                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
+                  {entry.section}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                aria-selected={selected}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setCursor(i);
+                  entry.onRun();
+                }}
+                className={cn(
+                  "flex w-full cursor-pointer items-center gap-3 py-1 pl-1 pr-3 text-left",
+                  selected && "bg-muted",
+                )}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{entry.label}</span>
+                  <span className="block text-muted-foreground">
+                    {entry.description}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded border px-2 py-0.5 text-xs",
+                    entry.disabled
+                      ? "border-border/60 text-muted-foreground/50"
+                      : "border-foreground/30",
+                  )}
+                >
+                  {entry.actionLabel}
+                </span>
+              </button>
+            </div>
+          ) : entry.kind === "keys" ? (
+            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
+              {entry.section ? (
+                <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
+                  {entry.section}
+                </div>
+              ) : null}
+              <div
+                aria-selected={selected}
+                onClick={() => setCursor(i)}
+                className={cn("px-1 py-1", selected && "bg-muted")}
+              >
+                <div className="text-muted-foreground">{entry.intro}</div>
+                {entry.keys.length === 0 ? (
+                  <div className="mt-1 text-muted-foreground">
+                    No keys yet — create one above.
+                  </div>
+                ) : (
+                  <div className="mt-1">
+                    {entry.keys.map((key) => {
+                      const expired =
+                        key.expiresAt !== null && key.expiresAt <= Date.now();
+                      const active = !key.revokedAt && !expired;
+                      const expires = key.expiresAt
+                        ? new Date(key.expiresAt).toLocaleDateString()
+                        : null;
+                      return (
+                        <div
+                          key={key.id}
+                          className="flex items-center gap-2 border-b border-border/60 py-1 last:border-b-0"
+                        >
+                          <span
+                            className={cn(
+                              "min-w-0 flex-1 truncate font-mono text-xs",
+                              !active && "text-muted-foreground line-through",
+                            )}
+                          >
+                            {key.name}
+                          </span>
+                          {key.admin ? (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              admin
+                            </span>
+                          ) : null}
+                          <span className="shrink-0 text-[10px] text-muted-foreground">
+                            {key.revokedAt
+                              ? "revoked"
+                              : expired
+                                ? "expired"
+                                : expires
+                                  ? `until ${expires}`
+                                  : "no expiry"}
+                          </span>
+                          {active ? (
+                            <button
+                              type="button"
+                              disabled={entry.revokingId === key.id}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void entry.onRevoke(key.id);
+                              }}
+                              className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-destructive disabled:cursor-wait disabled:opacity-40"
+                            >
+                              Revoke
+                            </button>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : entry.kind === "info" ? (
+            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
               {entry.section ? (
                 <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
                   {entry.section}
@@ -654,9 +1179,9 @@ const inputRef = useRef<HTMLInputElement>(null);
               >
                 <MarkdownText text={entry.content} />
               </div>
-            </Fragment>
+            </div>
           ) : (
-            <Fragment key={entry.key}>
+            <div key={entry.key} ref={selected ? setSelectedRef : undefined}>
               {entry.section ? (
                 <div className="px-1 pt-3 pb-1 text-muted-foreground/70">
                   {entry.section}
@@ -811,7 +1336,7 @@ const inputRef = useRef<HTMLInputElement>(null);
                   </div>
                 </div>
               ) : null}
-            </Fragment>
+            </div>
           );
         })}
       </div>

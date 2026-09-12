@@ -1,6 +1,14 @@
 import type { BlockGraph, Position } from "@repo/core";
 import type { BlockInput } from "@repo/store";
 import type { AgentEvent, AgentRunRequest } from "./agent-events.js";
+import type {
+  RemoteCheckResult,
+  RemoteCreateKeyRequest,
+  RemoteCreateKeyResult,
+  RemoteInstanceResult,
+  RemoteInstanceStatus,
+  RemoteKeySummary,
+} from "./remote.js";
 
 /**
  * The scheme a `weaver-media://` URL is served under. Registered as a
@@ -161,6 +169,23 @@ export interface WeaverApi {
   plugins: {
     /** The configured plugin directory and every loaded plugin. */
     list(): Promise<PluginListResult>;
+  };
+  remote: {
+    /** Does the connection to the configured instance actually work, and
+     *  which role does the given key have there? */
+    check(host: string, port: number, key: string): Promise<RemoteCheckResult>;
+    /** This machine's own server instance, the one Settings toggles. */
+    instance: {
+      status(): Promise<RemoteInstanceStatus>;
+      start(port: number, host?: string): Promise<RemoteInstanceResult>;
+      stop(): Promise<void>;
+    };
+    /** Keys this machine has issued. */
+    keys: {
+      list(): Promise<RemoteKeySummary[]>;
+      create(request: RemoteCreateKeyRequest): Promise<RemoteCreateKeyResult>;
+      revoke(id: string): Promise<void>;
+    };
   };
 }
 
