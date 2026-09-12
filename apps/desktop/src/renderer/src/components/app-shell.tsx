@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { SettingsProvider } from "@/lib/settings";
@@ -178,6 +178,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [renaming, setRenaming] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  // `useNavigate` is stable on a data router, but the shell uses the
+  // declarative `<HashRouter>`, whose `navigate` is recreated on every
+  // location change (its identity depends on the current pathname). The
+  // boot effect below must run exactly once, so it captures `navigate` in
+  // a ref rather than listing it in its deps — listing it would re-run the
+  // effect on every navigation, opening a brand-new session and kicking
+  // the tab back to chat no matter what page had just been opened.
+  const navigateRef = useRef(navigate);
+  /** Latest tabs, for the boot effect's claim check below. */
+  const tabsRef = useRef(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   // The startup tab is a fresh chat: create a session the shell has never
   // shown and point the startup tab at it. Starting at the chat home page
@@ -185,22 +198,33 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // session; navigating to the new session's own URL avoids that, and the
   // location effect below records it into the tab, so switching away and
   // back returns to this new session rather than resuming an old one.
+  // The claim only sticks while the startup tab still sits on the untouched
+  // chat home page: if the user already pointed it at Settings (or another
+  // session) within the few milliseconds this IPC is in flight, the boot
+  // session has no claim on the tab and must not yank it back to chat.
   useEffect(() => {
     let cancelled = false;
     void window.api.chat.createChatSession("New chat").then((result) => {
       if (cancelled || result.error || !result.id) return;
       const to = `/chat?session=${encodeURIComponent(result.id)}`;
+      const stillUnclaimed = tabsRef.current.some(
+        (tab) =>
+          tab.id === STARTUP_TAB.id &&
+          tab.pageId === PAGES[0]!.id &&
+          tab.to === PAGES[0]!.href,
+      );
+      if (!stillUnclaimed) return;
       setTabs((entries) =>
         entries.map((tab) =>
           tab.id === STARTUP_TAB.id ? { ...tab, to } : tab,
         ),
       );
-      navigate(to);
+      navigateRef.current(to);
     });
     return () => {
       cancelled = true;
     };
-  }, [navigate]);
+  }, []);
 
   const activeIndex = Math.max(
     tabs.findIndex((tab) => tab.id === activeId),
@@ -253,18 +277,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     navigate(page.href);
   };
 
-  /** `n` in the popup: a fresh tab on the home page, activated at once. */
+  /** `n` in the popup: a fresh tab on a brand-new empty session, activated at
+   *  once. `/chat` alone would fall back to the most recently modified
+   *  session, so the tab points straight at the new session's own URL, like
+   *  the boot tab does. An empty session they never write to is dropped on
+   *  restart, which is fine: it was never more than a blank chat. */
   const newTab = () => {
     const page = PAGES[0]!;
-    const tab: Tab = {
-      id: crypto.randomUUID(),
-      pageId: page.id,
-      to: page.href,
-    };
-    setTabs((entries) => [...entries, tab]);
     setPickerOpen(false);
-    setActiveId(tab.id);
-    navigate(page.href);
+    void window.api.chat.createChatSession("New chat").then((result) => {
+      if (result.error || !result.id) {
+        // Fall back to the plain home page rather than leaving `n` dead:
+        // the chat view then shows the most recent session instead of a
+        // fresh one, which is still a usable tab.
+        const tab: Tab = {
+          id: crypto.randomUUID(),
+          pageId: page.id,
+          to: page.href,
+        };
+        setTabs((entries) => [...entries, tab]);
+        setActiveId(tab.id);
+        navigate(page.href);
+        return;
+      }
+      const to = `/chat?session=${encodeURIComponent(result.id)}`;
+      const tab: Tab = {
+        id: crypto.randomUUID(),
+        pageId: page.id,
+        to,
+      };
+      setTabs((entries) => [...entries, tab]);
+      setActiveId(tab.id);
+      navigate(to);
+    });
   };
 
   /** `r` in the popup: a custom label for the active tab. Clearing it falls
