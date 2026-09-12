@@ -483,6 +483,7 @@ export async function runAgent(
         "Reading a whole non-code file returns its first page, marked truncated when the file is longer. A directory lists its immediate entries, one per line, subdirectories marked with a trailing /; http(s):// only reads files.",
         "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
         "Default is line mode: 1-indexed `offset`/`limit`. Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both; neither applies to a directory.",
+        "This is the tool for looking at a file: `bash`'s `cat`/`head`/`sed` dump the whole file into the transcript without the symbol index and windows above, so don't use `bash` for reading.",
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
