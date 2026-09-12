@@ -156,32 +156,50 @@ function moveChatBlock(
   return rewrite(graphId, (graph) => moveBlock(graph, blockId, at));
 }
 
+/**
+ * The default graph a fresh chat starts with: one `environment` block
+ * pinning `WEAVER_PWD` to the weaver process's own working directory, so
+ * relative media paths and agent runs in the new session resolve exactly
+ * where the user launched weaver. A duplicate keeps its source's blocks
+ * instead, so this default only lands on genuinely new sessions.
+ *
+ * It is handed to the view on load and never persisted by itself: a
+ * session whose graph is still just the default has not been touched, so
+ * no row is created for it. The session's row first materializes with the
+ * autosave that fires once the graph is actually dirty (a real edit, a
+ * block added), taking the default block along with whatever the user
+ * changed. This is what keeps a session the user never touched out of the
+ * database entirely.
+ */
+function defaultGraph(): BlockGraph {
+  const now = Date.now();
+  const envId = newId();
+  const envBlock: Block = {
+    id: envId,
+    kind: ENV_KIND,
+    label: "env",
+    createdAt: now,
+    modifiedAt: now,
+    next: null,
+    children: null,
+    data: { text: `${WEAVER_PWD}=${process.cwd()}` },
+  };
+  return { blocks: { [envId]: envBlock }, root: envId };
+}
+
 /** Creates a new, empty session (graph). The id it returns, not the name,
  *  is what callers should navigate with. Names are display-only and need
  *  not be unique.
  *
- *  A fresh session is not quite empty: it starts with one `environment`
- *  block pinning `WEAVER_PWD` to the weaver process's own working
- *  directory, so relative media paths and agent runs in the new session
- *  resolve exactly where the user launched weaver. A duplicate keeps its
- *  source's blocks instead, so this default only lands on genuinely new
- *  sessions. */
+ *  Nothing is written here: a fresh session only gets the default graph
+ *  (`environment` block, see `defaultGraph`), and that comes from
+ *  `loadGraph` rather than being persisted, so creating a chat the user
+ *  never touches costs the database nothing. The row is created together
+ *  with the first real write (`saveGraph`), under the name remembered in
+ *  `pendingSessions`. */
 function createChatSession(name: string): CreateSessionResult {
   const id = newId();
   pendingSessions.set(id, name);
-  const now = Date.now();
-  const envBlock: BlockInput = {
-    id: newId(),
-    kind: ENV_KIND,
-    label: "env",
-    createdAt: now,
-    data: { text: `${WEAVER_PWD}=${process.cwd()}` },
-  };
-  const result = createChatBlock(id, envBlock, {
-    parentId: null,
-    afterId: null,
-  });
-  if (result.error) return { error: result.error, id: null };
   return { error: null, id };
 }
 
@@ -308,7 +326,12 @@ function saveGraph(graphId: string, blocks: BlockInput[]): MutationResult {
  * needs on mount. A session is a graph; "recent" is its last write.
  * `session` resolves an explicit id or falls back to the most recently
  * modified one.
- */
+ *
+ * A pending session (a name remembered, no row yet) loads the default
+ * graph rather than nothing, so a fresh chat shows its `environment` block
+ * without any write having happened; only a real edit makes the first save
+ * materialize the row. A session with no row and no pending name, or none
+ * at all, is empty and renders as "no session". */
 function loadGraph(session?: string): LoadGraphResult {
   const store = getStore();
 
@@ -341,7 +364,7 @@ function loadGraph(session?: string): LoadGraphResult {
     const name = pendingSessions.get(wanted);
     if (name) open = { id: wanted, name };
   }
-  const graph = active ? store.loadGraph(active.id) : EMPTY_GRAPH;
+  const graph = active ? store.loadGraph(active.id) : open ? defaultGraph() : EMPTY_GRAPH;
 
   return { graph, sessions, session: open };
 }
