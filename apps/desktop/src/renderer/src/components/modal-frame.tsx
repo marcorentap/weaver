@@ -11,7 +11,7 @@ export function ModalFrame({
   title,
   meta,
   footer,
-  size = "md",
+  size = "lg",
   onClose,
   children,
 }: {
@@ -19,8 +19,9 @@ export function ModalFrame({
   title: string;
   meta?: ReactNode;
   footer?: ReactNode;
-  /** `lg` is for previews, which need room for the media itself; `xl` for
-   *  wide dialogs like the settings-style custom inference form. */
+  /** The default `lg` matches the preview popup's width, so every popup
+   *  shares the same frame; `xl` is for wide dialogs like the settings-style
+   *  custom inference form. */
   size?: "md" | "lg" | "xl";
   /** Clicking the backdrop leaves the mode, the same as the popup's esc. */
   onClose: () => void;
