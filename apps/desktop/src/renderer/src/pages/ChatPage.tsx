@@ -10,15 +10,28 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ChevronDown, ChevronRight, EyeOff, Lock, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
-import { childIds, GROUP_KIND, lastChildId, TEXT_KIND, textState, topLevelBlockIds } from "@repo/core";
+import {
+  childIds,
+  GROUP_KIND,
+  lastChildId,
+  TEXT_KIND,
+  textState,
+  topLevelBlockIds,
+} from "@repo/core";
 import type { BlockInput } from "@repo/store";
-import type { ChatSessionSummary, LoadGraphResult } from "@shared/ipc-contract.js";
+import type {
+  ChatSessionSummary,
+  LoadGraphResult,
+} from "@shared/ipc-contract.js";
 import { newSessionTitle } from "@shared/session-title.js";
 import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
 import { viewFor } from "@/blocks/views";
-import { CustomInferenceDialog, type CustomInferenceRun } from "@/components/custom-inference";
+import {
+  CustomInferenceDialog,
+  type CustomInferenceRun,
+} from "@/components/custom-inference";
 import { FieldEditor } from "@/components/field-editor";
 import { Gutter } from "@/components/gutter";
 import type { KeyMenuItem } from "@/components/key-menu";
@@ -44,6 +57,7 @@ type Popup =
   | { kind: "sessions" }
   | { kind: "preview" }
   | { kind: "customInference" }
+  | { kind: "customSummary"; take: BlockId[] }
   | { kind: "field"; field: BlockField }
   | { kind: "labelField" }
   | { kind: "configure" }
@@ -134,7 +148,9 @@ function InsertGap({
         onClick={locked ? undefined : onClick}
         disabled={locked}
         aria-label={locked ? "Locked while streaming in" : "Insert block here"}
-        title={locked ? "locked while a reply is still streaming in" : undefined}
+        title={
+          locked ? "locked while a reply is still streaming in" : undefined
+        }
         className={cn(
           "absolute right-3 top-0 z-10 -translate-y-1/2 rounded border border-white bg-background p-0.5 text-muted-foreground opacity-0 focus-visible:opacity-100",
           locked
@@ -164,7 +180,9 @@ function originClass(block: Block): string {
 
 /** What "Copy content" (`y`) means for a kind, or null for a kind with no
  *  single string worth copying; "Copy ID" already covers the block itself. */
-function copyableContent(block: Block): { label: string; value: string } | null {
+function copyableContent(
+  block: Block,
+): { label: string; value: string } | null {
   switch (block.kind) {
     case TEXT_KIND:
     case USER_KIND:
@@ -172,7 +190,10 @@ function copyableContent(block: Block): { label: string; value: string } | null 
     case MEDIA_KIND:
       return { label: "Copy URI", value: mediaState.parse(block.data).uri };
     case TOOL_KIND:
-      return { label: "Copy output", value: toolState.parse(block.data).output };
+      return {
+        label: "Copy output",
+        value: toolState.parse(block.data).output,
+      };
     default:
       return null;
   }
@@ -299,11 +320,7 @@ function BlockRow({
       onClick={onSelect}
       className={cn(
         "relative flex cursor-pointer items-start gap-3 py-1 pl-1 pr-3",
-        selected
-          ? "bg-muted"
-          : inSelection
-            ? "bg-muted/70"
-            : undefined,
+        selected ? "bg-muted" : inSelection ? "bg-muted/70" : undefined,
         hidden && "opacity-60",
       )}
     >
@@ -613,14 +630,12 @@ function ChatView({
    *  the same render it lands, if its container was not already expanded.
    *  `openActions` distinguishes "just created, show its actions" (create
    *  flow) from "just moved, only follow the cursor" (move/nest keys). */
-  const [pendingFocus, setPendingFocus] = useState<
-    {
-      id: BlockId;
-      openActions: boolean;
-      runInference?: boolean;
-      customInference?: boolean;
-    } | null
-  >(null);
+  const [pendingFocus, setPendingFocus] = useState<{
+    id: BlockId;
+    openActions: boolean;
+    runInference?: boolean;
+    customInference?: boolean;
+  } | null>(null);
   const { settings, hydrated } = useSettings();
 
   // ---- Live graph state --------------------------------------------------
@@ -656,12 +671,14 @@ function ChatView({
   useEffect(() => {
     const timers = scheduledHooks(engine.getSnapshot().graph).map((entry) =>
       setInterval(() => {
-        engine.runHook(entry.id, entry.hook).catch((error) =>
-          console.error(
-            `scheduled hook "${entry.hook}" on ${entry.id} failed:`,
-            error,
-          ),
-        );
+        engine
+          .runHook(entry.id, entry.hook)
+          .catch((error) =>
+            console.error(
+              `scheduled hook "${entry.hook}" on ${entry.id} failed:`,
+              error,
+            ),
+          );
       }, entry.intervalMs),
     );
     return () => timers.forEach(clearInterval);
@@ -677,10 +694,7 @@ function ChatView({
   // call the latest closure (current `session`, current engine).
   const performSave = useCallback(async (): Promise<void> => {
     if (!session) return;
-    const result = await saveGraphMutation(
-      session.id,
-      engine.toBlockInputs(),
-    );
+    const result = await saveGraphMutation(session.id, engine.toBlockInputs());
     if (result.error) {
       engine.markSaveFailed();
       console.error("save failed:", result.error);
@@ -718,8 +732,7 @@ function ChatView({
       setCursor(i);
       if (pendingFocus.openActions) setPopup({ kind: "actions" });
       if (pendingFocus.runInference) void runInference(pendingFocus.id);
-      if (pendingFocus.customInference)
-        setPopup({ kind: "customInference" });
+      if (pendingFocus.customInference) setPopup({ kind: "customInference" });
       setPendingFocus(null);
     }
   }
@@ -892,7 +905,9 @@ function ChatView({
 
   /** The chain a container holds, in order. The top-level chain for null. */
   const siblingsOf = (containerId: BlockId | null) =>
-    containerId === null ? topLevelBlockIds(graph) : childIds(graph, containerId);
+    containerId === null
+      ? topLevelBlockIds(graph)
+      : childIds(graph, containerId);
 
   /** Relinks `id` at `at` locally and on the server, then follows it to its
    *  new row. The single path behind `J`/`K` and `>`/`<`. Every structural
@@ -920,7 +935,9 @@ function ChatView({
     // previous one, which is "after the one before it", or first in the
     // chain when there is nothing before it.
     const afterId =
-      direction === 1 ? (siblings[target] as BlockId) : (siblings[target - 1] ?? null);
+      direction === 1
+        ? (siblings[target] as BlockId)
+        : (siblings[target - 1] ?? null);
     relocate(row.block.id, { parentId: container, afterId });
   };
 
@@ -970,23 +987,88 @@ function ChatView({
     custom?: Partial<CustomInferenceRun>,
   ): Promise<void> {
     if (!session) return Promise.resolve();
-    const { aiEndpoint, aiApiKey, aiDefaultModel, aiProviderSettings,
-      noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles } = settings;
+    const {
+      aiEndpoint,
+      aiApiKey,
+      aiProviderSettings,
+      inferDefaultModel,
+      inferThinkingLevel,
+      inferNoExtensions,
+      inferNoSkills,
+      inferNoPromptTemplates,
+      inferNoThemes,
+      inferNoContextFiles,
+    } = settings;
     const endpoint = custom?.endpoint ?? aiEndpoint;
     const provider = detectProvider(endpoint);
     return engine.runInference(id, {
       endpoint,
       apiKey: custom?.apiKey ?? aiApiKey,
-      model: custom?.model ?? aiDefaultModel,
+      model: custom?.model ?? inferDefaultModel,
+      thinkingLevel: (custom?.thinkingLevel ?? inferThinkingLevel) || undefined,
       providerId: custom?.providerId ?? provider?.id,
       providerSettings:
         custom?.providerSettings ??
         (provider ? aiProviderSettings[provider.id] : undefined),
-      noExtensions: custom?.noExtensions ?? noExtensions,
-      noSkills: custom?.noSkills ?? noSkills,
-      noPromptTemplates: custom?.noPromptTemplates ?? noPromptTemplates,
-      noThemes: custom?.noThemes ?? noThemes,
-      noContextFiles: custom?.noContextFiles ?? noContextFiles,
+      noExtensions: custom?.noExtensions ?? inferNoExtensions,
+      noSkills: custom?.noSkills ?? inferNoSkills,
+      noPromptTemplates: custom?.noPromptTemplates ?? inferNoPromptTemplates,
+      noThemes: custom?.noThemes ?? inferNoThemes,
+      noContextFiles: custom?.noContextFiles ?? inferNoContextFiles,
+    });
+  }
+
+  /**
+   * The `s` / `S` block and selection-menu action: stream a short summary of
+   * `take` — the block under the cursor, or the whole visual selection — in
+   * isolation, not of the conversation around it. `s` runs with the
+   * summarization settings (the settings page's "Summarization settings"
+   * section); `S` opens the custom dialog, whose one-run overrides land
+   * here the same way `X`'s do in `runInference`. Each blank summarization
+   * field falls back to the inference setting beside it, so a fresh install
+   * that never touched the summarization rows still gets a working run out
+   * of the AI provider it already configured. `take`'s last id anchors the
+   * run, so the summary appends right after the block or selection. The
+   * run itself is a plain LLM call (`engine.summarize` sets `plain`), so
+   * none of the inference harness — tools, skills, extensions, prompt
+   * templates, themes, context files — applies to it.
+   */
+  function runSummary(
+    take: BlockId[],
+    custom?: Partial<CustomInferenceRun>,
+  ): Promise<void> {
+    if (!session || take.length === 0) return Promise.resolve();
+    // The empty check above guarantees a last element.
+    const anchor = take[take.length - 1]!;
+    const {
+      aiEndpoint,
+      aiApiKey,
+      aiProviderSettings,
+      inferDefaultModel,
+      inferThinkingLevel,
+      summDefaultModel,
+      summProviderSettings,
+      summThinkingLevel,
+    } = settings;
+    // Summarization shares the endpoint and key with inference; only the
+    // model and thinking level have their own defaults, each falling back
+    // to the inference setting when blank.
+    const endpoint = custom?.endpoint ?? aiEndpoint;
+    const provider = detectProvider(endpoint);
+    return engine.summarize(anchor, take, {
+      endpoint,
+      apiKey: custom?.apiKey ?? aiApiKey,
+      model: custom?.model ?? (summDefaultModel || inferDefaultModel),
+      thinkingLevel:
+        (custom?.thinkingLevel ?? (summThinkingLevel || inferThinkingLevel)) ||
+        undefined,
+      providerId: custom?.providerId ?? provider?.id,
+      providerSettings:
+        custom?.providerSettings ??
+        (provider
+          ? (summProviderSettings[provider.id] ??
+            aiProviderSettings[provider.id])
+          : undefined),
     });
   }
 
@@ -1433,6 +1515,22 @@ function ChatView({
               setPopup({ kind: "customInference" });
             },
           },
+          {
+            label: "Summarize",
+            key: "s",
+            run: () => {
+              setPopup(null);
+              void runSummary([row.block.id]);
+            },
+          },
+          {
+            label: "Custom summarize",
+            key: "S",
+            run: () => {
+              setError(null);
+              setPopup({ kind: "customSummary", take: [row.block.id] });
+            },
+          },
           ...(locked
             ? []
             : (view.fields?.(row.block) ?? []).map((field, i) => ({
@@ -1449,7 +1547,9 @@ function ChatView({
                   : { detail: field.value || field.placeholder }),
                 run: () => openField(field),
               }))),
-          ...(!locked && kind && (kind.hooks.length > 0 || kind.callbacks.length > 0)
+          ...(!locked &&
+          kind &&
+          (kind.hooks.length > 0 || kind.callbacks.length > 0)
             ? [
                 {
                   label: "Configure",
@@ -1542,10 +1642,9 @@ function ChatView({
 
   /**
    * The visual-selection menu (`v` then `enter`): copy every selected
-   * block's content, joined, delete the whole range, or group it under a
-   * new block. A kind's own actions (preview, configure, run inference)
-   * stay single-block only. "Run inference on N blocks at once" has no
-   * obvious single meaning yet.
+   * block's content, joined, summarize the selection in isolation, delete
+   * the whole range, or group it under a new block. A kind's own actions
+   * (preview, configure, run inference) stay single-block only.
    */
   const selectionLocked = selectedRows.some((entry) =>
     lockedIds.has(entry.block.id),
@@ -1565,6 +1664,28 @@ function ChatView({
               void navigator.clipboard.writeText(text);
               setPopup(null);
               setVisualAnchor(null);
+            },
+          },
+          {
+            label: "Summarize",
+            key: "s",
+            detail: `${selectedRows.length} block${selectedRows.length === 1 ? "" : "s"}, compressed in isolation`,
+            run: () => {
+              setPopup(null);
+              setVisualAnchor(null);
+              void runSummary(selectedRows.map((entry) => entry.block.id));
+            },
+          },
+          {
+            label: "Custom summarize",
+            key: "S",
+            detail: `${selectedRows.length} block${selectedRows.length === 1 ? "" : "s"}, compressed in isolation`,
+            run: () => {
+              setError(null);
+              setPopup({
+                kind: "customSummary",
+                take: selectedRows.map((entry) => entry.block.id),
+              });
             },
           },
           ...(selectionLocked
@@ -1672,7 +1793,10 @@ function ChatView({
                       for (const id of ids) {
                         relocate(id, {
                           parentId: groupId,
-                          afterId: lastChildId(engine.getSnapshot().graph, groupId),
+                          afterId: lastChildId(
+                            engine.getSnapshot().graph,
+                            groupId,
+                          ),
                         });
                       }
                     });
@@ -1892,9 +2016,7 @@ function ChatView({
                 hidden={Boolean(entry.block.hidden)}
                 shown={showEverything || shown.has(entry.block.id)}
                 onShow={() =>
-                  setShown((current) =>
-                    new Set(current).add(entry.block.id),
-                  )
+                  setShown((current) => new Set(current).add(entry.block.id))
                 }
                 gutter={gutter}
                 graph={graph}
@@ -1971,17 +2093,46 @@ function ChatView({
           defaults={{
             endpoint: settings.aiEndpoint,
             apiKey: settings.aiApiKey,
-            model: settings.aiDefaultModel,
+            model: settings.inferDefaultModel,
+            thinkingLevel: settings.inferThinkingLevel,
             providerSettings: settings.aiProviderSettings,
-            noExtensions: settings.noExtensions,
-            noSkills: settings.noSkills,
-            noPromptTemplates: settings.noPromptTemplates,
-            noThemes: settings.noThemes,
-            noContextFiles: settings.noContextFiles,
+            noExtensions: settings.inferNoExtensions,
+            noSkills: settings.inferNoSkills,
+            noPromptTemplates: settings.inferNoPromptTemplates,
+            noThemes: settings.inferNoThemes,
+            noContextFiles: settings.inferNoContextFiles,
           }}
           onRun={(run) => {
             setPopup(null);
             void runInference(row.block.id, run);
+          }}
+          onCancel={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "customSummary" && row ? (
+        <CustomInferenceDialog
+          id="custom-summary"
+          title="Run custom summarization"
+          runLabel="Run summarization"
+          meta={row.block.label}
+          // Same shape as the custom inference dialog, prefilled from the
+          // summarization settings instead; a blank summarization field
+          // falls back to the inference one beside it, exactly like the `s`
+          // default run. There are no discovery defaults: the run is plain
+          // (`plain`), so the harness rows are neither shown nor sent.
+          plain
+          defaults={{
+            endpoint: settings.aiEndpoint,
+            apiKey: settings.aiApiKey,
+            model: settings.summDefaultModel || settings.inferDefaultModel,
+            thinkingLevel:
+              settings.summThinkingLevel || settings.inferThinkingLevel,
+            providerSettings: settings.summProviderSettings,
+          }}
+          onRun={(run) => {
+            setPopup(null);
+            void runSummary(popup.take, run);
           }}
           onCancel={() => setPopup(null)}
         />

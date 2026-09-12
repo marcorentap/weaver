@@ -1,6 +1,23 @@
 import { z } from "zod";
 
 /**
+ * Reasoning-effort levels a run may ask for, mirroring pi-ai's own
+ * `ThinkingLevel` (`off` plus minimal/low/medium/high/xhigh/max — the
+ * SDK's `PI_REASONING_LEVEL`). A blank/omitted `thinkingLevel` means "no
+ * preference": the SDK picks its default.
+ */
+export const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
+/**
  * What one step of an agent run looks like on the wire.
  *
  * The main process's `agent:run:start` handler emits these as
@@ -92,6 +109,11 @@ export const agentRunRequest = z.object({
   noContextFiles: z.boolean().optional(),
   /** That provider's saved field values, keyed by field key. */
   providerSettings: z.record(z.string(), z.string()).optional(),
+  /** Reasoning effort the run asks the model for, pi-ai's levels. A level
+   *  the endpoint's provider routes into its own reasoning format (see
+   *  `providerTuning` in `main/lib/run-agent.ts`); omitted for a run that
+   *  didn't pick one, which leaves the SDK's default in charge. */
+  thinkingLevel: z.enum(THINKING_LEVELS).optional(),
   /**
    * The merged environment the anchoring block sees: every `environment`
    * block above it in the graph, closer ones overriding farther ones. The
@@ -100,6 +122,12 @@ export const agentRunRequest = z.object({
    * Omitted when the block sees no environment at all.
    */
   env: z.record(z.string(), z.string()).optional(),
+  /** Treat the run as a plain LLM call instead of an agent run: no session,
+   *  no tools, no system prompt, no resource loading (everything the
+   *  `no…` flags and `tools` above normally control). The prompt goes
+   *  straight to the model as one user message. The summarization run sets
+   *  this, so a `summary` block never has the agent harness around it. */
+  plain: z.boolean().optional(),
 });
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;

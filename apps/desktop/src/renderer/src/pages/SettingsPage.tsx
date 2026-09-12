@@ -4,6 +4,7 @@ import {
   LINE_NUMBER_OPTIONS,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
+  THINKING_LEVEL_OPTIONS,
   useSettings,
   WORD_WRAP_OPTIONS,
   type LineNumberMode,
@@ -43,8 +44,14 @@ type SettingDef =
       label: string;
       description: string;
       /** A section heading rendered above this entry. Only the first
-       *  entry of a group sets it. */
+       *  entry of a group sets it. A group nested under another section
+       *  (the provider's own fields under its endpoint section) sets
+       *  `parent` to that section's title too. */
       section?: string;
+      /** The section this group nests under when it is not top-level.
+       *  Only read on the entry that opens the group (the first with a new
+       *  `section`); the rows after it inherit the group. */
+      parent?: string;
       options: readonly { value: string; label: string }[];
       value: string;
       onChange: (value: string) => void;
@@ -64,6 +71,7 @@ type SettingDef =
       label: string;
       description: string;
       section?: string;
+      parent?: string;
       value: number;
       step: number;
       min?: number;
@@ -76,6 +84,7 @@ type SettingDef =
       label: string;
       description: string;
       section?: string;
+      parent?: string;
       value: string;
       onChange: (value: string) => void;
       /** Rejects a typed value on `enter`, returning why. A rejected edit
@@ -99,6 +108,7 @@ type SettingDef =
       kind: "info";
       key: string;
       section?: string;
+      parent?: string;
       content: string;
     }
   | {
@@ -109,6 +119,7 @@ type SettingDef =
       label: string;
       description: string;
       section?: string;
+      parent?: string;
       /** Label of the button on the row, e.g. "Create". */
       actionLabel: string;
       onRun: () => void;
@@ -120,6 +131,7 @@ type SettingDef =
       kind: "keys";
       key: string;
       section?: string;
+      parent?: string;
       intro: string;
       keys: RemoteKeySummary[];
       onRevoke: (id: string) => Promise<void> | void;
@@ -130,30 +142,64 @@ type SettingDef =
 /** One visible row of the settings list, mirroring a chat page row: a
  *  line-number gutter, a label column, and the entry's own content. A
  *  section header renders as a group row (the same shape chat gives a
- *  group block), and the settings under it fold one notch deeper. */
+ *  group block), and the settings under it fold one notch deeper; a group
+ *  nested inside another (a provider's own fields under its endpoint
+ *  section) indents one notch further still. `depth` is the indentation
+ *  level: an entry inside a top-level group is `1`, a nested group's rows
+ *  `2`. Group rows carry their fold identity as `key` (`parent/title` for
+ *  a nested one, so two same-titled groups fold independently). */
 type Row =
-  | { kind: "group"; title: string }
-  | { kind: "entry"; def: SettingDef };
+  | { kind: "group"; title: string; key: string; depth: number }
+  | { kind: "entry"; def: SettingDef; depth: number };
 
 /** Flatten the flat `defs` list into groups. Each definition carrying a
  *  `section` starts a new group row; the definitions after it (until the
- *  next one that names a section, or the end) become that group's rows.
- *  `closed` holds the titles of groups folded like chat's collapsed
- *  groups: their rows are left out of the list entirely (they get no
- *  gutter number and no cursor), and reopening them reflows the numbers. */
+ *  next one that names a section) become that group's rows. A nested
+ *  group's opening entry also sets `parent` to the section it sits under,
+ *  so a provider's own fields land directly beneath its endpoint section.
+ *  `closed` holds the keys of groups folded like chat's collapsed groups:
+ *  their rows are left out of the list entirely (they get no gutter number
+ *  and no cursor), and reopening them reflows the numbers. A group under
+ *  a folded ancestor never renders either, whatever its own key says. */
 function flattenRows(defs: SettingDef[], closed: ReadonlySet<string>): Row[] {
   const rows: Row[] = [];
-  let current: string | null = null;
+  // The sections opened so far, innermost last. A folded group stays on
+  // the stack (later definitions still belong to it) but drops its rows;
+  // a group under a folded ancestor drops its group row too.
+  const stack: { title: string; key: string; depth: number }[] = [];
   for (const def of defs) {
     if (def.section !== undefined) {
-      current = def.section;
-      rows.push({ kind: "group", title: def.section });
-      if (!closed.has(def.section)) rows.push({ kind: "entry", def });
-    } else if (current !== null) {
-      if (!closed.has(current)) rows.push({ kind: "entry", def });
+      if (def.parent !== undefined) {
+        // Nest under the parent, whatever sections came between: pop the
+        // stack down to the parent, then push the child on top.
+        const at = stack.findIndex((group) => group.title === def.parent);
+        stack.length = at === -1 ? 0 : at + 1;
+      } else {
+        // A top-level section ends whatever was open.
+        stack.length = 0;
+      }
+      const key =
+        def.parent !== undefined ? `${def.parent}/${def.section}` : def.section;
+      // Whether any ancestor (not the group itself) is folded, so the
+      // group under a folded parent never renders.
+      const ancestorFolded = stack.some((group) => closed.has(group.key));
+      const depth = stack.length;
+      stack.push({ title: def.section, key, depth });
+      if (!ancestorFolded) {
+        rows.push({ kind: "group", title: def.section, key, depth });
+        if (!closed.has(key))
+          rows.push({ kind: "entry", def, depth: depth + 1 });
+      }
     } else {
-      // A definition before any section marker still renders, at top level.
-      rows.push({ kind: "entry", def });
+      // A definition without its own section belongs to the innermost one;
+      // it joins the list only while that section is open.
+      const owner = stack[stack.length - 1];
+      if (owner === undefined) {
+        // Before any section marker: still renders, at top level.
+        rows.push({ kind: "entry", def, depth: 0 });
+      } else if (!stack.some((group) => closed.has(group.key))) {
+        rows.push({ kind: "entry", def, depth: owner.depth + 1 });
+      }
     }
   }
   return rows;
@@ -282,8 +328,10 @@ function hostOk(value: string): boolean {
 }
 
 /** OpenRouter's key usage, as a markdown table for the "info" row under
- *  provider settings. Credits are USD, 1:1. */
-function usageMarkdown(usage: NonNullable<ProviderUsageResult["usage"]>): string {
+ *  the AI provider credentials. Credits are USD, 1:1. */
+function usageMarkdown(
+  usage: NonNullable<ProviderUsageResult["usage"]>,
+): string {
   const usd = (value: number) => `$${value.toFixed(2)}`;
   return [
     `${usage.label}${usage.isFreeTier ? " (free tier)" : ""}`,
@@ -308,13 +356,20 @@ export default function SettingsPage() {
     setFontSize,
     setAiEndpoint,
     setAiApiKey,
-    setAiDefaultModel,
-    setProviderField,
-    setNoExtensions,
-    setNoSkills,
-    setNoPromptTemplates,
-    setNoThemes,
-    setNoContextFiles,
+    setInferDefaultModel,
+    setInferThinkingLevel,
+    setSummThinkingLevel,
+    setInferNoExtensions,
+    setInferNoSkills,
+    setInferNoPromptTemplates,
+    setInferNoThemes,
+    setInferNoContextFiles,
+    setSummDefaultModel,
+    setSummNoExtensions,
+    setSummNoSkills,
+    setSummNoPromptTemplates,
+    setSummNoThemes,
+    setSummNoContextFiles,
     setRemoteEnabled,
     setRemoteHost,
     setRemotePort,
@@ -346,9 +401,8 @@ export default function SettingsPage() {
   } | null>(null);
   /** Status of this machine's own server and a message from its last
    *  start/stop (a bind error, say). */
-  const [instanceStatus, setInstanceStatus] = useState<
-    RemoteInstanceStatus | null
-  >(null);
+  const [instanceStatus, setInstanceStatus] =
+    useState<RemoteInstanceStatus | null>(null);
   const [instanceMessage, setInstanceMessage] = useState<string | null>(null);
   /** Keys this machine has issued. */
   const [remoteKeys, setRemoteKeys] = useState<RemoteKeySummary[]>([]);
@@ -373,7 +427,12 @@ export default function SettingsPage() {
    *  start, into the global plugins store — every Settings pane reads the
    *  same already-fetched data instead of re-running `plugins:list` plus a
    *  settings read per plugin on its own mount. */
-  const { plugins: pluginList, values: pluginValues, setValue, setDir } = usePlugins();
+  const {
+    plugins: pluginList,
+    values: pluginValues,
+    setValue,
+    setDir,
+  } = usePlugins();
 
   /** A plugin setting field becomes one editable row, under the plugin's
    *  own section. */
@@ -395,8 +454,7 @@ export default function SettingsPage() {
         step: field.step ?? 1,
         min: field.min,
         max: field.max,
-        onChange: (next) =>
-          setValue(pluginId, field.key, String(next)),
+        onChange: (next) => setValue(pluginId, field.key, String(next)),
       };
     }
     if (field.kind === "option") {
@@ -426,6 +484,11 @@ export default function SettingsPage() {
   }
 
   const provider = detectProvider(settings.aiEndpoint);
+  /** The provider's reported models, sorted by name, for the cycling rows
+   *  and the "Available models" list alike. */
+  const models = probe?.models
+    ? [...probe.models].sort((a, b) => a.localeCompare(b))
+    : [];
 
   /** Re-read this machine's server status and its keys. */
   const refreshRemoteState = useCallback(async () => {
@@ -531,9 +594,7 @@ export default function SettingsPage() {
     ? `**Copy it now — shown once**: \`${createdKey}\``
     : "";
 
-  const keyErrorText = keyError
-    ? `⚠ ${keyError}`
-    : "";
+  const keyErrorText = keyError ? `⚠ ${keyError}` : "";
 
   const defs: SettingDef[] = [
     {
@@ -594,119 +655,8 @@ export default function SettingsPage() {
       placeholder: "sk-...",
       provider: true,
     },
-    {
-      kind: "option",
-      key: "aiDefaultModel",
-      label: "Default model",
-      description: "Default when a block's own model is blank.",
-      // The arrows cycle the provider's reported models. Enter types a
-      // value by hand; it must be one of the available models once the
-      // list has loaded, or a blank (provider default).
-      options: (probe?.models ?? []).map((model) => ({
-        value: model,
-        label: model,
-      })),
-      value: settings.aiDefaultModel,
-      onChange: setAiDefaultModel,
-      editable: true,
-      validate: (value) => {
-        if (value && probe?.models?.length && !probe.models.includes(value)) {
-          return "invalid model";
-        }
-        return null;
-      },
-    },
-    // What pi's own DefaultResourceLoader loads for each run: extensions,
-    // `SKILL.md` files, prompt templates, themes and project context files.
-    // These are the app-wide defaults the `X` modal prefills; the values
-    // below are inverted from the saved booleans (`no…` = off) so a row
-    // reads as the feature it enables rather than its negation.
-    {
-      kind: "option",
-      key: "inference.noExtensions",
-      label: "Pi extensions",
-      description: "Load pi extensions (slash commands, hooks, tools) for a run.",
-      section: "Inference settings",
-      options: ON_OFF_OPTIONS,
-      value: settings.noExtensions ? "off" : "on",
-      onChange: (value) => setNoExtensions(value === "off"),
-    },
-    {
-      kind: "option",
-      key: "inference.noSkills",
-      label: "Skills",
-      description: "Load SKILL.md files from the agent and project directories.",
-      options: ON_OFF_OPTIONS,
-      value: settings.noSkills ? "off" : "on",
-      onChange: (value) => setNoSkills(value === "off"),
-    },
-    {
-      kind: "option",
-      key: "inference.noPromptTemplates",
-      label: "Prompt templates",
-      description: "Load pi prompt templates (/agent, /session, system personas).",
-      options: ON_OFF_OPTIONS,
-      value: settings.noPromptTemplates ? "off" : "on",
-      onChange: (value) => setNoPromptTemplates(value === "off"),
-    },
-    {
-      kind: "option",
-      key: "inference.noThemes",
-      label: "Themes",
-      description: "Load pi themes.",
-      options: ON_OFF_OPTIONS,
-      value: settings.noThemes ? "off" : "on",
-      onChange: (value) => setNoThemes(value === "off"),
-    },
-    {
-      kind: "option",
-      key: "inference.noContextFiles",
-      label: "Context files",
-      description: "Load project context files (CONTEXT.md / AGENTS.md).",
-      options: ON_OFF_OPTIONS,
-      value: settings.noContextFiles ? "off" : "on",
-      onChange: (value) => setNoContextFiles(value === "off"),
-    },
-    // A provider detected from the endpoint above gets its own fields,
-    // read from and written back to its own slot in `aiProviderSettings`
-    // so switching endpoints never clobbers another provider's saved
-    // values. Nothing renders here for an endpoint that matches none.
-    ...(provider ?? { fields: [] }).fields.map(
-      (field, i): SettingDef =>
-        field.options
-          ? {
-              kind: "option",
-              key: `provider.${provider!.id}.${field.key}`,
-              label: field.label,
-              description: field.description,
-              section: i === 0 ? "Provider settings" : undefined,
-              options: field.options,
-              value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
-              onChange: (value) =>
-                setProviderField(provider!.id, field.key, value),
-              warning:
-                field.key === "thinkingLevel" &&
-                settings.aiProviderSettings[provider!.id]?.thinkingLevel &&
-                settings.aiDefaultModel &&
-                probe?.modelParameters?.[settings.aiDefaultModel] &&
-                !probe.modelParameters[settings.aiDefaultModel]!.includes(
-                  "reasoning",
-                )
-                  ? `${settings.aiDefaultModel} doesn't list reasoning support`
-                  : null,
-            }
-          : {
-              kind: "string",
-              key: `provider.${provider!.id}.${field.key}`,
-              label: field.label,
-              description: field.description,
-              section: i === 0 ? "Provider settings" : undefined,
-              value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
-              onChange: (value) =>
-                setProviderField(provider!.id, field.key, value),
-              placeholder: field.placeholder,
-            },
-    ),
+    // OpenRouter's key usage, under the AI provider credentials that
+    // produce it.
     ...(provider?.id === "openrouter"
       ? [
           {
@@ -719,6 +669,203 @@ export default function SettingsPage() {
           },
         ]
       : []),
+
+    // The app-wide defaults for an inference run (`x` / `X`): the model it
+    // falls back to when a block's own model field is blank, the reasoning
+    // effort it asks for, and what pi's `DefaultResourceLoader` loads for
+    // it (extensions, `SKILL.md` files, prompt templates, themes and
+    // project context files). The `X` modal prefills from these; the
+    // values below are inverted from the saved booleans (`no…` = off) so a
+    // row reads as the feature it enables rather than its negation. The
+    // "Summarization settings" section below carries the same six rows,
+    // samely ordered, for the `s` / `S` runs.
+    {
+      kind: "option",
+      key: "inferDefaultModel",
+      label: "Default model",
+      description: "Default when a block's own model field is blank.",
+      section: "Inference settings",
+      // The arrows cycle the provider's reported models. Enter types a value
+      // by hand; it must be one of the available models once the list has
+      // loaded, or a blank (provider default).
+      options: models.map((model) => ({
+        value: model,
+        label: model,
+      })),
+      value: settings.inferDefaultModel,
+      onChange: setInferDefaultModel,
+      editable: true,
+      validate: (value) => {
+        if (value && probe?.models?.length && !probe.models.includes(value)) {
+          return "invalid model";
+        }
+        return null;
+      },
+    },
+    {
+      kind: "option",
+      key: "inferThinkingLevel",
+      label: "Thinking level",
+      description:
+        "Reasoning effort the default run asks for. Support varies by model.",
+      options: THINKING_LEVEL_OPTIONS,
+      value: settings.inferThinkingLevel,
+      // The model's reasoning caps come back with the provider probe, so
+      // a level picked before the models loaded still gets flagged once it
+      // does.
+      warning:
+        settings.inferThinkingLevel &&
+        settings.inferDefaultModel &&
+        probe?.modelParameters?.[settings.inferDefaultModel] &&
+        !probe.modelParameters[settings.inferDefaultModel]!.includes(
+          "reasoning",
+        )
+          ? `${settings.inferDefaultModel} doesn't list reasoning support`
+          : null,
+      onChange: setInferThinkingLevel,
+    },
+    {
+      kind: "option",
+      key: "inferNoExtensions",
+      label: "Pi extensions",
+      description: "Load pi extensions (slash commands, hooks, tools).",
+      options: ON_OFF_OPTIONS,
+      value: settings.inferNoExtensions ? "off" : "on",
+      onChange: (value) => setInferNoExtensions(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inferNoSkills",
+      label: "Skills",
+      description:
+        "Load SKILL.md files from the agent and project directories.",
+      options: ON_OFF_OPTIONS,
+      value: settings.inferNoSkills ? "off" : "on",
+      onChange: (value) => setInferNoSkills(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inferNoPromptTemplates",
+      label: "Prompt templates",
+      description:
+        "Load pi prompt templates (/agent, /session, system personas).",
+      options: ON_OFF_OPTIONS,
+      value: settings.inferNoPromptTemplates ? "off" : "on",
+      onChange: (value) => setInferNoPromptTemplates(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inferNoThemes",
+      label: "Themes",
+      description: "Load pi themes.",
+      options: ON_OFF_OPTIONS,
+      value: settings.inferNoThemes ? "off" : "on",
+      onChange: (value) => setInferNoThemes(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "inferNoContextFiles",
+      label: "Context files",
+      description: "Load project context files (CONTEXT.md / AGENTS.md).",
+      options: ON_OFF_OPTIONS,
+      value: settings.inferNoContextFiles ? "off" : "on",
+      onChange: (value) => setInferNoContextFiles(value === "off"),
+    },
+
+    // The same six defaults for a summarization run (`s` on a block, `S`
+    // for the custom dialog): its fallback model, its reasoning effort and
+    // the same resource flags as the inference rows above, so the section
+    // reads identically to "Inference settings". Summarization shares the
+    // endpoint and key with inference (the "AI provider" rows above); each
+    // blank model/level value falls back to the inference setting beside
+    // it, so summaries work even before any of these are filled in.
+    {
+      kind: "option",
+      key: "summDefaultModel",
+      label: "Default model",
+      description: "Default when a summarization run's own model is blank.",
+      section: "Summarization settings",
+      // Same provider list as inference; the endpoint is shared, so the
+      // models are the same set.
+      options: models.map((model) => ({
+        value: model,
+        label: model,
+      })),
+      value: settings.summDefaultModel,
+      onChange: setSummDefaultModel,
+      editable: true,
+      validate: (value) => {
+        if (value && probe?.models?.length && !probe.models.includes(value)) {
+          return "invalid model";
+        }
+        return null;
+      },
+    },
+    {
+      kind: "option",
+      key: "summThinkingLevel",
+      label: "Thinking level",
+      description:
+        "Reasoning effort a summarization run asks for. Blank falls back to the inference setting.",
+      options: THINKING_LEVEL_OPTIONS,
+      value: settings.summThinkingLevel,
+      warning:
+        settings.summThinkingLevel &&
+        settings.summDefaultModel &&
+        probe?.modelParameters?.[settings.summDefaultModel] &&
+        !probe.modelParameters[settings.summDefaultModel]!.includes("reasoning")
+          ? `${settings.summDefaultModel} doesn't list reasoning support`
+          : null,
+      onChange: setSummThinkingLevel,
+    },
+    {
+      kind: "option",
+      key: "summNoExtensions",
+      label: "Pi extensions",
+      description:
+        "Load pi extensions (slash commands, hooks, tools) for a summarization run.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summNoExtensions ? "off" : "on",
+      onChange: (value) => setSummNoExtensions(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "summNoSkills",
+      label: "Skills",
+      description: "Load SKILL.md files for a summarization run.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summNoSkills ? "off" : "on",
+      onChange: (value) => setSummNoSkills(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "summNoPromptTemplates",
+      label: "Prompt templates",
+      description:
+        "Load pi prompt templates (/agent, /session, system personas) for a summarization run.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summNoPromptTemplates ? "off" : "on",
+      onChange: (value) => setSummNoPromptTemplates(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "summNoThemes",
+      label: "Themes",
+      description: "Load pi themes for a summarization run.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summNoThemes ? "off" : "on",
+      onChange: (value) => setSummNoThemes(value === "off"),
+    },
+    {
+      kind: "option",
+      key: "summNoContextFiles",
+      label: "Context files",
+      description:
+        "Load project context files (CONTEXT.md / AGENTS.md) for a summarization run.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summNoContextFiles ? "off" : "on",
+      onChange: (value) => setSummNoContextFiles(value === "off"),
+    },
 
     // Remote: where this app sends its agent runs when the toggle is on.
     {
@@ -740,7 +887,9 @@ export default function SettingsPage() {
       onChange: setRemoteHost,
       placeholder: "http://192.168.1.20",
       validate: (value) =>
-        hostOk(value) ? null : "needs a scheme and host, e.g. http://192.168.1.20",
+        hostOk(value)
+          ? null
+          : "needs a scheme and host, e.g. http://192.168.1.20",
     },
     {
       kind: "number",
@@ -767,9 +916,10 @@ export default function SettingsPage() {
       kind: "info",
       key: "remoteConnection",
       section: undefined,
-      content: !settings.remoteHost.trim() && !settings.remoteKey.trim()
-        ? "Not configured."
-        : remoteConnectionText,
+      content:
+        !settings.remoteHost.trim() && !settings.remoteKey.trim()
+          ? "Not configured."
+          : remoteConnectionText,
     },
 
     // This machine's own server: the toggle is also the start/stop.
@@ -857,7 +1007,8 @@ export default function SettingsPage() {
     {
       kind: "keys",
       key: "remoteKeysList",
-      intro: "Key tokens show once, at creation. Create a new key if you lost one.",
+      intro:
+        "Key tokens show once, at creation. Create a new key if you lost one.",
       keys: remoteKeys,
       revokingId,
       onRevoke: revokeKey,
@@ -885,12 +1036,15 @@ export default function SettingsPage() {
     }
   }
 
-  /** Fold or unfold a section (its title is the group's key). */
-  const toggleGroup = (title: string) => {
+  /** Fold or unfold a section. Its key is the group's identity: the
+   *  section title, or `parent/title` for a nested one, so two same-titled
+   *  groups (the inference and summarization provider fields) fold
+   *  independently. */
+  const toggleGroup = (key: string) => {
     setClosed((previous) => {
       const next = new Set(previous);
-      if (next.has(title)) next.delete(title);
-      else next.add(title);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -946,27 +1100,30 @@ export default function SettingsPage() {
   /** Asks the main process whether the current pair actually works. Runs on
    *  every committed endpoint or key, and once when the page loads, since
    *  either input alone proves nothing. */
-  const checkProvider = useCallback(async (endpoint: string, apiKey: string) => {
-    if (!endpoint.trim() && !apiKey) {
-      setProbe(null);
-      return;
-    }
-    setProbe({ ok: null, message: "checking…" });
-    try {
-      const verdict = await window.api.agent.check(endpoint, apiKey);
-      setProbe({
-        ok: verdict.ok,
-        message: verdict.message,
-        models: verdict.models,
-        modelParameters: verdict.modelParameters,
-      });
-    } catch (error) {
-      setProbe({
-        ok: false,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, []);
+  const checkProvider = useCallback(
+    async (endpoint: string, apiKey: string) => {
+      if (!endpoint.trim() && !apiKey) {
+        setProbe(null);
+        return;
+      }
+      setProbe({ ok: null, message: "checking…" });
+      try {
+        const verdict = await window.api.agent.check(endpoint, apiKey);
+        setProbe({
+          ok: verdict.ok,
+          message: verdict.message,
+          models: verdict.models,
+          modelParameters: verdict.modelParameters,
+        });
+      } catch (error) {
+        setProbe({
+          ok: false,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    [],
+  );
 
   /** OpenRouter-only key usage. Same shape of probe as `checkProvider`. */
   const fetchUsage = useCallback(async (endpoint: string, apiKey: string) => {
@@ -1007,7 +1164,13 @@ export default function SettingsPage() {
       0,
     );
     return () => clearTimeout(timer);
-  }, [hydrated, provider?.id, settings.aiEndpoint, settings.aiApiKey, fetchUsage]);
+  }, [
+    hydrated,
+    provider?.id,
+    settings.aiEndpoint,
+    settings.aiApiKey,
+    fetchUsage,
+  ]);
 
   // Remote: read this machine's server status and keys once on visit.
   useEffect(() => {
@@ -1078,7 +1241,10 @@ export default function SettingsPage() {
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k / <n>k", label: "Previous setting, <n> at a time" },
+        help: {
+          keys: "↑ / k / <n>k",
+          label: "Previous setting, <n> at a time",
+        },
         run: (count = 1) => move(-count),
       },
       {
@@ -1091,7 +1257,7 @@ export default function SettingsPage() {
           if (row?.kind === "group") {
             // Only closing shuts a section; `h` on an already folded group
             // is a no-op, the way chat's step-out is.
-            if (!closed.has(row.title)) toggleGroup(row.title);
+            if (!closed.has(row.key)) toggleGroup(row.key);
             return;
           }
           if (def) cycle(def, -1);
@@ -1107,7 +1273,7 @@ export default function SettingsPage() {
           if (row?.kind === "group") {
             // Unfold, or step into the first row once it is already open,
             // chat's `l`-on-a-group "open then step in".
-            if (closed.has(row.title)) toggleGroup(row.title);
+            if (closed.has(row.key)) toggleGroup(row.key);
             else move(1);
             return;
           }
@@ -1127,7 +1293,7 @@ export default function SettingsPage() {
         },
         run: () =>
           row?.kind === "group"
-            ? toggleGroup(row.title)
+            ? toggleGroup(row.key)
             : def && (def.kind === "action" ? def.onRun() : startEdit(def)),
       },
     ],
@@ -1162,10 +1328,10 @@ export default function SettingsPage() {
         {rows.map((row, i) => {
           const selected = i === index;
           if (row.kind === "group") {
-            const folded = closed.has(row.title);
+            const folded = closed.has(row.key);
             return (
               <div
-                key={`group:${row.title}`}
+                key={`group:${row.key}`}
                 ref={selected ? setSelectedRef : undefined}
                 aria-selected={selected}
                 aria-expanded={!folded}
@@ -1176,7 +1342,12 @@ export default function SettingsPage() {
                 )}
               >
                 <Gutter line={lineNumber(i)} show={gutter} current={selected} />
-                <span className="flex w-52 shrink-0 items-center gap-1">
+                {/* Nested groups (a provider's own fields under its endpoint
+                 *  section) indent one notch, the chat group step. */}
+                <span
+                  className="flex w-52 shrink-0 items-center gap-1"
+                  style={{ paddingLeft: `${row.depth * INDENT_REM}rem` }}
+                >
                   <button
                     type="button"
                     aria-label={folded ? "Expand section" : "Collapse section"}
@@ -1184,7 +1355,7 @@ export default function SettingsPage() {
                     // has to keep its click to itself, padded past the glyph.
                     onClick={(event) => {
                       event.stopPropagation();
-                      toggleGroup(row.title);
+                      toggleGroup(row.key);
                     }}
                     className="-my-1 shrink-0 p-1 text-muted-foreground hover:text-foreground"
                   >
@@ -1224,11 +1395,12 @@ export default function SettingsPage() {
               )}
             >
               <Gutter line={lineNumber(i)} show={gutter} current={selected} />
-              {/* The label column, indented one notch because every setting
-               *  lives inside a section group, the chat page's group step. */}
+              {/* The label column, indented one notch per section level
+               *  (one for a top-level section's row, two once it sits under
+               *  a nested group like a provider's own fields). */}
               <span
                 className="flex w-52 shrink-0 items-center gap-1"
-                style={{ paddingLeft: `${INDENT_REM}rem` }}
+                style={{ paddingLeft: `${row.depth * INDENT_REM}rem` }}
               >
                 {entry.kind === "info" || entry.kind === "keys" ? null : (
                   <span className="min-w-0 truncate font-medium">
@@ -1246,22 +1418,22 @@ export default function SettingsPage() {
                    *  the action item's control lines up with every other
                    *  setting's value. */}
                   <span className="flex w-64 shrink-0 justify-center">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setCursor(i);
-                      entry.onRun();
-                    }}
-                    className={cn(
-                      "shrink-0 cursor-pointer rounded border px-2 py-0.5 text-xs",
-                      entry.disabled
-                        ? "border-border/60 text-muted-foreground/50"
-                        : "border-foreground/30",
-                    )}
-                  >
-                    {entry.actionLabel}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setCursor(i);
+                        entry.onRun();
+                      }}
+                      className={cn(
+                        "shrink-0 cursor-pointer rounded border px-2 py-0.5 text-xs",
+                        entry.disabled
+                          ? "border-border/60 text-muted-foreground/50"
+                          : "border-foreground/30",
+                      )}
+                    >
+                      {entry.actionLabel}
+                    </button>
                   </span>
                 </span>
               ) : entry.kind === "keys" ? (
@@ -1404,15 +1576,17 @@ export default function SettingsPage() {
                               : "",
                           )}
                         >
-                          {hydrated
-                            ? showPlaceholder
-                              ? (
-                                  <span className="text-muted-foreground/50">
-                                    {entry.placeholder}
-                                  </span>
-                                )
-                              : displayValue(entry)
-                            : ""}
+                          {hydrated ? (
+                            showPlaceholder ? (
+                              <span className="text-muted-foreground/50">
+                                {entry.placeholder}
+                              </span>
+                            ) : (
+                              displayValue(entry)
+                            )
+                          ) : (
+                            ""
+                          )}
                         </span>
                       )}
                       <span className="flex size-4 shrink-0 items-center justify-center">
@@ -1444,7 +1618,9 @@ export default function SettingsPage() {
                       {entry.label}: {entry.warning}
                     </span>
                   ) : null}
-                  {entry.kind === "string" && entry.key === "aiApiKey" && probe ? (
+                  {entry.kind === "string" &&
+                  entry.key === "aiApiKey" &&
+                  probe ? (
                     <span
                       className={cn(
                         "text-xs",
@@ -1456,15 +1632,16 @@ export default function SettingsPage() {
                       Provider: {probe.message}
                     </span>
                   ) : null}
-                  {entry.kind === "string" &&
-                  entry.key === "aiDefaultModel" &&
+                  {entry.kind === "option" &&
+                  (entry.key === "inferDefaultModel" ||
+                    entry.key === "summDefaultModel") &&
                   probe?.models?.length ? (
                     <span className="w-full py-1">
                       <span className="block font-medium">
                         Available models
                       </span>
                       <span className="mt-1 block max-h-40 overflow-auto rounded border border-border font-mono text-xs text-muted-foreground">
-                        {probe.models.map((model) => (
+                        {models.map((model) => (
                           <span
                             key={model}
                             className="block border-b border-border/60 px-2 py-1 last:border-b-0"

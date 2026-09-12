@@ -24,6 +24,52 @@ import type { BlockInput } from "@repo/store";
 import { kinds } from "@shared/blocks/kinds.js";
 import { TOOL_KIND } from "@plugins/rich-media";
 import { streamInference } from "@/lib/inference";
+import type { ThinkingLevel } from "@shared/agent-events.js";
+
+/**
+ * The instruction a summarization run sends the model, with the target
+ * block's own content appended below it. The run is isolated: no
+ * `<weaver_graph>` context goes along, so the model only ever sees the
+ * content the user pointed at, not the conversation around it. Kept here,
+ * not in the block, because the action is the summary itself — the anchor
+ * is the thing to compress, not a reason to answer.
+ */
+const SUMMARIZE_PROMPT = [
+  "Summarize the text below.",
+  "Write in plain style: short, matter-of-fact sentences, no filler, no cliches, no formulaic transition phrases, no decorative adjectives.",
+  "Make it self-contained: inline the names, numbers, dates, results, and decisions themselves. A summary that merely points at information, like a C pointer, sends the reader fetching; when the text only references something (a commit, a file, a link), say what it says or does so the summary reads true on its own.",
+  "If the text only makes sense with context, open with a short background section saying what it is part of, what it changes, or why it exists.",
+  "Reply with only the summary, no preamble.",
+].join("\n");
+
+/** Connection and resource-loading settings shared by inference and
+ *  summarization runs. What pi's `DefaultResourceLoader` loads for the run
+ *  maps straight onto `AgentRunRequest`'s wire names; see that type for the
+ *  defaults the main process applies when a flag is omitted. */
+type RunConnection = {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  tools?: string[];
+  /** The provider detected from `endpoint`, and its saved settings.
+   *  Passed through to the main process untouched; see
+   *  `shared/provider-routing.ts`. */
+  providerId?: string;
+  providerSettings?: Record<string, string>;
+  /** Reasoning effort the run asks the model for, pi-ai's levels; blank
+   *  leaves the SDK's default. Goes to the main process as the request's
+   *  own `thinkingLevel`. */
+  thinkingLevel?: string;
+  noExtensions?: boolean;
+  noSkills?: boolean;
+  noPromptTemplates?: boolean;
+  noThemes?: boolean;
+  noContextFiles?: boolean;
+  /** Treat the run as a plain LLM call instead of an agent run: no session,
+   *  tools, system prompt, or resource loading in the main process. The
+   *  summarization run sets this; inference never does. */
+  plain?: boolean;
+};
 
 export type LiveGraphSnapshot = {
   graph: BlockGraph;
@@ -73,27 +119,28 @@ export type LiveGraph = {
    * view that started it unmounting (switching tabs and back). It keeps
    * appending into this graph regardless of who, if anyone, is watching.
    */
-  runInference: (
-    id: BlockId,
-    options: {
-      endpoint: string;
-      apiKey: string;
-      model: string;
-      tools?: string[];
-      /** The provider detected from `endpoint`, and its saved settings.
-       *  Passed through to the main process untouched; see
-       *  `shared/provider-routing.ts`. */
-      providerId?: string;
-      providerSettings?: Record<string, string>;
-      /** What pi's `DefaultResourceLoader` loads for this run; see
-       *  `AgentRunRequest` for the wire names. Omitted → the main process
-       *  applies its own (and the saved settings') defaults. */
-      noExtensions?: boolean;
-      noSkills?: boolean;
-      noPromptTemplates?: boolean;
-      noThemes?: boolean;
-      noContextFiles?: boolean;
-    },
+  runInference: (id: BlockId, options: RunConnection) => Promise<void>;
+  /**
+   * The same engine as `runInference`, but the model compresses `take` —
+   * the block under the cursor, or the whole visual selection — into a
+   * short summary instead of replying to the conversation above it. The
+   * target's content is the whole prompt: no `<weaver_graph>` context goes
+   * along, so the summary is of the block in isolation, short and accurate
+   * for a reader scanning many blocks to keep up. `anchor` is where the
+   * summary lands and which block the run locks; single-block runs pass the
+   * same id as the only element of `take`, selection runs pass the range
+   * with its last id as the anchor, so the summary appends right after the
+   * selection. The answer lands in a block labeled "summary". `s` (default
+   * settings) and `S` (custom settings) in the block and selection menus
+   * drive it via the summarization settings, with blank fields falling back
+   * to the inference ones. Unlike inference, the run is a plain LLM call
+   * (`plain` is set): no agent session, tools, or resource loading in the
+   * main process, so a summary stays read-only text compression.
+   */
+  summarize: (
+    anchor: BlockId,
+    take: BlockId[],
+    options: RunConnection,
   ) => Promise<void>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
@@ -372,21 +419,37 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     );
   }
 
-  async function runInference(
+  /** The shared engine behind both runs: stream one reply and append its
+   *  result blocks. `id` is the anchor — where the reply lands and which
+   *  block the run locks. An inference run prompts with the anchor's own
+   *  content and sends everything above it as `<weaver_graph>` context; a
+   *  summarization run passes `take` (the block, or the selected range, to
+   *  compress) and sends no graph context at all, so the summary is of the
+   *  target alone. `answerLabel` names the text blocks the reply lands in:
+   *  "assistant" for inference, "summary" for a summarization. */
+  async function runAgentText(
     id: BlockId,
-    { endpoint, apiKey, model, tools = [], providerId, providerSettings,
-      noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles }: {
-      endpoint: string;
-      apiKey: string;
-      model: string;
-      tools?: string[];
-      providerId?: string;
-      providerSettings?: Record<string, string>;
-      noExtensions?: boolean;
-      noSkills?: boolean;
-      noPromptTemplates?: boolean;
-      noThemes?: boolean;
-      noContextFiles?: boolean;
+    {
+      endpoint,
+      apiKey,
+      model,
+      tools = [],
+      providerId,
+      providerSettings,
+      thinkingLevel,
+      noExtensions,
+      noSkills,
+      noPromptTemplates,
+      noThemes,
+      noContextFiles,
+      plain,
+      take,
+      answerLabel,
+    }: RunConnection & {
+      /** The blocks whose content a summarization run compresses; absent
+       *  for an inference run, which uses `id`'s own content instead. */
+      take?: BlockId[];
+      answerLabel: string;
     },
   ): Promise<void> {
     const block = snapshot.graph.blocks[id];
@@ -426,7 +489,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       return newId;
     };
     // A run's deltas land in two text blocks: the model's reasoning labeled
-    // "thinking" and its answer labeled "assistant". Both are plain text
+    // "thinking" and its answer labeled "assistant" (an inference run) or
+    // "summary" (a summarization run). Both are plain text
     // kind — text is text whether it is a chain of thought or a reply — but
     // they are separate blocks, because the reply is the answer the user
     // asked for and the reasoning is the work that produced it. Each is null
@@ -487,14 +551,19 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     };
     const updateThinking = () => {
       if (thinkingId === null) {
-        thinkingId = append(TEXT_KIND, { text: thinkingText }, "thinking", true);
+        thinkingId = append(
+          TEXT_KIND,
+          { text: thinkingText },
+          "thinking",
+          true,
+        );
       } else {
         patchText(thinkingId, thinkingText);
       }
     };
     const updateReply = () => {
       if (replyId === null) {
-        replyId = append(TEXT_KIND, { text: replyText }, "assistant");
+        replyId = append(TEXT_KIND, { text: replyText }, answerLabel);
       } else {
         patchText(replyId, replyText);
       }
@@ -515,12 +584,53 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
       return;
     }
-    const prompt = snapshotBlock(snapshot.graph, id, kinds);
-    if (!prompt.trim()) {
-      append(TEXT_KIND, { text: "block is empty. Nothing to send" }, "error");
-      return;
+    // What the agent reads. An inference run is the block's own content
+    // with everything above it as `<weaver_graph>` context; a summarization
+    // run is the reverse — the fixed instruction followed by only the
+    // target's content, and no graph context at all, so the model compresses
+    // the block in isolation instead of re-deriving the conversation around it.
+    let prompt: string;
+    let context: string;
+    if (take) {
+      const content = take
+        .map((tid) => snapshotBlock(snapshot.graph, tid, kinds))
+        .filter((part) => part.trim().length > 0)
+        .join("\n\n");
+      if (!content) {
+        append(
+          TEXT_KIND,
+          {
+            text:
+              take.length > 1
+                ? "nothing to summarize — the selected blocks are empty"
+                : "nothing to summarize — the block is empty",
+          },
+          "error",
+        );
+        return;
+      }
+      // Same wrapper shape the main process gives an inference run's graph
+      // (`<weaver_graph>` … `</weaver_graph>`): the fixed instruction in
+      // its own tags, then the target's content in its own, so the model
+      // can tell the job apart from the material.
+      prompt = [
+        "<instruction>",
+        SUMMARIZE_PROMPT,
+        "</instruction>",
+        "",
+        "<content>",
+        content,
+        "</content>",
+      ].join("\n");
+      context = "";
+    } else {
+      prompt = snapshotBlock(snapshot.graph, id, kinds);
+      if (!prompt.trim()) {
+        append(TEXT_KIND, { text: "block is empty. Nothing to send" }, "error");
+        return;
+      }
+      context = snapshotAbove(snapshot.graph, id, kinds);
     }
-    const context = snapshotAbove(snapshot.graph, id, kinds);
     // The environment the block sees, walked up the graph the same way the
     // agent's own context is. The main process turns `WEAVER_PWD` into the
     // agent's working directory and hands the rest to the agent's tools, so
@@ -532,8 +642,24 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     try {
       let failure: string | null = null;
       const { done, cancel } = streamInference(
-        { endpoint, apiKey, model, context, prompt, tools, providerId, providerSettings, env,
-          noExtensions, noSkills, noPromptTemplates, noThemes, noContextFiles },
+        {
+          endpoint,
+          apiKey,
+          model,
+          context,
+          prompt,
+          tools,
+          providerId,
+          providerSettings,
+          thinkingLevel: thinkingLevel as ThinkingLevel | undefined,
+          env,
+          noExtensions,
+          noSkills,
+          noPromptTemplates,
+          noThemes,
+          noContextFiles,
+          plain,
+        },
         (event) => {
           if (event.type === "thinking_delta") {
             thinkingText += event.text;
@@ -557,7 +683,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
             // append the message whole, exactly as before deltas existed.
             if (replyId === null) {
               replyText = event.text;
-              append(TEXT_KIND, { text: replyText }, "assistant");
+              append(TEXT_KIND, { text: replyText }, answerLabel);
             }
             resetStreaming();
           } else if (event.type === "tool_start") {
@@ -576,7 +702,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
             if (blockId === undefined) return;
             const current = snapshot.graph.blocks[blockId];
             if (!current) return; // Deleted mid-stream.
-            const output = typeof current.data.output === "string" ? current.data.output : "";
+            const output =
+              typeof current.data.output === "string"
+                ? current.data.output
+                : "";
             patchTool(blockId, output + event.text);
           } else if (event.type === "tool") {
             resetStreaming();
@@ -632,6 +761,32 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     }
   }
 
+  async function runInference(
+    id: BlockId,
+    connection: RunConnection,
+  ): Promise<void> {
+    return runAgentText(id, { ...connection, answerLabel: "assistant" });
+  }
+
+  /** Summarize `take` — one block, or the whole visual selection — in
+   *  isolation. `anchor` is where the summary lands and which block the run
+   *  locks: pass the same block for a single-block run, the selection's last
+   *  id for a range, so the summary appends right after the selection. The
+   *  target's content is the whole prompt (`SUMMARIZE_PROMPT` + content); no
+   *  graph context goes along. */
+  async function summarize(
+    anchor: BlockId,
+    take: BlockId[],
+    connection: RunConnection,
+  ): Promise<void> {
+    return runAgentText(anchor, {
+      ...connection,
+      take,
+      plain: true,
+      answerLabel: "summary",
+    });
+  }
+
   function abortRun(id: BlockId): boolean {
     const abort = runningAborts.get(id);
     if (!abort) return false;
@@ -648,7 +803,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     runHook,
     abortRun,
     runInference,
-    isLocked: (id) => lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id),
+    summarize,
+    isLocked: (id) =>
+      lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id),
     updateField(id, name, value) {
       if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
       const current = snapshot.graph.blocks[id];
@@ -686,7 +843,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     setHidden(id, hidden) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return false;
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id))
+        return false;
       const current = snapshot.graph.blocks[id];
       if (!current || (current.hidden ?? false) === hidden) return false;
       pushUndo();
@@ -715,7 +873,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     moveBlock(id, at) {
       if (!snapshot.graph.blocks[id]) return false;
       const locked = lockedBlockIds(snapshot.graph, snapshot.appendTails);
-      if (locked.has(id) || (at.afterId && locked.has(at.afterId))) return false;
+      if (locked.has(id) || (at.afterId && locked.has(at.afterId)))
+        return false;
       pushUndo();
       commit(moveBlockCore(snapshot.graph, id, at), true);
       return true;

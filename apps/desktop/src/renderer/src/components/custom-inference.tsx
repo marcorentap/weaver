@@ -4,6 +4,7 @@ import {
   detectProvider,
   type ProviderField,
 } from "@shared/provider-routing.js";
+import { THINKING_LEVEL_OPTIONS } from "@/lib/settings";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
@@ -13,6 +14,9 @@ export type CustomInferenceRun = {
   endpoint: string;
   apiKey: string;
   model: string;
+  /** Reasoning effort for this run; blank falls back to the saved
+   *  inference/summarization default, exactly like the other fields. */
+  thinkingLevel?: string;
   providerId?: string;
   providerSettings?: Record<string, string>;
   /** What pi's `DefaultResourceLoader` loads for this run; `true` = don't
@@ -70,43 +74,62 @@ const INDENT_REM = 1;
 
 /**
  * The `X` modal. `enter` → `x` runs the block with the default settings;
- * `enter` → `X` opens this and lets the run be aimed differently. It mirrors
- * the settings page's AI provider layout: rows with a label column and a
- * value column, `j`/`k` to move, `h`/`l` or the chevrons to cycle an option,
- * `enter` to type a string value or run, `esc` to cancel the edit and then
- * the dialog. Every value prefills from the saved settings so a single tweak
- * (change the model, enter, enter) is a one-step run. Nothing persists: this
- * is a run, not a settings edit.
+ * `enter` → `X` opens this and lets the run be aimed differently. The `S`
+ * summarization run reuses it with a different title and `runLabel`, and
+ * in plain mode (`plain`) the harness-discovery rows drop out entirely —
+ * a plain run has no loader, so the settings source and the run row's
+ * wording are the only other things that change.
+ * It mirrors the settings page's AI provider layout: rows with a label
+ * column and a value column, `j`/`k` to move, `h`/`l` or the chevrons to
+ * cycle an option, `enter` to type a string value or run, `esc` to cancel
+ * the edit and then the dialog. Every value prefills from the saved
+ * settings so a single tweak (change the model, enter, enter) is a
+ * one-step run. Nothing persists: this is a run, not a settings edit.
  */
 export function CustomInferenceDialog({
   id,
   title,
   meta,
+  runLabel = "Run inference",
   defaults,
   onRun,
   onCancel,
+  plain,
 }: {
   id: string;
   title: string;
   meta?: string;
-  /** The saved settings to prefill from. */
+  /** The run row renders as this: "Run inference" for `X`, "Run
+   *  summarization" when the `S` custom summary reuses the dialog. */
+  runLabel?: string;
+  /** The saved settings to prefill from. Agent-run rows (the discovery
+   *  flags) may be absent for a plain run, which has no loader. */
   defaults: {
     endpoint: string;
     apiKey: string;
     model: string;
+    thinkingLevel?: string;
     providerSettings: Record<string, Record<string, string>>;
-    noExtensions: boolean;
-    noSkills: boolean;
-    noPromptTemplates: boolean;
-    noThemes: boolean;
-    noContextFiles: boolean;
+    noExtensions?: boolean;
+    noSkills?: boolean;
+    noPromptTemplates?: boolean;
+    noThemes?: boolean;
+    noContextFiles?: boolean;
   };
   onRun: (run: CustomInferenceRun) => void;
   onCancel: () => void;
+  /** This run is a plain LLM call (the `S` summarization dialog): the
+   *  discovery rows (pi extensions, skills, prompt templates, themes,
+   *  context files) configure a harness the run never mounts, so they drop
+   *  out of the dialog and out of the `onRun` payload. */
+  plain?: boolean;
 }) {
   const [endpoint, setEndpoint] = useState(defaults.endpoint);
   const [apiKey, setApiKey] = useState(defaults.apiKey);
   const [model, setModel] = useState(defaults.model);
+  const [thinkingLevel, setThinkingLevel] = useState(
+    defaults.thinkingLevel ?? "",
+  );
   /** Per-provider field values, copied so editing a run never mutates the
    *  saved settings behind it. */
   const [providerSettings, setProviderSettings] = useState<
@@ -120,15 +143,18 @@ export function CustomInferenceDialog({
     ),
   );
   /** What pi loads for this run, copied from the saved settings like every
-   *  other value in the dialog. */
-  const [noExtensions, setNoExtensions] = useState(defaults.noExtensions);
-  const [noSkills, setNoSkills] = useState(defaults.noSkills);
-  const [noPromptTemplates, setNoPromptTemplates] = useState(
-    defaults.noPromptTemplates,
+   *  other value in the dialog. Only read for agent runs (`plain` is
+   *  false); a plain run has no loader, so it keeps its default `false`. */
+  const [noExtensions, setNoExtensions] = useState(
+    defaults.noExtensions ?? false,
   );
-  const [noThemes, setNoThemes] = useState(defaults.noThemes);
+  const [noSkills, setNoSkills] = useState(defaults.noSkills ?? false);
+  const [noPromptTemplates, setNoPromptTemplates] = useState(
+    defaults.noPromptTemplates ?? false,
+  );
+  const [noThemes, setNoThemes] = useState(defaults.noThemes ?? false);
   const [noContextFiles, setNoContextFiles] = useState(
-    defaults.noContextFiles,
+    defaults.noContextFiles ?? false,
   );
   // The provider the endpoint being typed belongs to. Same detection the
   // default run and the main process use, so its fields appear (and are
@@ -142,13 +168,69 @@ export function CustomInferenceDialog({
     }));
   };
 
+  /** The harness-discovery rows (pi extensions, skills, prompt templates,
+   *  themes, context files) of the settings page's "Inference settings"
+   *  section, shown only for agent runs; a plain run has no loader, so
+   *  these would tune nothing and stay empty. */
+  const discoveryRows: RowDef[] = plain
+    ? []
+    : [
+        {
+          key: "noExtensions",
+          kind: "option",
+          label: "Pi extensions",
+          description: "Load pi extensions (slash commands, hooks, tools).",
+          options: ON_OFF_OPTIONS,
+          value: noExtensions ? "off" : "on",
+          onChange: (value) => setNoExtensions(value === "off"),
+        },
+        {
+          key: "noSkills",
+          kind: "option",
+          label: "Skills",
+          description:
+            "Load SKILL.md files from the agent and project directories.",
+          options: ON_OFF_OPTIONS,
+          value: noSkills ? "off" : "on",
+          onChange: (value) => setNoSkills(value === "off"),
+        },
+        {
+          key: "noPromptTemplates",
+          kind: "option",
+          label: "Prompt templates",
+          description:
+            "Load pi prompt templates (/agent, /session, system personas).",
+          options: ON_OFF_OPTIONS,
+          value: noPromptTemplates ? "off" : "on",
+          onChange: (value) => setNoPromptTemplates(value === "off"),
+        },
+        {
+          key: "noThemes",
+          kind: "option",
+          label: "Themes",
+          description: "Load pi themes.",
+          options: ON_OFF_OPTIONS,
+          value: noThemes ? "off" : "on",
+          onChange: (value) => setNoThemes(value === "off"),
+        },
+        {
+          key: "noContextFiles",
+          kind: "option",
+          label: "Context files",
+          description: "Load project context files (CONTEXT.md / AGENTS.md).",
+          options: ON_OFF_OPTIONS,
+          value: noContextFiles ? "off" : "on",
+          onChange: (value) => setNoContextFiles(value === "off"),
+        },
+      ];
+
   /** Rows the way settings would render them: the run action first, then
    *  each field, then the provider's own fields. */
   const rows: RowDef[] = [
     {
       key: "run",
       kind: "action",
-      label: "Run inference",
+      label: runLabel,
       description: "Run with the settings above.",
       actionLabel: "Run",
     },
@@ -180,79 +262,44 @@ export function CustomInferenceDialog({
       placeholder: "gpt-4o",
       onChange: setModel,
     },
+    {
+      key: "thinkingLevel",
+      kind: "option",
+      label: "Thinking level",
+      description: "Reasoning effort. Support varies by model.",
+      options: THINKING_LEVEL_OPTIONS,
+      value: thinkingLevel,
+      onChange: setThinkingLevel,
+    },
     // What pi's DefaultResourceLoader loads for this run, same rows the
-    // settings page's "Inference settings" section shows. On/off here
-    // reads as the feature it enables (`no…` is the saved/inverted value).
-    {
-      key: "noExtensions",
-      kind: "option",
-      label: "Pi extensions",
-      description: "Load pi extensions (slash commands, hooks, tools).",
-      options: ON_OFF_OPTIONS,
-      value: noExtensions ? "off" : "on",
-      onChange: (value) => setNoExtensions(value === "off"),
-    },
-    {
-      key: "noSkills",
-      kind: "option",
-      label: "Skills",
-      description: "Load SKILL.md files from the agent and project directories.",
-      options: ON_OFF_OPTIONS,
-      value: noSkills ? "off" : "on",
-      onChange: (value) => setNoSkills(value === "off"),
-    },
-    {
-      key: "noPromptTemplates",
-      kind: "option",
-      label: "Prompt templates",
-      description: "Load pi prompt templates (/agent, /session, system personas).",
-      options: ON_OFF_OPTIONS,
-      value: noPromptTemplates ? "off" : "on",
-      onChange: (value) => setNoPromptTemplates(value === "off"),
-    },
-    {
-      key: "noThemes",
-      kind: "option",
-      label: "Themes",
-      description: "Load pi themes.",
-      options: ON_OFF_OPTIONS,
-      value: noThemes ? "off" : "on",
-      onChange: (value) => setNoThemes(value === "off"),
-    },
-    {
-      key: "noContextFiles",
-      kind: "option",
-      label: "Context files",
-      description: "Load project context files (CONTEXT.md / AGENTS.md).",
-      options: ON_OFF_OPTIONS,
-      value: noContextFiles ? "off" : "on",
-      onChange: (value) => setNoContextFiles(value === "off"),
-    },
-    ...(provider?.fields ?? []).map(
-      (field: ProviderField): RowDef =>
-        field.options
-          ? {
-              key: `provider.${field.key}`,
-              kind: "option",
-              label: field.label,
-              description: field.description,
-              options: field.options,
-              value: provider
-                ? (providerSettings[provider.id]?.[field.key] ?? "")
-                : "",
-              onChange: (value) => setProviderField(field.key, value),
-            }
-          : {
-              key: `provider.${field.key}`,
-              kind: "string",
-              label: field.label,
-              description: field.description,
-              value: provider
-                ? (providerSettings[provider.id]?.[field.key] ?? "")
-                : "",
-              placeholder: field.placeholder,
-              onChange: (value) => setProviderField(field.key, value),
-            },
+    // settings page's "Inference settings" section shows; skipped for a
+    // plain run (`plain`), which has no loader. On/off here reads as the
+    // feature it enables (`no…` is the saved/inverted value).
+    ...discoveryRows,
+    ...(provider?.fields ?? []).map((field: ProviderField): RowDef =>
+      field.options
+        ? {
+            key: `provider.${field.key}`,
+            kind: "option",
+            label: field.label,
+            description: field.description,
+            options: field.options,
+            value: provider
+              ? (providerSettings[provider.id]?.[field.key] ?? "")
+              : "",
+            onChange: (value) => setProviderField(field.key, value),
+          }
+        : {
+            key: `provider.${field.key}`,
+            kind: "string",
+            label: field.label,
+            description: field.description,
+            value: provider
+              ? (providerSettings[provider.id]?.[field.key] ?? "")
+              : "",
+            placeholder: field.placeholder,
+            onChange: (value) => setProviderField(field.key, value),
+          },
     ),
   ];
 
@@ -261,15 +308,20 @@ export function CustomInferenceDialog({
       endpoint: endpoint.trim(),
       apiKey,
       model: model.trim(),
+      thinkingLevel: thinkingLevel || undefined,
       providerId: provider?.id,
-      providerSettings: provider
-        ? providerSettings[provider.id]
-        : undefined,
-      noExtensions,
-      noSkills,
-      noPromptTemplates,
-      noThemes,
-      noContextFiles,
+      providerSettings: provider ? providerSettings[provider.id] : undefined,
+      // A plain run (the `S` summarization dialog) has no loader, so the
+      // discovery flags are neither shown nor sent.
+      ...(plain
+        ? {}
+        : {
+            noExtensions,
+            noSkills,
+            noPromptTemplates,
+            noThemes,
+            noContextFiles,
+          }),
     });
 
   const [cursor, setCursor] = useState(0);
@@ -323,7 +375,8 @@ export function CustomInferenceDialog({
           keys: "← / h",
           label: row?.kind === "option" ? "Previous value" : "Previous row",
         },
-        run: () => (row?.kind === "option" && editing === null ? cycle(-1) : move(-1)),
+        run: () =>
+          row?.kind === "option" && editing === null ? cycle(-1) : move(-1),
       },
       {
         keys: ["ArrowRight", "l"],
@@ -331,7 +384,8 @@ export function CustomInferenceDialog({
           keys: "→ / l",
           label: row?.kind === "option" ? "Next value" : "Next row",
         },
-        run: () => (row?.kind === "option" && editing === null ? cycle(1) : move(1)),
+        run: () =>
+          row?.kind === "option" && editing === null ? cycle(1) : move(1),
       },
       {
         keys: ["Enter"],
@@ -463,7 +517,9 @@ export function CustomInferenceDialog({
                             }}
                             className={cn(
                               "w-56 border-b border-foreground/40 bg-transparent outline-none placeholder:text-muted-foreground/50",
-                              rowDef.kind === "string" ? "text-left" : "text-center",
+                              rowDef.kind === "string"
+                                ? "text-left"
+                                : "text-center",
                             )}
                           />
                         ) : (
@@ -487,31 +543,33 @@ export function CustomInferenceDialog({
                              *  stored key shown for confirmation — short
                              *  secrets (4 chars or fewer) fall back to full
                              *  masking. Strings show value or placeholder. */}
-                            {rowDef.kind === "option"
-                              ? (rowDef.options.find(
-                                  (option) => option.value === rowDef.value,
-                                )?.label ?? rowDef.value)
-                              : rowDef.kind === "string" && rowDef.secret
-                                ? rowDef.value
-                                  ? rowDef.value.length > 4
-                                    ? `••••${rowDef.value.slice(-4)}`
-                                    : "•".repeat(8)
-                                  : rowDef.placeholder
-                                    ? (
-                                        <span className="text-muted-foreground/50">
-                                          {rowDef.placeholder}
-                                        </span>
-                                      )
-                                    : ""
-                                : rowDef.value
-                                  ? rowDef.value
-                                  : rowDef.placeholder
-                                    ? (
-                                        <span className="text-muted-foreground/50">
-                                          {rowDef.placeholder}
-                                        </span>
-                                      )
-                                    : ""}
+                            {rowDef.kind === "option" ? (
+                              (rowDef.options.find(
+                                (option) => option.value === rowDef.value,
+                              )?.label ?? rowDef.value)
+                            ) : rowDef.kind === "string" && rowDef.secret ? (
+                              rowDef.value ? (
+                                rowDef.value.length > 4 ? (
+                                  `••••${rowDef.value.slice(-4)}`
+                                ) : (
+                                  "•".repeat(8)
+                                )
+                              ) : rowDef.placeholder ? (
+                                <span className="text-muted-foreground/50">
+                                  {rowDef.placeholder}
+                                </span>
+                              ) : (
+                                ""
+                              )
+                            ) : rowDef.value ? (
+                              rowDef.value
+                            ) : rowDef.placeholder ? (
+                              <span className="text-muted-foreground/50">
+                                {rowDef.placeholder}
+                              </span>
+                            ) : (
+                              ""
+                            )}
                           </span>
                         )}
                         <span className="flex size-4 shrink-0 items-center justify-center">

@@ -18,6 +18,7 @@ import {
   agentRunRequest,
   type AgentEvent,
   type AgentRunRequest,
+  type ThinkingLevel,
 } from "../../shared/agent-events.js";
 import { readSource } from "./read-source.js";
 import { writeSource } from "./write-source.js";
@@ -91,8 +92,9 @@ export type AgentRunContext = {
   pluginTools: PluginTool[];
   /** One plugin's setting value, `undefined` when unset. */
   getSetting: (pluginId: string, key: string) => string | undefined;
-  /** Called once a session exists so the caller can abort it (IPC cancel,
-   *  a remote client disconnecting). */
+  /** Called once a run exists so the caller can abort it (IPC cancel,
+   *  a remote client disconnecting). Agent and plain-LLM runs each call it
+   *  once they have a live request to tear down. */
   onSession?: (abort: () => void) => void;
   /** Called for URIs a live run asserts it is about to show, so the local
    *  media protocol serves them before their block persists. The remote
@@ -225,18 +227,6 @@ function messageFailure(message: unknown): string | null {
   );
 }
 
-/** `shared/provider-routing.ts`'s "Thinking level" values, structurally
- *  matching pi-ai's `ThinkingLevel` without importing it (that type is in
- *  a transitive dependency this package doesn't declare directly). */
-const THINKING_LEVELS = [
-  "off",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const;
-
 /** Sail's completion-window values; anything else means its own default
  *  ("asap"). */
 const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
@@ -254,8 +244,9 @@ const OPENROUTER_ATTRIBUTION = {
   "X-OpenRouter-Categories": "personal-agent",
 } as const;
 
-/** Turns the renderer's `providerId`/`providerSettings` into that
- *  provider's request tuning. OpenRouter's `only`/`sort` become the
+/** Turns the renderer's `providerId`/`providerSettings` plus the run's own
+ *  `thinkingLevel` into that provider's request tuning. OpenRouter's
+ *  `only`/`sort` become the
  *  `provider` routing object; its reasoning effort needs
  *  `thinkingFormat: "openrouter"`. Sail's reasoning effort needs no
  *  compat override (pi-ai's default `reasoning_effort` already matches),
@@ -268,6 +259,7 @@ const OPENROUTER_ATTRIBUTION = {
 function providerTuning(
   providerId: string | undefined,
   providerSettings: Record<string, string> | undefined,
+  thinkingLevel: ThinkingLevel | undefined,
 ): {
   compat?: {
     openRouterRouting?: OpenRouterRouting;
@@ -276,15 +268,8 @@ function providerTuning(
   };
   samplingParams?: Record<string, unknown>;
   reasoning: boolean;
-  thinkingLevel?: (typeof THINKING_LEVELS)[number];
+  thinkingLevel?: ThinkingLevel;
 } {
-  const thinkingRaw = providerSettings?.thinkingLevel?.trim();
-  const thinkingLevel = (THINKING_LEVELS as readonly string[]).includes(
-    thinkingRaw ?? "",
-  )
-    ? (thinkingRaw as (typeof THINKING_LEVELS)[number])
-    : undefined;
-
   if (providerId === "openrouter") {
     const only = (providerSettings?.only ?? "")
       .split(",")
@@ -327,6 +312,28 @@ function providerTuning(
 }
 
 /**
+ * The text a run sends the model, agent and plain call alike. The graph
+ * above the block, when there is one, is wrapped in `<weaver_graph>` and
+ * separated from the run's own prompt by a rule, so the model can tell
+ * the surrounding conversation apart from what it is asked to do; a run
+ * with no graph context (a plain call, whose instruction and content
+ * already ship inside the prompt) goes through untouched.
+ */
+function assemblePrompt(body: AgentRunRequest): string {
+  return body.context
+    ? [
+        "<weaver_graph>",
+        body.context,
+        "</weaver_graph>",
+        "",
+        "---",
+        "",
+        body.prompt,
+      ].join("\n")
+    : body.prompt;
+}
+
+/**
  * One full agent run. Validates the request, mounts the model, tools and
  * plugins, runs the session, and maps every SDK event into the app's
  * `AgentEvent` shape, emitted through `emit` until a terminal
@@ -357,7 +364,11 @@ export async function runAgent(
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
-    const tuning = providerTuning(body.providerId, body.providerSettings);
+    const tuning = providerTuning(
+      body.providerId,
+      body.providerSettings,
+      body.thinkingLevel,
+    );
     modelRuntime.registerProvider("weaver", {
       baseUrl: body.endpoint,
       apiKey: body.apiKey,
@@ -389,6 +400,73 @@ export async function runAgent(
       return;
     }
 
+    // A plain call: the prompt goes straight to the model as a single user
+    // message. Nothing else happens here, by design — no session, no
+    // tools, no system prompt, no resource loading, no environment
+    // shading — so the model sees exactly what the run asked for, nothing
+    // the harness would add. The summarization run sets `plain`, keeping
+    // the agent machinery (plugins, skills, file tools) away from a
+    // read-only compress-and-reply task. The same `done`/`error`/delta
+    // events come back, so the renderer's run plumbing is identical to an
+    // agent run's.
+    if (body.plain) {
+      const controller = new AbortController();
+      ctx.onSession?.(() => controller.abort());
+      const events = modelRuntime.stream(
+        model,
+        {
+          messages: [
+            {
+              role: "user",
+              content: assemblePrompt(body),
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        { signal: controller.signal },
+      );
+      try {
+        for await (const event of events) {
+          if (event.type === "text_delta") {
+            emit({ type: "text_delta", text: event.delta });
+          } else if (event.type === "thinking_delta") {
+            emit({ type: "thinking_delta", text: event.delta });
+          } else if (event.type === "done") {
+            // Same terminal handling as the agent run's `message_end`: an
+            // unexpected stop reason is a failure, and a finished message
+            // can still carry reasoning or the whole reply when nothing
+            // streamed (a non-streaming provider).
+            const failure = messageFailure(event.message);
+            if (failure) {
+              emit({ type: "error", message: failure });
+              continue;
+            }
+            const thinking = messageThinking(event.message);
+            if (thinking) emit({ type: "thinking", text: thinking });
+            const text = messageText(event.message);
+            if (text) emit({ type: "text", text });
+          } else if (event.type === "error" && event.reason !== "aborted") {
+            // `aborted` is Ctrl+C, a deliberate stop; the renderer already
+            // resolved its own run on cancel, so there is nothing to report.
+            emit({
+              type: "error",
+              message:
+                event.error.errorMessage ??
+                `model ended with an unexpected stop reason: ${event.reason}`,
+            });
+          }
+        }
+      } catch (error) {
+        emit({
+          type: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      emit({ type: "done" });
+      return;
+    }
+
     /**
      * The one tool the harness adds: it turns a URI into a media block. A
      * generic version of this, one block kind per call with that kind's own
@@ -401,12 +479,14 @@ export async function runAgent(
       label: "Display external media",
       description: [
         "Show the user a real file: an image, audio, video, PDF, or text file by URI, or a YouTube video by its watch/share/shorts URL.",
-        "The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn't recognize, renders as a plain \"no preview\" placeholder instead of the actual file.",
+        'The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn\'t recognize, renders as a plain "no preview" placeholder instead of the actual file.',
         "If the only copy you have is extensionless (a download, a temp file, an attachment), write or copy it to a path that ends in the right extension first, then point this tool at that copy.",
         "A local file needs an absolute file:// URI, such as file:///home/me/diagram.png.",
       ].join("\n"),
       parameters: Type.Object({
-        uri: Type.String({ description: "http(s)://, file://, or a YouTube URL" }),
+        uri: Type.String({
+          description: "http(s)://, file://, or a YouTube URL",
+        }),
         label: Type.String({ description: "Short label for the block" }),
       }),
       execute: async (_toolCallId, params) => {
@@ -432,7 +512,12 @@ export async function runAgent(
           refuse(schemaMessage(error));
         }
         ctx.registerPendingMedia?.(params.uri);
-        emit({ type: "block", kind: MEDIA_KIND, label: params.label, data: state });
+        emit({
+          type: "block",
+          kind: MEDIA_KIND,
+          label: params.label,
+          data: state,
+        });
         return answer(`added a media block for ${params.uri}`);
       },
     });
@@ -448,12 +533,13 @@ export async function runAgent(
         description: Array.isArray(tool.description)
           ? tool.description.join("\n")
           : tool.description,
-        parameters: tool.parameters as Parameters<typeof defineTool>[0]["parameters"],
+        parameters: tool.parameters as Parameters<
+          typeof defineTool
+        >[0]["parameters"],
         execute: async (_toolCallId, args) => {
-          const result = await tool.execute(
-            args as Record<string, unknown>,
-            { getSetting: ctx.getSetting },
-          );
+          const result = await tool.execute(args as Record<string, unknown>, {
+            getSetting: ctx.getSetting,
+          });
           return {
             content: [{ type: "text" as const, text: result.content }],
             details: result.details,
@@ -494,8 +580,7 @@ export async function runAgent(
       noPromptTemplates:
         body.noPromptTemplates ?? DISCOVERY_DEFAULTS.noPromptTemplates,
       noThemes: body.noThemes ?? DISCOVERY_DEFAULTS.noThemes,
-      noContextFiles:
-        body.noContextFiles ?? DISCOVERY_DEFAULTS.noContextFiles,
+      noContextFiles: body.noContextFiles ?? DISCOVERY_DEFAULTS.noContextFiles,
       // A replacement, not an append: pi's default prompt (CLI-agent
       // phrasing, SDK-built tool list) is replaced wholesale; this file is
       // the whole system prompt. Tools still reach the model through the
@@ -526,8 +611,7 @@ export async function runAgent(
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
-          description:
-            "Filesystem path, or file://, http(s)://, ssh:// URI",
+          description: "Filesystem path, or file://, http(s)://, ssh:// URI",
         }),
         offset: Type.Optional(
           Type.Number({
@@ -538,7 +622,9 @@ export async function runAgent(
           Type.Number({ description: "Maximum number of lines to read" }),
         ),
         byteOffset: Type.Optional(
-          Type.Number({ description: "Byte to start reading from (0-indexed)" }),
+          Type.Number({
+            description: "Byte to start reading from (0-indexed)",
+          }),
         ),
         byteLength: Type.Optional(
           Type.Number({ description: "Maximum number of bytes to read" }),
@@ -606,7 +692,10 @@ export async function runAgent(
         }
         return {
           content: [
-            { type: "text" as const, text: `wrote ${params.content.length} bytes to ${params.path}` },
+            {
+              type: "text" as const,
+              text: `wrote ${params.content.length} bytes to ${params.path}`,
+            },
           ],
           details: {},
         };
@@ -723,7 +812,12 @@ export async function runAgent(
         // opens none here; a failed one still records a `tool` block (see
         // `tool_execution_end`) without a `tool_start` before it.
         if (sessionEvent.toolName === displayMedia.name) return;
-        emit({ type: "tool_start", id: entry.id, name: sessionEvent.toolName, args: entry.args });
+        emit({
+          type: "tool_start",
+          id: entry.id,
+          name: sessionEvent.toolName,
+          args: entry.args,
+        });
         return;
       }
       // Token-by-token streaming of the assistant's own words and, where
@@ -734,9 +828,17 @@ export async function runAgent(
         if (sessionEvent.assistantMessageEvent.type === "text_delta") {
           assistantText += sessionEvent.assistantMessageEvent.delta;
           registerInlineMedia(assistantText, ctx.registerPendingMedia);
-          emit({ type: "text_delta", text: sessionEvent.assistantMessageEvent.delta });
-        } else if (sessionEvent.assistantMessageEvent.type === "thinking_delta") {
-          emit({ type: "thinking_delta", text: sessionEvent.assistantMessageEvent.delta });
+          emit({
+            type: "text_delta",
+            text: sessionEvent.assistantMessageEvent.delta,
+          });
+        } else if (
+          sessionEvent.assistantMessageEvent.type === "thinking_delta"
+        ) {
+          emit({
+            type: "thinking_delta",
+            text: sessionEvent.assistantMessageEvent.delta,
+          });
         }
         return;
       }
@@ -785,7 +887,11 @@ export async function runAgent(
         // has nothing to show, and a silent failure is worse than a
         // visible one; its `tool_start` was skipped, so its wire id is
         // fresh and the renderer falls back to appending the block.
-        if (sessionEvent.toolName === displayMedia.name && !sessionEvent.isError) return;
+        if (
+          sessionEvent.toolName === displayMedia.name &&
+          !sessionEvent.isError
+        )
+          return;
         emit({
           type: "tool",
           id: pending?.id ?? String(++nextToolId),
@@ -797,17 +903,7 @@ export async function runAgent(
       }
     });
 
-    const prompt = body.context
-      ? [
-          "<weaver_graph>",
-          body.context,
-          "</weaver_graph>",
-          "",
-          "---",
-          "",
-          body.prompt,
-        ].join("\n")
-      : body.prompt;
+    const prompt = assemblePrompt(body);
 
     // The agent's own tools spawn shells that inherit `process.env`, so the
     // block's variables reach them by shading `process.env` for the duration

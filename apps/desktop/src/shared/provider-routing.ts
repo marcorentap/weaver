@@ -54,20 +54,6 @@ const OPENROUTER: ProviderDef = {
         { value: "latency", label: "Latency" },
       ],
     },
-    {
-      key: "thinkingLevel",
-      label: "Thinking level",
-      description: "Reasoning effort. Support varies by model.",
-      options: [
-        { value: "", label: "Default" },
-        { value: "off", label: "Off" },
-        { value: "minimal", label: "Minimal" },
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High" },
-        { value: "xhigh", label: "Extra high" },
-      ],
-    },
   ],
 };
 
@@ -76,20 +62,6 @@ const SAIL: ProviderDef = {
   name: "Sail",
   hosts: ["api.sailresearch.com"],
   fields: [
-    {
-      key: "thinkingLevel",
-      label: "Reasoning effort",
-      description: "Reasoning effort. Support varies by model.",
-      options: [
-        { value: "", label: "Default" },
-        { value: "off", label: "Off" },
-        { value: "minimal", label: "Minimal" },
-        { value: "low", label: "Low" },
-        { value: "medium", label: "Medium" },
-        { value: "high", label: "High" },
-        { value: "xhigh", label: "Extra high" },
-      ],
-    },
     {
       key: "completionWindow",
       label: "Completion window",

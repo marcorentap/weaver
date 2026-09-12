@@ -30,6 +30,25 @@ export const WORD_WRAP_OPTIONS = [
   { value: "on", label: "On" },
 ] as const satisfies readonly { value: WordWrapMode; label: string }[];
 
+/**
+ * The reasoning-effort choices the "Inference settings" and
+ * "Summarization settings" sections (and the `X` / `S` dialogs) offer:
+ * pi-ai's own levels plus a blank "Default" that leaves the SDK's
+ * default in charge. The non-blank values are the wire layer's
+ * `THINKING_LEVELS` (`shared/agent-events.ts`); this list only wraps them
+ * in display labels.
+ */
+export const THINKING_LEVEL_OPTIONS = [
+  { value: "", label: "Default" },
+  { value: "off", label: "Off" },
+  { value: "minimal", label: "Minimal" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "Extra high" },
+  { value: "max", label: "Max" },
+] as const;
+
 /** Root font size, in px. Every rem-sized element scales off `<html>`. */
 export const DEFAULT_FONT_SIZE = 15;
 export const MIN_FONT_SIZE = 10;
@@ -50,22 +69,50 @@ type Settings = {
   aiEndpoint: string;
   /** Bearer token sent to `aiEndpoint`. */
   aiApiKey: string;
-  /** Model id an agent block uses when its own `model` field is blank. */
-  aiDefaultModel: string;
+  /** Default model an inference run (an agent block, or the `X` modal's
+   *  row) falls back to when its own `model` field is blank. */
+  inferDefaultModel: string;
   /** Per-provider settings (routing preferences, and the like), keyed by
    *  the provider id `shared/provider-routing.ts` detects from
-   *  `aiEndpoint`. Keyed rather than flat so switching endpoints between
+   *  `aiEndpoint`. Keyed rather than flat so flipping endpoints between
    *  two known providers never clobbers the other one's saved values. */
   aiProviderSettings: Record<string, Record<string, string>>;
-  /** What pi's `DefaultResourceLoader` loads on each agent run, inverted
-   *  (`true` = don't load) so the names match the SDK flags the main
-   *  process passes through. These are the app-wide defaults the `X` modal
-   *  prefills per run. */
-  noExtensions: boolean;
-  noSkills: boolean;
-  noPromptTemplates: boolean;
-  noThemes: boolean;
-  noContextFiles: boolean;
+  /** Per-provider settings for summarization runs, keyed by the provider
+   *  id detected from the shared `aiEndpoint`. Same shape and purpose as
+   *  `aiProviderSettings`, kept apart so summaries can be tuned (or left
+   *  untuned) independently of the model that answers blocks. */
+  summProviderSettings: Record<string, Record<string, string>>;
+  /** Reasoning effort the inference run asks the model for, one of
+   *  pi's own levels (see `shared/agent-events.ts`), or blank for the SDK's
+   *  default. App-wide default of the `X` modal's row. */
+  inferThinkingLevel: string;
+  /** Same for a default summarization run; blank falls back to
+   *  `inferThinkingLevel`, like the default model beside it. */
+  summThinkingLevel: string;
+  /** What pi's `DefaultResourceLoader` loads on each inference run,
+   *  inverted (`true` = don't load) so the names match the SDK flags the
+   *  main process passes through. These are the app-wide defaults the `X`
+   *  modal prefills per run. Same five flags, samely named, for a
+   *  summarization run (`summNo…`): summaries share the inference harness
+   *  defaults or tune them half as hard, whichever the rows below set. */
+  inferNoExtensions: boolean;
+  inferNoSkills: boolean;
+  inferNoPromptTemplates: boolean;
+  inferNoThemes: boolean;
+  inferNoContextFiles: boolean;
+  /** Same five `DefaultResourceLoader` flags for a summarization run. */
+  summNoExtensions: boolean;
+  summNoSkills: boolean;
+  summNoPromptTemplates: boolean;
+  summNoThemes: boolean;
+  summNoContextFiles: boolean;
+  /** Default model a summarization run (`s` on a block) falls back to when
+   *  its own `model` field is blank. Kept apart from the inference default
+   *  so a smaller or cheaper model can compress conversations without
+   *  touching the one that answers them; a blank value falls back to
+   *  `inferDefaultModel`. Summarization runs share the endpoint and key
+   *  with inference (`aiEndpoint`/`aiApiKey`). */
+  summDefaultModel: string;
   /** Whether agent runs go through a remote weaver instance. */
   remoteEnabled: boolean;
   /** Scheme'd host of the remote instance, e.g. "http://192.168.1.20". */
@@ -90,17 +137,31 @@ const DEFAULTS: Settings = {
   fontSize: DEFAULT_FONT_SIZE,
   aiEndpoint: "",
   aiApiKey: "",
-  aiDefaultModel: "",
+  inferDefaultModel: "",
   aiProviderSettings: {},
   // Extensions, skills and context files are part of a block's context and
-  // default on; pi's prompt templates and themes would change how
+  // default on; Pi's prompt templates and themes would change how
   // surrounding weaver chrome renders and stay off. Same defaults the main
-  // process applies when a run omits a flag (`DISCOVERY_DEFAULTS`).
-  noExtensions: false,
-  noSkills: false,
-  noPromptTemplates: true,
-  noThemes: true,
-  noContextFiles: false,
+  // process applies when the run omits a flag (`DISCOVERY_DEFAULTS`), for
+  // inference and summarization alike.
+  inferNoExtensions: false,
+  inferNoSkills: false,
+  inferNoPromptTemplates: true,
+  inferNoThemes: true,
+  inferNoContextFiles: false,
+  summNoExtensions: false,
+  summNoSkills: false,
+  summNoPromptTemplates: true,
+  summNoThemes: true,
+  summNoContextFiles: false,
+  // Summarization runs fall back to the inference default model when this
+  // is blank, so it starts empty.
+  summDefaultModel: "",
+  // Blank reasoning effort means the SDK picks, the same default a fresh
+  // install has always had.
+  inferThinkingLevel: "",
+  summThinkingLevel: "",
+  summProviderSettings: {},
   remoteEnabled: false,
   remoteHost: "",
   remotePort: 3111,
@@ -158,13 +219,26 @@ type SettingsContextValue = {
   setFontSize: (size: number) => void;
   setAiEndpoint: (value: string) => void;
   setAiApiKey: (value: string) => void;
-  setAiDefaultModel: (value: string) => void;
-  setNoExtensions: (value: boolean) => void;
-  setNoSkills: (value: boolean) => void;
-  setNoPromptTemplates: (value: boolean) => void;
-  setNoThemes: (value: boolean) => void;
-  setNoContextFiles: (value: boolean) => void;
+  setInferDefaultModel: (value: string) => void;
+  setInferNoExtensions: (value: boolean) => void;
+  setInferNoSkills: (value: boolean) => void;
+  setInferNoPromptTemplates: (value: boolean) => void;
+  setInferNoThemes: (value: boolean) => void;
+  setInferNoContextFiles: (value: boolean) => void;
+  setSummDefaultModel: (value: string) => void;
+  setSummNoExtensions: (value: boolean) => void;
+  setSummNoSkills: (value: boolean) => void;
+  setSummNoPromptTemplates: (value: boolean) => void;
+  setSummNoThemes: (value: boolean) => void;
+  setSummNoContextFiles: (value: boolean) => void;
+  setInferThinkingLevel: (value: string) => void;
+  setSummThinkingLevel: (value: string) => void;
   setProviderField: (providerId: string, key: string, value: string) => void;
+  setSummProviderField: (
+    providerId: string,
+    key: string,
+    value: string,
+  ) => void;
   setRemoteEnabled: (value: boolean) => void;
   setRemoteHost: (value: string) => void;
   setRemotePort: (value: number) => void;
@@ -198,16 +272,34 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             fontSize: stored?.fontSize ?? DEFAULTS.fontSize,
             aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
             aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
-            aiDefaultModel: stored?.aiDefaultModel ?? DEFAULTS.aiDefaultModel,
+            inferDefaultModel:
+              stored?.inferDefaultModel ?? DEFAULTS.inferDefaultModel,
             aiProviderSettings:
               stored?.aiProviderSettings ?? DEFAULTS.aiProviderSettings,
-            noExtensions: stored?.noExtensions ?? DEFAULTS.noExtensions,
-            noSkills: stored?.noSkills ?? DEFAULTS.noSkills,
-            noPromptTemplates:
-              stored?.noPromptTemplates ?? DEFAULTS.noPromptTemplates,
-            noThemes: stored?.noThemes ?? DEFAULTS.noThemes,
-            noContextFiles:
-              stored?.noContextFiles ?? DEFAULTS.noContextFiles,
+            inferNoExtensions:
+              stored?.inferNoExtensions ?? DEFAULTS.inferNoExtensions,
+            inferNoSkills: stored?.inferNoSkills ?? DEFAULTS.inferNoSkills,
+            inferNoPromptTemplates:
+              stored?.inferNoPromptTemplates ?? DEFAULTS.inferNoPromptTemplates,
+            inferNoThemes: stored?.inferNoThemes ?? DEFAULTS.inferNoThemes,
+            inferNoContextFiles:
+              stored?.inferNoContextFiles ?? DEFAULTS.inferNoContextFiles,
+            summNoExtensions:
+              stored?.summNoExtensions ?? DEFAULTS.summNoExtensions,
+            summNoSkills: stored?.summNoSkills ?? DEFAULTS.summNoSkills,
+            summNoPromptTemplates:
+              stored?.summNoPromptTemplates ?? DEFAULTS.summNoPromptTemplates,
+            summNoThemes: stored?.summNoThemes ?? DEFAULTS.summNoThemes,
+            summNoContextFiles:
+              stored?.summNoContextFiles ?? DEFAULTS.summNoContextFiles,
+            summDefaultModel:
+              stored?.summDefaultModel ?? DEFAULTS.summDefaultModel,
+            inferThinkingLevel:
+              stored?.inferThinkingLevel ?? DEFAULTS.inferThinkingLevel,
+            summThinkingLevel:
+              stored?.summThinkingLevel ?? DEFAULTS.summThinkingLevel,
+            summProviderSettings:
+              stored?.summProviderSettings ?? DEFAULTS.summProviderSettings,
             remoteEnabled: stored?.remoteEnabled ?? DEFAULTS.remoteEnabled,
             remoteHost: stored?.remoteHost ?? DEFAULTS.remoteHost,
             remotePort: stored?.remotePort ?? DEFAULTS.remotePort,
@@ -240,17 +332,23 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
    *  Committed before the IPC round trip resolves, same optimistic order as
    *  every other mutation in the app, so a keystroke never waits on the
    *  main process to render. */
-  const set = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
-    const next = { ...current.settings, [key]: value };
-    commit({ settings: next, hydrated: current.hydrated });
-    void window.api.settings.set(STORAGE_KEY, JSON.stringify(next));
-  }, []);
+  const set = useCallback(
+    <K extends keyof Settings>(key: K, value: Settings[K]) => {
+      const next = { ...current.settings, [key]: value };
+      commit({ settings: next, hydrated: current.hydrated });
+      void window.api.settings.set(STORAGE_KEY, JSON.stringify(next));
+    },
+    [],
+  );
 
   const setLineNumber = useCallback(
     (lineNumber: LineNumberMode) => set("lineNumber", lineNumber),
     [set],
   );
-  const setFontSize = useCallback((size: number) => set("fontSize", size), [set]);
+  const setFontSize = useCallback(
+    (size: number) => set("fontSize", size),
+    [set],
+  );
   const setWordWrap = useCallback(
     (wordWrap: WordWrapMode) => set("wordWrap", wordWrap),
     [set],
@@ -263,8 +361,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: string) => set("aiApiKey", value),
     [set],
   );
-  const setAiDefaultModel = useCallback(
-    (value: string) => set("aiDefaultModel", value),
+  const setInferDefaultModel = useCallback(
+    (value: string) => set("inferDefaultModel", value),
     [set],
   );
   /** Merges one field into one provider's settings bag, leaving every
@@ -281,24 +379,70 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     },
     [set],
   );
-  const setNoExtensions = useCallback(
-    (value: boolean) => set("noExtensions", value),
+  /** Merges one field into one provider's settings bag, same as
+   *  `setProviderField` for the summarization side. */
+  const setSummProviderField = useCallback(
+    (providerId: string, key: string, value: string) => {
+      set("summProviderSettings", {
+        ...current.settings.summProviderSettings,
+        [providerId]: {
+          ...current.settings.summProviderSettings[providerId],
+          [key]: value,
+        },
+      });
+    },
     [set],
   );
-  const setNoSkills = useCallback(
-    (value: boolean) => set("noSkills", value),
+  const setInferNoExtensions = useCallback(
+    (value: boolean) => set("inferNoExtensions", value),
     [set],
   );
-  const setNoPromptTemplates = useCallback(
-    (value: boolean) => set("noPromptTemplates", value),
+  const setInferNoSkills = useCallback(
+    (value: boolean) => set("inferNoSkills", value),
     [set],
   );
-  const setNoThemes = useCallback(
-    (value: boolean) => set("noThemes", value),
+  const setInferNoPromptTemplates = useCallback(
+    (value: boolean) => set("inferNoPromptTemplates", value),
     [set],
   );
-  const setNoContextFiles = useCallback(
-    (value: boolean) => set("noContextFiles", value),
+  const setInferNoThemes = useCallback(
+    (value: boolean) => set("inferNoThemes", value),
+    [set],
+  );
+  const setInferNoContextFiles = useCallback(
+    (value: boolean) => set("inferNoContextFiles", value),
+    [set],
+  );
+  const setSummNoExtensions = useCallback(
+    (value: boolean) => set("summNoExtensions", value),
+    [set],
+  );
+  const setSummNoSkills = useCallback(
+    (value: boolean) => set("summNoSkills", value),
+    [set],
+  );
+  const setSummNoPromptTemplates = useCallback(
+    (value: boolean) => set("summNoPromptTemplates", value),
+    [set],
+  );
+  const setSummNoThemes = useCallback(
+    (value: boolean) => set("summNoThemes", value),
+    [set],
+  );
+  const setSummNoContextFiles = useCallback(
+    (value: boolean) => set("summNoContextFiles", value),
+    [set],
+  );
+  const setSummDefaultModel = useCallback(
+    (value: string) => set("summDefaultModel", value),
+    [set],
+  );
+  const setInferThinkingLevel = useCallback(
+    (value: string) => set("inferThinkingLevel", value),
+    [set],
+  );
+  const setSummThinkingLevel = useCallback(
+    (value: string) => set("summThinkingLevel", value),
     [set],
   );
   const setRemoteEnabled = useCallback(
@@ -339,13 +483,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setFontSize,
       setAiEndpoint,
       setAiApiKey,
-      setAiDefaultModel,
+      setInferDefaultModel,
       setProviderField,
-      setNoExtensions,
-      setNoSkills,
-      setNoPromptTemplates,
-      setNoThemes,
-      setNoContextFiles,
+      setSummProviderField,
+      setInferNoExtensions,
+      setInferNoSkills,
+      setInferNoPromptTemplates,
+      setInferNoThemes,
+      setInferNoContextFiles,
+      setSummNoExtensions,
+      setSummNoSkills,
+      setSummNoPromptTemplates,
+      setSummNoThemes,
+      setSummNoContextFiles,
+      setSummDefaultModel,
+      setInferThinkingLevel,
+      setSummThinkingLevel,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,
@@ -362,13 +515,22 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setFontSize,
       setAiEndpoint,
       setAiApiKey,
-      setAiDefaultModel,
+      setInferDefaultModel,
       setProviderField,
-      setNoExtensions,
-      setNoSkills,
-      setNoPromptTemplates,
-      setNoThemes,
-      setNoContextFiles,
+      setSummProviderField,
+      setInferNoExtensions,
+      setInferNoSkills,
+      setInferNoPromptTemplates,
+      setInferNoThemes,
+      setInferNoContextFiles,
+      setSummNoExtensions,
+      setSummNoSkills,
+      setSummNoPromptTemplates,
+      setSummNoThemes,
+      setSummNoContextFiles,
+      setSummDefaultModel,
+      setInferThinkingLevel,
+      setSummThinkingLevel,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,
@@ -384,6 +546,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
 export function useSettings(): SettingsContextValue {
   const value = useContext(context);
-  if (!value) throw new Error("useSettings must be used within SettingsProvider");
+  if (!value)
+    throw new Error("useSettings must be used within SettingsProvider");
   return value;
 }
