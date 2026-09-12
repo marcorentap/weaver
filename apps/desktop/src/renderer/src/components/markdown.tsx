@@ -111,7 +111,7 @@ const MARKDOWN: Components = {
       src={
         typeof src === "string" && parseMediaUri(src) ? mediaSrc(src) : src
       }
-      className="mt-2 max-h-48 w-auto"
+      className="mt-2 max-h-48 w-auto max-w-full"
     />
   ),
 };

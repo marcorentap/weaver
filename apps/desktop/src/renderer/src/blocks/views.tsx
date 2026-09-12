@@ -181,13 +181,14 @@ function MediaRow({ state, pwd }: { state: MediaState; pwd?: string }) {
         // A media block's URI is arbitrary, any host or a local file behind
         // the media protocol, so a fixed remotePatterns allowlist can't
         // serve it.
-        // `max-height` alone leaves an intrinsically small image (an icon-size
-        // svg, say) at its natural size instead of filling the row; a fixed
-        // `h-48` plus `object-contain` scales every image up or down to it.
+        // Only the height is capped: a wide image grows toward the row's edge
+        // (`max-w-full`) instead of squatting in a fixed square, while a small
+        // image (an icon-size svg, say) stays at its natural size. The box
+        // preserves the intrinsic ratio, so no `object-contain` letterboxing.
         <img
           src={src}
           alt=""
-          className="h-48 w-48 shrink-0 border object-contain"
+          className="max-h-48 max-w-full w-auto shrink-0 border"
         />
       ) : null}
       {type === "video" ? (
