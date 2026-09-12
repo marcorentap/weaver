@@ -365,6 +365,7 @@ export default function SettingsPage() {
     setInferNoThemes,
     setInferNoContextFiles,
     setSummDefaultModel,
+    setSummAgent,
     setSummNoExtensions,
     setSummNoSkills,
     setSummNoPromptTemplates,
@@ -772,13 +773,15 @@ export default function SettingsPage() {
       onChange: (value) => setInferNoContextFiles(value === "off"),
     },
 
-    // The same six defaults for a summarization run (`s` on a block, `S`
-    // for the custom dialog): its fallback model, its reasoning effort and
-    // the same resource flags as the inference rows above, so the section
-    // reads identically to "Inference settings". Summarization shares the
-    // endpoint and key with inference (the "AI provider" rows above); each
-    // blank model/level value falls back to the inference setting beside
-    // it, so summaries work even before any of these are filled in.
+    // The same defaults for a summarization run (`s` on a block, `S`
+    // for the custom dialog): its fallback model, its reasoning effort,
+    // the agentic toggle that decides whether a summary mounts the pi
+    // agent or goes out plain, and the same resource flags as the
+    // inference rows above. When agentic is off the flags below tune
+    // nothing (a plain call has no loader), but the run still shares the
+    // endpoint and key with inference (the "AI provider" rows above);
+    // each blank model/level value falls back to the inference setting
+    // beside it, so summaries work even before any of these are filled in.
     {
       kind: "option",
       key: "summDefaultModel",
@@ -817,6 +820,16 @@ export default function SettingsPage() {
           ? `${settings.summDefaultModel} doesn't list reasoning support`
           : null,
       onChange: setSummThinkingLevel,
+    },
+    {
+      kind: "option",
+      key: "summAgent",
+      label: "Agentic",
+      description:
+        "Summarize with the pi agent (tools, skills, extensions) instead of a plain LLM call. When on, the rows below apply to the summary; when off, they tune nothing.",
+      options: ON_OFF_OPTIONS,
+      value: settings.summAgent ? "on" : "off",
+      onChange: (value) => setSummAgent(value === "on"),
     },
     {
       kind: "option",

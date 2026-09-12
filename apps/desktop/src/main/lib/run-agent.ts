@@ -404,11 +404,12 @@ export async function runAgent(
     // message. Nothing else happens here, by design — no session, no
     // tools, no system prompt, no resource loading, no environment
     // shading — so the model sees exactly what the run asked for, nothing
-    // the harness would add. The summarization run sets `plain`, keeping
-    // the agent machinery (plugins, skills, file tools) away from a
-    // read-only compress-and-reply task. The same `done`/`error`/delta
-    // events come back, so the renderer's run plumbing is identical to an
-    // agent run's.
+    // the harness would add. A summarization run is plain unless its
+    // agentic toggle is on, keeping the agent machinery (plugins, skills,
+    // file tools) away from a read-only compress-and-reply task when
+    // that's what the user asked for. The same `done`/`error`/delta
+    // events come back, so the renderer's run plumbing is identical to
+    // an agent run's.
     if (body.plain) {
       const controller = new AbortController();
       ctx.onSession?.(() => controller.abort());

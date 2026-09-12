@@ -106,6 +106,12 @@ type Settings = {
   summNoPromptTemplates: boolean;
   summNoThemes: boolean;
   summNoContextFiles: boolean;
+  /** Whether a summarization run (`s` / `S`) goes through the pi agent
+   *  instead of a plain LLM call. Off keeps the read-only compress-and-
+   *  reply behavior; on mounts the whole harness, so the `summNo…` rows
+   *  next to it (extensions, skills, prompt templates, themes, context
+   *  files) actually apply and the run can use tools. */
+  summAgent: boolean;
   /** Default model a summarization run (`s` on a block) falls back to when
    *  its own `model` field is blank. Kept apart from the inference default
    *  so a smaller or cheaper model can compress conversations without
@@ -154,6 +160,9 @@ const DEFAULTS: Settings = {
   summNoPromptTemplates: true,
   summNoThemes: true,
   summNoContextFiles: false,
+  // Summaries stay plain until the agentic toggle is flipped, so a fresh
+  // install behaves exactly as it always has.
+  summAgent: false,
   // Summarization runs fall back to the inference default model when this
   // is blank, so it starts empty.
   summDefaultModel: "",
@@ -226,6 +235,7 @@ type SettingsContextValue = {
   setInferNoThemes: (value: boolean) => void;
   setInferNoContextFiles: (value: boolean) => void;
   setSummDefaultModel: (value: string) => void;
+  setSummAgent: (value: boolean) => void;
   setSummNoExtensions: (value: boolean) => void;
   setSummNoSkills: (value: boolean) => void;
   setSummNoPromptTemplates: (value: boolean) => void;
@@ -292,6 +302,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             summNoThemes: stored?.summNoThemes ?? DEFAULTS.summNoThemes,
             summNoContextFiles:
               stored?.summNoContextFiles ?? DEFAULTS.summNoContextFiles,
+            summAgent: stored?.summAgent ?? DEFAULTS.summAgent,
             summDefaultModel:
               stored?.summDefaultModel ?? DEFAULTS.summDefaultModel,
             inferThinkingLevel:
@@ -437,6 +448,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: string) => set("summDefaultModel", value),
     [set],
   );
+  const setSummAgent = useCallback(
+    (value: boolean) => set("summAgent", value),
+    [set],
+  );
   const setInferThinkingLevel = useCallback(
     (value: string) => set("inferThinkingLevel", value),
     [set],
@@ -497,6 +512,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummNoThemes,
       setSummNoContextFiles,
       setSummDefaultModel,
+      setSummAgent,
       setInferThinkingLevel,
       setSummThinkingLevel,
       setRemoteEnabled,
@@ -529,6 +545,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummNoThemes,
       setSummNoContextFiles,
       setSummDefaultModel,
+      setSummAgent,
       setInferThinkingLevel,
       setSummThinkingLevel,
       setRemoteEnabled,

@@ -9,16 +9,25 @@ import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
-/** The per-run inference settings `X` collects on a block before running. */
+/** The per-run settings the `X` / `S` dialogs collect on a block before
+ *  running. The endpoint, key and provider fields prefill from the saved
+ *  settings; `agentic` only a summary run carries, so a summary can ride
+ *  the agent or stay a plain call. Every field falls back to its saved
+ *  default when blank. */
 export type CustomInferenceRun = {
   endpoint: string;
   apiKey: string;
+  /** Model this run uses; blank falls back to the saved default. */
   model: string;
   /** Reasoning effort for this run; blank falls back to the saved
    *  inference/summarization default, exactly like the other fields. */
   thinkingLevel?: string;
   providerId?: string;
   providerSettings?: Record<string, string>;
+  /** Whether a summarization ride the pi agent instead of going out
+   *  as a plain LLM call. Set only by the `S` dialog; an inference run is
+   *  always an agent run, so its custom payload never carries this. */
+  agentic?: boolean;
   /** What pi's `DefaultResourceLoader` loads for this run; `true` = don't
    *  load. Omitted by callers that don't aim the run (plain `x`), which
    *  then fall back to the saved inference settings. */
@@ -73,18 +82,25 @@ type RowDef =
 const INDENT_REM = 1;
 
 /**
- * The `X` modal. `enter` → `x` runs the block with the default settings;
- * `enter` → `X` opens this and lets the run be aimed differently. The `S`
- * summarization run reuses it with a different title and `runLabel`, and
- * in plain mode (`plain`) the harness-discovery rows drop out entirely —
- * a plain run has no loader, so the settings source and the run row's
- * wording are the only other things that change.
- * It mirrors the settings page's AI provider layout: rows with a label
- * column and a value column, `j`/`k` to move, `h`/`l` or the chevrons to
- * cycle an option, `enter` to type a string value or run, `esc` to cancel
- * the edit and then the dialog. Every value prefills from the saved
- * settings so a single tweak (change the model, enter, enter) is a
- * one-step run. Nothing persists: this is a run, not a settings edit.
+ * The `X` / `S` modal. `enter` → `x` / `s` runs the block with the saved
+ * settings; `enter` → `X` / `S` opens this and lets the per-run fields be
+ * changed. It mirrors the settings page's "Inference settings" and
+ * "Summarization settings" sections: the same rows, same order — model,
+ * thinking level, and (agent runs only) what pi's loader pulls in — with
+ * nothing extra. The endpoint, key and provider tuning the page keeps in
+ * its "AI provider" section stay fixed to the saved settings, since those
+ * are not per-run settings. The `S` summarization run reuses it with a
+ * different title and `runLabel`, and gets an Agentic row the inference
+ * dialog doesn't have: summaries are plain LLM calls unless the toggle
+ * rides the agent, and the agent's harness rows only appear when it does.
+ * For the inference run the dialog is always agentic, so no toggle row and
+ * the discovery rows always show.
+ * The layout is the settings page's own: rows with a label column and a
+ * value column, `j`/`k` to move, `h`/`l` or the chevrons to cycle an
+ * option, `enter` to type a string value or run, `esc` to cancel the edit
+ * and then the dialog. Every value prefills from the saved settings so a
+ * single tweak (change the model, enter, enter) is a one-step run.
+ * Nothing persists: this is a run, not a settings edit.
  */
 export function CustomInferenceDialog({
   id,
@@ -94,7 +110,7 @@ export function CustomInferenceDialog({
   defaults,
   onRun,
   onCancel,
-  plain,
+  agentic,
 }: {
   id: string;
   title: string;
@@ -105,11 +121,8 @@ export function CustomInferenceDialog({
   /** The saved settings to prefill from. Agent-run rows (the discovery
    *  flags) may be absent for a plain run, which has no loader. */
   defaults: {
-    endpoint: string;
-    apiKey: string;
     model: string;
     thinkingLevel?: string;
-    providerSettings: Record<string, Record<string, string>>;
     noExtensions?: boolean;
     noSkills?: boolean;
     noPromptTemplates?: boolean;
@@ -118,33 +131,24 @@ export function CustomInferenceDialog({
   };
   onRun: (run: CustomInferenceRun) => void;
   onCancel: () => void;
-  /** This run is a plain LLM call (the `S` summarization dialog): the
-   *  discovery rows (pi extensions, skills, prompt templates, themes,
-   *  context files) configure a harness the run never mounts, so they drop
-   *  out of the dialog and out of the `onRun` payload. */
-  plain?: boolean;
+  /** The `S` summarization dialog's initial agentic state. Undefined means
+   *  the run cannot go plain (the `X` inference dialog, always an agent
+   *  run): the Agentic row is hidden and the discovery rows always show.
+   *  The summarization dialog passes the saved `summAgent` setting. */
+  agentic?: boolean;
 }) {
-  const [endpoint, setEndpoint] = useState(defaults.endpoint);
-  const [apiKey, setApiKey] = useState(defaults.apiKey);
   const [model, setModel] = useState(defaults.model);
   const [thinkingLevel, setThinkingLevel] = useState(
     defaults.thinkingLevel ?? "",
   );
-  /** Per-provider field values, copied so editing a run never mutates the
-   *  saved settings behind it. */
-  const [providerSettings, setProviderSettings] = useState<
-    Record<string, Record<string, string>>
-  >(() =>
-    Object.fromEntries(
-      Object.entries(defaults.providerSettings).map(([providerId, fields]) => [
-        providerId,
-        { ...fields },
-      ]),
-    ),
-  );
-  /** What pi loads for this run, copied from the saved settings like every
-   *  other value in the dialog. Only read for agent runs (`plain` is
-   *  false); a plain run has no loader, so it keeps its default `false`. */
+  /** Whether this run rides the agent harness. Inference is always agentic
+   *  (`agentic` prop undefined); the summary dialog starts from the saved
+   *  setting and the row flips it. */
+  const [isAgentic, setIsAgentic] = useState(agentic ?? true);
+  /** The dialog can switch a run out of plain mode: true for inference
+   *  (which has no toggle) and for the summary dialog when agentic is on.
+   *  Only when true do the discovery rows appear and the flags ship. */
+  const showAgentic = agentic === undefined || isAgentic;
   const [noExtensions, setNoExtensions] = useState(
     defaults.noExtensions ?? false,
   );
@@ -156,23 +160,11 @@ export function CustomInferenceDialog({
   const [noContextFiles, setNoContextFiles] = useState(
     defaults.noContextFiles ?? false,
   );
-  // The provider the endpoint being typed belongs to. Same detection the
-  // default run and the main process use, so its fields appear (and are
-  // sent) only when the endpoint actually names that provider.
-  const provider = detectProvider(endpoint);
-  const setProviderField = (key: string, value: string) => {
-    if (!provider) return;
-    setProviderSettings((current) => ({
-      ...current,
-      [provider.id]: { ...(current[provider.id] ?? {}), [key]: value },
-    }));
-  };
-
   /** The harness-discovery rows (pi extensions, skills, prompt templates,
    *  themes, context files) of the settings page's "Inference settings"
    *  section, shown only for agent runs; a plain run has no loader, so
    *  these would tune nothing and stay empty. */
-  const discoveryRows: RowDef[] = plain
+  const discoveryRows: RowDef[] = !showAgentic
     ? []
     : [
         {
@@ -225,7 +217,8 @@ export function CustomInferenceDialog({
       ];
 
   /** Rows the way settings would render them: the run action first, then
-   *  each field, then the provider's own fields. */
+   *  each settings-page field for the run's kind — nothing the page's own
+   *  sections don't carry. */
   const rows: RowDef[] = [
     {
       key: "run",
@@ -235,29 +228,10 @@ export function CustomInferenceDialog({
       actionLabel: "Run",
     },
     {
-      key: "endpoint",
-      kind: "string",
-      label: "Endpoint",
-      description: "OpenAI-completions base URL.",
-      value: endpoint,
-      placeholder: "https://api.openai.com/v1",
-      onChange: setEndpoint,
-    },
-    {
-      key: "apiKey",
-      kind: "string",
-      label: "API key",
-      description: "Bearer token for the endpoint.",
-      value: apiKey,
-      secret: true,
-      placeholder: "sk-...",
-      onChange: setApiKey,
-    },
-    {
       key: "model",
       kind: "string",
-      label: "Model",
-      description: "Model this run uses.",
+      label: "Default model",
+      description: "Default when a block's own model field is blank.",
       value: model,
       placeholder: "gpt-4o",
       onChange: setModel,
@@ -271,57 +245,51 @@ export function CustomInferenceDialog({
       value: thinkingLevel,
       onChange: setThinkingLevel,
     },
+    // A summary can be a plain call or an agent run; this toggle decides
+    // which, and gates the harness rows below. Inference is always an
+    // agent run, so only the summary dialog gets the row. It mirrors the
+    // settings page's "Summarization settings" agentic toggle (the
+    // `summAgent` setting it prefills from).
+    ...(agentic === undefined
+      ? []
+      : [
+          {
+            key: "agentic",
+            kind: "option",
+            label: "Agentic",
+            description:
+              "Run through the pi agent (tools, skills, extensions) or as a plain LLM call.",
+            options: ON_OFF_OPTIONS,
+            value: isAgentic ? "on" : "off",
+            onChange: (value) => setIsAgentic(value === "on"),
+          },
+        ]),
     // What pi's DefaultResourceLoader loads for this run, same rows the
     // settings page's "Inference settings" section shows; skipped for a
-    // plain run (`plain`), which has no loader. On/off here reads as the
-    // feature it enables (`no…` is the saved/inverted value).
+    // plain run, which has no loader. On/off here reads as the feature it
+    // enables (`no…` is the saved/inverted value).
     ...discoveryRows,
-    ...(provider?.fields ?? []).map((field: ProviderField): RowDef =>
-      field.options
-        ? {
-            key: `provider.${field.key}`,
-            kind: "option",
-            label: field.label,
-            description: field.description,
-            options: field.options,
-            value: provider
-              ? (providerSettings[provider.id]?.[field.key] ?? "")
-              : "",
-            onChange: (value) => setProviderField(field.key, value),
-          }
-        : {
-            key: `provider.${field.key}`,
-            kind: "string",
-            label: field.label,
-            description: field.description,
-            value: provider
-              ? (providerSettings[provider.id]?.[field.key] ?? "")
-              : "",
-            placeholder: field.placeholder,
-            onChange: (value) => setProviderField(field.key, value),
-          },
-    ),
   ];
 
   const submit = () =>
     onRun({
-      endpoint: endpoint.trim(),
-      apiKey,
       model: model.trim(),
       thinkingLevel: thinkingLevel || undefined,
-      providerId: provider?.id,
-      providerSettings: provider ? providerSettings[provider.id] : undefined,
-      // A plain run (the `S` summarization dialog) has no loader, so the
-      // discovery flags are neither shown nor sent.
-      ...(plain
-        ? {}
-        : {
+      // The `S` dialog reports its agentic choice; inference always runs
+      // the agent, so no flag travels for it.
+      ...(agentic === undefined ? {} : { agentic: isAgentic }),
+      // A plain summary has no loader, so its discovery flags are neither
+      // shown nor sent. (An inference dialog is always agentic, so its
+      // `showAgentic` is always true.)
+      ...(showAgentic
+        ? {
             noExtensions,
             noSkills,
             noPromptTemplates,
             noThemes,
             noContextFiles,
-          }),
+          }
+        : {}),
     });
 
   const [cursor, setCursor] = useState(0);

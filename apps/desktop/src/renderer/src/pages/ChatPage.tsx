@@ -999,17 +999,14 @@ function ChatView({
       inferNoThemes,
       inferNoContextFiles,
     } = settings;
-    const endpoint = custom?.endpoint ?? aiEndpoint;
-    const provider = detectProvider(endpoint);
+    const provider = detectProvider(aiEndpoint);
     return engine.runInference(id, {
-      endpoint,
-      apiKey: custom?.apiKey ?? aiApiKey,
+      endpoint: aiEndpoint,
+      apiKey: aiApiKey,
       model: custom?.model ?? inferDefaultModel,
       thinkingLevel: (custom?.thinkingLevel ?? inferThinkingLevel) || undefined,
-      providerId: custom?.providerId ?? provider?.id,
-      providerSettings:
-        custom?.providerSettings ??
-        (provider ? aiProviderSettings[provider.id] : undefined),
+      providerId: provider?.id,
+      providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
       noExtensions: custom?.noExtensions ?? inferNoExtensions,
       noSkills: custom?.noSkills ?? inferNoSkills,
       noPromptTemplates: custom?.noPromptTemplates ?? inferNoPromptTemplates,
@@ -1028,10 +1025,13 @@ function ChatView({
    * field falls back to the inference setting beside it, so a fresh install
    * that never touched the summarization rows still gets a working run out
    * of the AI provider it already configured. `take`'s last id anchors the
-   * run, so the summary appends right after the block or selection. The
-   * run itself is a plain LLM call (`engine.summarize` sets `plain`), so
-   * none of the inference harness — tools, skills, extensions, prompt
-   * templates, themes, context files — applies to it.
+   * run, so the summary appends right after the block or selection. Whether
+   * the run mounts the pi agent or goes out plain is the `summAgent`
+   * setting's call; `S` overrides it per run with the dialog's Agentic row.
+   * An agentic summary gets the same harness rows as inference (loaded
+   * from the `summNo…` defaults); a plain one has no loader, so none of
+   * the inference harness — tools, skills, extensions, prompt templates,
+   * themes, context files — applies to it.
    */
   function runSummary(
     take: BlockId[],
@@ -1049,26 +1049,45 @@ function ChatView({
       summDefaultModel,
       summProviderSettings,
       summThinkingLevel,
+      summAgent,
+      summNoExtensions,
+      summNoSkills,
+      summNoPromptTemplates,
+      summNoThemes,
+      summNoContextFiles,
     } = settings;
+    // The `S` dialog's own agentic choice, else the saved default. A plain
+    // summary omits the flags that only a loader reads; an agentic one
+    // falls back to the `summNo…` settings exactly like `runInference`.
+    const agentic = custom?.agentic ?? summAgent;
     // Summarization shares the endpoint and key with inference; only the
     // model and thinking level have their own defaults, each falling back
-    // to the inference setting when blank.
-    const endpoint = custom?.endpoint ?? aiEndpoint;
-    const provider = detectProvider(endpoint);
+    // to the inference setting when blank. The `S` dialog can override the
+    // run's model and thinking level; the endpoint, key and provider
+    // tuning always come from the saved settings, like a default run.
+    const provider = detectProvider(aiEndpoint);
     return engine.summarize(anchor, take, {
-      endpoint,
-      apiKey: custom?.apiKey ?? aiApiKey,
+      endpoint: aiEndpoint,
+      apiKey: aiApiKey,
       model: custom?.model ?? (summDefaultModel || inferDefaultModel),
       thinkingLevel:
         (custom?.thinkingLevel ?? (summThinkingLevel || inferThinkingLevel)) ||
         undefined,
-      providerId: custom?.providerId ?? provider?.id,
-      providerSettings:
-        custom?.providerSettings ??
-        (provider
-          ? (summProviderSettings[provider.id] ??
-            aiProviderSettings[provider.id])
-          : undefined),
+      providerId: provider?.id,
+      providerSettings: provider
+        ? (summProviderSettings[provider.id] ?? aiProviderSettings[provider.id])
+        : undefined,
+      plain: !agentic,
+      ...(agentic
+        ? {
+            noExtensions: custom?.noExtensions ?? summNoExtensions,
+            noSkills: custom?.noSkills ?? summNoSkills,
+            noPromptTemplates:
+              custom?.noPromptTemplates ?? summNoPromptTemplates,
+            noThemes: custom?.noThemes ?? summNoThemes,
+            noContextFiles: custom?.noContextFiles ?? summNoContextFiles,
+          }
+        : {}),
     });
   }
 
@@ -2091,11 +2110,8 @@ function ChatView({
           title="Run custom inference"
           meta={row.block.label}
           defaults={{
-            endpoint: settings.aiEndpoint,
-            apiKey: settings.aiApiKey,
             model: settings.inferDefaultModel,
             thinkingLevel: settings.inferThinkingLevel,
-            providerSettings: settings.aiProviderSettings,
             noExtensions: settings.inferNoExtensions,
             noSkills: settings.inferNoSkills,
             noPromptTemplates: settings.inferNoPromptTemplates,
@@ -2119,16 +2135,20 @@ function ChatView({
           // Same shape as the custom inference dialog, prefilled from the
           // summarization settings instead; a blank summarization field
           // falls back to the inference one beside it, exactly like the `s`
-          // default run. There are no discovery defaults: the run is plain
-          // (`plain`), so the harness rows are neither shown nor sent.
-          plain
+          // default run. The agentic toggle starts from `summAgent`: off
+          // keeps it a plain call (no harness rows), on turns it into an
+          // agent run with the `summNo…` defaults prefilled, the same set
+          // of rows the inference dialog always carries.
+          agentic={settings.summAgent}
           defaults={{
-            endpoint: settings.aiEndpoint,
-            apiKey: settings.aiApiKey,
             model: settings.summDefaultModel || settings.inferDefaultModel,
             thinkingLevel:
               settings.summThinkingLevel || settings.inferThinkingLevel,
-            providerSettings: settings.summProviderSettings,
+            noExtensions: settings.summNoExtensions,
+            noSkills: settings.summNoSkills,
+            noPromptTemplates: settings.summNoPromptTemplates,
+            noThemes: settings.summNoThemes,
+            noContextFiles: settings.summNoContextFiles,
           }}
           onRun={(run) => {
             setPopup(null);

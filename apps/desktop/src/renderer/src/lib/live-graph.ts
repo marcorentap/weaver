@@ -133,9 +133,10 @@ export type LiveGraph = {
    * selection. The answer lands in a block labeled "summary". `s` (default
    * settings) and `S` (custom settings) in the block and selection menus
    * drive it via the summarization settings, with blank fields falling back
-   * to the inference ones. Unlike inference, the run is a plain LLM call
-   * (`plain` is set): no agent session, tools, or resource loading in the
-   * main process, so a summary stays read-only text compression.
+   * to the inference ones. Whether the run mounts the agent is the
+   * `summAgent` setting's call: on, it is an agent run (tools, skills,
+   * extensions, the loaded defaults); off, `plain` rides the connection, so
+   * the call is plain read-only compression.
    */
   summarize: (
     anchor: BlockId,
@@ -782,7 +783,6 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     return runAgentText(anchor, {
       ...connection,
       take,
-      plain: true,
       answerLabel: "summary",
     });
   }
