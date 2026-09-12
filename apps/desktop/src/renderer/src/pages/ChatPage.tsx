@@ -300,11 +300,16 @@ function BlockRow({
         selected
           ? "bg-muted"
           : inSelection
-            ? "bg-muted/40"
+            ? "bg-muted/70"
             : undefined,
         hidden && "opacity-60",
       )}
     >
+      {/* Visual-selection (`v`) left-edge marker: a solid rule that bounds
+       *  the range even where the muted tint is too faint to notice. */}
+      {inSelection ? (
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-foreground/60" />
+      ) : null}
       {flashing ? (
         <div className="pointer-events-none absolute inset-x-0 -bottom-px h-0.5 animate-pulse bg-foreground/60" />
       ) : null}
