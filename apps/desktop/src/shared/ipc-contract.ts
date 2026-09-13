@@ -185,6 +185,16 @@ export interface WeaverApi {
   plugins: {
     /** The configured plugin directory and every loaded plugin. */
     list(): Promise<PluginListResult>;
+    /** Runs a plugin setting field's own validator with a still-uncommitted
+     *  value. Returns why it is rejected, or null when it is fine (or the
+     *  field has no validator). Validators are functions, so they cannot
+     *  cross structured clone with `list`; this keeps the real one running
+     *  instead of a renderer copy. */
+    validate(
+      pluginId: string,
+      key: string,
+      value: string,
+    ): Promise<string | null>;
   };
   keymap: {
     /** A leader key the page's own keydown will never see because the main

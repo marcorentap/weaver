@@ -1,5 +1,5 @@
 import { ipcMain } from "electron";
-import type { Plugin } from "@repo/plugins";
+import type { Plugin, PluginSettingField } from "@repo/plugins";
 import { loadedPlugins } from "../lib/plugins.js";
 
 /**
@@ -39,4 +39,19 @@ export function registerPluginHandlers(): void {
     const { dir, plugins } = loadedPlugins();
     return { dir, plugins: plugins.map(serializable) };
   });
+  // The renderer cannot run a `validate` itself (functions do not survive
+  // structured clone), so it sends the draft here and the plugin's own
+  // validator decides. Returns why the value is rejected, or null when it is
+  // fine or the field has no validator.
+  ipcMain.handle(
+    "plugins:validate",
+    (_, pluginId: string, key: string, value: string) => {
+      const plugin = loadedPlugins().plugins.find((p) => p.id === pluginId);
+      const field = plugin?.settings?.find(
+        (setting): setting is Extract<PluginSettingField, { kind: "string" }> =>
+          setting.kind === "string" && setting.key === key,
+      );
+      return field?.validate?.(value) ?? null;
+    },
+  );
 }

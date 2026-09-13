@@ -57,8 +57,9 @@ type SettingDef =
       onChange: (value: string) => void;
       /** Also editable by typing (enter), like a string setting. */
       editable?: boolean;
-      /** Rejects a typed value on `enter`, returning why. */
-      validate?: (value: string) => string | null;
+      /** Rejects a typed value on `enter`, returning why. May return a
+       *  promise (plugin fields validate over an IPC round-trip). */
+      validate?: (value: string) => string | null | Promise<string | null>;
       /** Shown under the row, in red, whenever non-null. Unlike `validate`,
        *  checked every render rather than only on commit, so a value that
        *  was fine when set but is stale now (the default model changed
@@ -89,8 +90,9 @@ type SettingDef =
       onChange: (value: string) => void;
       /** Rejects a typed value on `enter`, returning why. A rejected edit
        *  stays open with the draft intact, so nothing is silently dropped
-       *  and nothing invalid is ever stored. */
-      validate?: (value: string) => string | null;
+       *  and nothing invalid is ever stored. May return a promise (plugin
+       *  fields validate over an IPC round-trip). */
+      validate?: (value: string) => string | null | Promise<string | null>;
       /** Part of the provider credentials. Committing it re-runs the live
        *  reachability check. */
       provider?: boolean;
@@ -485,6 +487,12 @@ export default function SettingsPage() {
       onChange: (next) => setValue(pluginId, field.key, next),
       placeholder: field.placeholder,
       secret: field.secret,
+      // `validate` does not survive structured clone, so the field cannot
+      // carry it. Ask the main process to run the plugin's own validator
+      // instead — same red-message rejection a provider row gets, without
+      // a second copy of the rule.
+      validate: (next) =>
+        window.api.plugins.validate(pluginId, field.key, next),
     };
   }
 
@@ -1243,14 +1251,14 @@ export default function SettingsPage() {
     checkRemoteConnection,
   ]);
 
-  const finishEdit = () => {
+  const finishEdit = async () => {
     if (!editing || !def || def.key !== editing || !isEditable(def)) {
       setEditing(null);
       return;
     }
     const invalid =
       isEditable(def) && def.kind !== "number"
-        ? (def.validate?.(draft) ?? null)
+        ? ((await def.validate?.(draft)) ?? null)
         : null;
     if (invalid) {
       // Stays open with the draft intact. The value is the user's, and

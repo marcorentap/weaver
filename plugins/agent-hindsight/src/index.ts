@@ -46,14 +46,22 @@ export const agentHindsight = definePlugin({
         "Optional bearer token for a Hindsight server that requires auth (Hindsight Cloud). Leave blank for a local server without auth.",
       placeholder: "hs_...",
       secret: true,
+      validate: (value) =>
+        /\s/.test(value)
+          ? "no spaces: a key is a single token"
+          : null,
     },
     {
       kind: "string",
       key: "bankId",
       label: "Default bank",
       description:
-        "Memory bank the tools use unless the agent names one. Blank makes every tool require its own `bank` argument.",
+        "Memory bank for the tools to use when the agent names no bank. Leave blank to make every tool require its own `bank` argument.",
       placeholder: "assistant",
+      validate: (value) =>
+        /^[\w.-]*$/.test(value)
+          ? null
+          : "bank ids are letters, digits, dots, dashes and underscores, e.g. 'assistant'",
     },
   ],
   tools: [retainTool, recallTool, reflectTool, listMemoriesTool],

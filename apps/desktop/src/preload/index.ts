@@ -79,6 +79,10 @@ const api: WeaverApi = {
   plugins: {
     list: () =>
       ipcRenderer.invoke("plugins:list") as Promise<PluginListResult>,
+    validate: (pluginId, key, value) =>
+      ipcRenderer.invoke("plugins:validate", pluginId, key, value) as Promise<
+        string | null
+      >,
   },
   keymap: {
     onChordLeader: (cb) => {
