@@ -229,9 +229,44 @@ function textBlobUrl(text: string): string {
   return URL.createObjectURL(new Blob([text], { type: "text/plain" }));
 }
 
+/**
+ * Hindsight tools' whole point is a long natural-language string — the fact
+ * to retain, the question to recall or reflect on, the filter to list. That
+ * text is the "input" a preview should read, so pull it out of the JSON args
+ * and render it as rich markdown. Any other tool keeps the plain args line.
+ */
+const HINDSIGHT_INPUT_FIELDS: Record<string, string> = {
+  hindsight_retain: "content",
+  hindsight_recall: "query",
+  hindsight_reflect: "query",
+  hindsight_list: "q",
+};
+
+/**
+ * The natural-language input of a hindsight call, or null when the block is
+ * not a hindsight tool or its args carry no text. The args are JSON, so the
+ * human-shaped query lives inside one field rather than in `state.args` as a
+ * whole.
+ */
+function hindsightInput(state: ToolState): string | null {
+  const field = HINDSIGHT_INPUT_FIELDS[state.name];
+  if (!field || !state.args) return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(state.args);
+  } catch {
+    return null;
+  }
+  const value = (args as Record<string, unknown>)?.[field];
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
 /** Full-size presentation: header line, then the same output a row shows,
- * scrolling on its own instead of clipping. */
+ * scrolling on its own instead of clipping. Hindsight calls render their
+ * input up front as rich markdown, so the preview reads like the prose the
+ * agent actually wrote rather than a one-line slice of its JSON args. */
 function ToolPreview({ state }: { state: ToolState }) {
+  const input = hindsightInput(state);
   return (
     <div className="flex h-[70vh] w-full flex-col gap-2">
       <div className="flex min-w-0 shrink-0 items-baseline gap-2">
@@ -240,6 +275,12 @@ function ToolPreview({ state }: { state: ToolState }) {
           {state.args}
         </span>
       </div>
+      {input !== null ? (
+        <MarkdownText
+          text={input}
+          className="min-h-0 flex-1 overflow-auto overscroll-contain"
+        />
+      ) : null}
       {state.output === "" ? (
         <p className="text-muted-foreground">No output.</p>
       ) : (
