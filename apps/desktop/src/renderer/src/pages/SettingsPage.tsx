@@ -437,14 +437,17 @@ export default function SettingsPage() {
   } = usePlugins();
 
   /** A plugin setting field becomes one editable row, under the plugin's
-   *  own section. */
+   *  own section. Only the first field stamps `section` so it opens the
+   *  group; the rest join it, or every field would render its own
+   *  same-titled section header. */
   function pluginSettingDef(
     plugin: PluginListResult["plugins"][number],
     field: PluginSettingFieldWire,
     pluginId: string,
+    index: number,
   ): SettingDef {
     const value = pluginValues[pluginId]?.[field.key] ?? "";
-    const section = plugin.name;
+    const section = index === 0 ? plugin.name : undefined;
     if (field.kind === "number") {
       return {
         kind: "number",
@@ -1068,9 +1071,9 @@ export default function SettingsPage() {
       onChange: setDir,
     });
     for (const plugin of pluginList.plugins) {
-      for (const field of plugin.settings ?? []) {
-        defs.push(pluginSettingDef(plugin, field, plugin.id));
-      }
+      plugin.settings?.forEach((field, index) => {
+        defs.push(pluginSettingDef(plugin, field, plugin.id, index));
+      });
     }
   }
 
