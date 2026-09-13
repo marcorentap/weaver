@@ -1,4 +1,4 @@
-import type { BlockKind } from "@repo/core";
+import type { BlockData, BlockKind } from "@repo/core";
 
 /**
  * One setting a plugin contributes to the app's Settings page, described
@@ -48,6 +48,16 @@ export type ToolRunContext = {
   /** The value of `key` under plugin `pluginId`'s settings, or undefined if
    *  it was never set. */
   getSetting: (pluginId: string, key: string) => string | undefined;
+  /**
+   * Append a new block of `kind` into the graph, as a sibling right after
+   * the block the current run is anchored on. Only present when the harness
+   * can materialize blocks (an agent run inside the app does; a bare tool
+   * caller may not), so a tool that wants one must treat it as optional: if
+   * it is missing, fall back to plain text instead of assuming the block
+   * was added. The data is validated against the kind before it lands, so
+   * a tool can pass its own state and let the harness reject a bad shape.
+   */
+  addBlock?: (kind: string, data: BlockData, label: string) => void;
 };
 
 /**

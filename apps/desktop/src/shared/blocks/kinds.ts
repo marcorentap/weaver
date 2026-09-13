@@ -1,5 +1,6 @@
 import { coreKinds, kindRegistry, type KindRegistry } from "@repo/core";
 import richMedia from "@plugins/rich-media";
+import userInput from "@plugins/user-input";
 
 /**
  * The graph's effective kind registry: the core kinds every graph ships with,
@@ -11,4 +12,5 @@ import richMedia from "@plugins/rich-media";
 export const kinds: KindRegistry = kindRegistry([
   ...coreKinds,
   ...(richMedia.kinds ?? []),
+  ...(userInput.kinds ?? []),
 ]);

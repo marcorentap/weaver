@@ -25,6 +25,7 @@ export default defineConfig({
           "@repo/store",
           "@plugins/agent-seerxng",
           "@plugins/rich-media",
+          "@plugins/user-input",
         ],
       }),
       // `agent/system-prompt.md` is read at run time via `readFileSync`, not

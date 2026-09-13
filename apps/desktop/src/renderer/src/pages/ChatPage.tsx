@@ -33,6 +33,7 @@ import {
   type CustomInferenceRun,
 } from "@/components/custom-inference";
 import { FieldEditor } from "@/components/field-editor";
+import { MultichoiceSelect } from "@/components/multichoice-select";
 import { Gutter } from "@/components/gutter";
 import type { KeyMenuItem } from "@/components/key-menu";
 import { KeyMenu } from "@/components/key-menu";
@@ -49,6 +50,11 @@ import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
 import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
 import { MEDIA_KIND, mediaState } from "@/blocks/media";
+import {
+  MULTICHOICE_KIND,
+  multichoiceSnapshot,
+  multichoiceState,
+} from "@plugins/user-input";
 
 /** Which modal popup, if any, sits above chat's normal mode. */
 type Popup =
@@ -60,6 +66,7 @@ type Popup =
   | { kind: "customSummary"; take: BlockId[] }
   | { kind: "field"; field: BlockField }
   | { kind: "labelField" }
+  | { kind: "multichoiceSelect" }
   | { kind: "configure" }
   | { kind: "callHook"; hook: string }
   | { kind: "createKind" }
@@ -194,10 +201,22 @@ function copyableContent(
         label: "Copy output",
         value: toolState.parse(block.data).output,
       };
+    case MULTICHOICE_KIND:
+      return {
+        label: "Copy answer",
+        value: multichoiceSnapshot(multichoiceState.parse(block.data)),
+      };
     default:
       return null;
   }
 }
+
+/**
+ * The kind's own block action for a multichoice question: one entry that
+ * opens the real answer dialog. Everything else — picking, renaming,
+ * adding and removing options, the Other text and the note — lives in that
+ * dialog, so the actions menu stays as thin as every other block's.
+ */
 
 /** Tall content is clipped to this many lines until it is unhidden. Rows are
  *  `text-xs`, whose line height is exactly `1rem`, so this is also its
@@ -1566,6 +1585,22 @@ function ChatView({
                   : { detail: field.value || field.placeholder }),
                 run: () => openField(field),
               }))),
+          // A multichoice block's own action: one entry that opens the
+          // answer dialog — checkboxes, renaming, adding, removing, Other
+          // and the note — entered with space, like opening a menu.
+          ...(row.block.kind === MULTICHOICE_KIND && !locked
+            ? [
+                {
+                  label: "Select answer",
+                  key: " ",
+                  keyLabel: "⎵",
+                  run: () => {
+                    setError(null);
+                    setPopup({ kind: "multichoiceSelect" });
+                  },
+                },
+              ]
+            : []),
           ...(!locked &&
           kind &&
           (kind.hooks.length > 0 || kind.callbacks.length > 0)
@@ -2181,6 +2216,19 @@ function ChatView({
           saving={saving}
           onSubmit={(value) => void renameBlock(value)}
           onCancel={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "multichoiceSelect" && row ? (
+        <MultichoiceSelect
+          id="multichoice-select"
+          title="Select answer"
+          meta={row.block.label}
+          state={multichoiceState.parse(row.block.data)}
+          onUpdate={(data) =>
+            engine.updateBlockData(row.block.id, data)
+          }
+          onClose={() => setPopup(null)}
         />
       ) : null}
 

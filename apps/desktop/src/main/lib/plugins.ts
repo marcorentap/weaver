@@ -12,6 +12,7 @@ import {
 import type { BuildResult } from "esbuild";
 import { agentSearxng } from "@plugins/agent-seerxng";
 import { richMedia } from "@plugins/rich-media";
+import { userInput } from "@plugins/user-input";
 import { getStore } from "./store.js";
 
 /**
@@ -20,7 +21,7 @@ import { getStore } from "./store.js";
  * store and agent actually use. The configured directory adds plugins on
  * top.
  */
-const BUILT_IN: Plugin[] = [richMedia, agentSearxng];
+const BUILT_IN: Plugin[] = [richMedia, agentSearxng, userInput];
 
 /** Store key the configured plugin directory lives under. */
 export const PLUGINS_DIR_SETTING = "weaver.plugins.dir";
@@ -103,7 +104,9 @@ async function loadOne(id: string): Promise<Plugin | null> {
     })) as BuildResult;
     const code = built.outputFiles?.[0]?.text;
     if (!code) return null;
-    const mod = await import("data:text/javascript," + encodeURIComponent(code));
+    const mod = await import(
+      "data:text/javascript," + encodeURIComponent(code)
+    );
     const plugin = (mod.default ?? mod) as Plugin | undefined;
     if (plugin && typeof plugin.id === "string" && plugin.id) return plugin;
     return null;

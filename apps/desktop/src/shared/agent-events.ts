@@ -136,6 +136,7 @@ export type AgentRunRequest = z.infer<typeof agentRunRequest>;
  *  included. The main process runs commands as whoever started the app, so
  *  this is also the default when a block names none. */
 export const ALLOWED_TOOLS = [
+  "ask_user",
   "read",
   "grep",
   "find",

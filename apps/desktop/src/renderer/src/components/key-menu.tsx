@@ -9,6 +9,10 @@ export type KeyMenuItem = {
   detail?: string;
   /** Optional direct shortcut, on top of arrow keys plus enter. */
   key?: string;
+  /** How `key` reads as a label, for keys that aren't a printable
+   *  character — the space bar is `" "` at the keyboard but `"⎵"` in the
+   *  gutter and help. */
+  keyLabel?: string;
   destructive?: boolean;
   run: () => void;
 };
@@ -85,7 +89,10 @@ export function KeyMenu({
           ? [
               {
                 keys: [item.key],
-                help: { keys: item.key, label: item.label },
+                help: {
+                  keys: item.keyLabel ?? item.key,
+                  label: item.label,
+                },
                 run: item.run,
               },
             ]
@@ -120,8 +127,8 @@ export function KeyMenu({
                     item.destructive && "text-destructive",
                   )}
                 >
-                  <span className="w-3 shrink-0 text-muted-foreground">
-                    {item.key ?? " "}
+                  <span className="w-8 shrink-0 text-muted-foreground">
+                    {item.keyLabel ?? item.key ?? " "}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {item.detail ? (

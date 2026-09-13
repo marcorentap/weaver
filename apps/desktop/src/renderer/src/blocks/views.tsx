@@ -13,6 +13,7 @@ import { schemaMessage } from "@/lib/schema-error";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
 import { CodeBlock, languageForPath } from "@/components/code";
+import { Square, SquareCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { kinds } from "@shared/blocks/kinds.js";
 import type { MediaState } from "./media";
@@ -25,8 +26,20 @@ import {
   parseMediaUri,
   resolveMediaUri,
 } from "./media";
-import { TOOL_KIND, toolLanguage, toolState, USER_KIND, userState } from "@plugins/rich-media";
+import {
+  TOOL_KIND,
+  toolLanguage,
+  toolState,
+  USER_KIND,
+  userState,
+} from "@plugins/rich-media";
 import type { ToolState } from "@plugins/rich-media";
+import {
+  MULTICHOICE_KIND,
+  multichoiceState,
+  OTHER_OPTION,
+  type MultichoiceState,
+} from "@plugins/user-input";
 
 /** One editable entry of a block's state, offered in its actions menu. */
 export type BlockField = {
@@ -86,6 +99,91 @@ function UserRow({ text }: { text: string }) {
         {text || "(empty)"}
       </span>
     </span>
+  );
+}
+
+/** The options of a multichoice block as a checklist, each with a checkbox
+ *  marking whether the user picked it, with the editor's Other always at the
+ *  end. Chosen rows read in `text-foreground` and show their Other text (if
+ *  any) inline; the additional note follows the list. */
+function MultichoiceOptions({
+  state,
+  className,
+}: {
+  state: MultichoiceState;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "flex min-w-0 flex-col gap-0.5 text-muted-foreground",
+        className,
+      )}
+    >
+      {[...state.options, OTHER_OPTION].map((option) => {
+        const chosen = state.selected.includes(option);
+        const detail =
+          option === OTHER_OPTION && chosen && state.other.trim()
+            ? `: ${state.other.trim()}`
+            : null;
+        return (
+          <span
+            key={option}
+            className={cn("min-w-0", chosen && "text-foreground")}
+          >
+            <span className="inline-block w-4 shrink-0 leading-none">
+              {chosen ? (
+                <SquareCheck className="size-3 align-[-1px] text-foreground" />
+              ) : (
+                <Square className="size-3 align-[-1px]" />
+              )}
+            </span>
+            {option}
+            {detail}
+          </span>
+        );
+      })}
+      {state.note.trim() ? (
+        <span className="min-w-0 text-foreground">
+          Note: {state.note.trim()}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function MultichoiceRow({ state }: { state: MultichoiceState }) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-1">
+      <span
+        className={cn(
+          "min-w-0 whitespace-pre-wrap",
+          state.prompt.trim() ? "" : "text-muted-foreground",
+        )}
+      >
+        {state.prompt.trim() || "(no question yet)"}
+      </span>
+      <MultichoiceOptions state={state} />
+    </span>
+  );
+}
+
+/** Full-size presentation: the question and the same checklist the row
+ *  shows, with room to breathe. Reading what was asked and what was picked
+ *  is all a question block has to offer, so preview is that plus `p`. */
+function MultichoicePreview({ state }: { state: MultichoiceState }) {
+  return (
+    <div className="h-[70vh] w-full overflow-auto overscroll-contain">
+      <span
+        className={cn(
+          "mb-2 block whitespace-pre-wrap",
+          state.prompt.trim() ? "" : "text-muted-foreground",
+        )}
+      >
+        {state.prompt.trim() || "(no question yet)"}
+      </span>
+      <MultichoiceOptions state={state} className="gap-1" />
+    </div>
   );
 }
 
@@ -262,7 +360,9 @@ function MediaPreview({ state, pwd }: { state: MediaState; pwd?: string }) {
     );
   }
   if (type === "video") {
-    return <video src={src} controls autoPlay className="max-h-[70vh] w-full" />;
+    return (
+      <video src={src} controls autoPlay className="max-h-[70vh] w-full" />
+    );
   }
   if (type === "audio") {
     return <audio src={src} controls autoPlay className="w-full" />;
@@ -402,17 +502,14 @@ export const blockViews: Record<string, BlockView> = {
     raw: (block, graph) => {
       const uri = mediaState.parse(block.data).uri;
       const url = parseMediaUri(uri);
-      return url &&
-        (url.protocol === "http:" || url.protocol === "https:")
+      return url && (url.protocol === "http:" || url.protocol === "https:")
         ? uri
         : (resolveMediaUri(uri, envPwd(graph, block)) ?? uri);
     },
   },
 
   [USER_KIND]: {
-    Row: ({ block }) => (
-      <UserRow text={userState.parse(block.data).text} />
-    ),
+    Row: ({ block }) => <UserRow text={userState.parse(block.data).text} />,
     fields: (block) => [
       {
         name: "text",
@@ -450,6 +547,31 @@ export const blockViews: Record<string, BlockView> = {
     Preview: ({ block }) => <ToolPreview state={toolState.parse(block.data)} />,
     raw: (block) => textBlobUrl(toolState.parse(block.data).output),
   },
+
+  // A question block is content the user answers, not prose: it renders as
+  // the question over a checklist, because that is what you actually asked
+  // and how the answer reads at a glance. The checklist stays in the block's
+  // actions menu (`enter`), which is where selections, additions and
+  // removals of options happen.
+  [MULTICHOICE_KIND]: {
+    Row: ({ block }) => (
+      <MultichoiceRow state={multichoiceState.parse(block.data)} />
+    ),
+    // Only the prompt edits from here; the answer itself — picking options,
+    // the Other text, the note — lives in the kind's own answer dialog,
+    // opened from the block actions menu.
+    fields: (block) => [
+      {
+        name: "prompt",
+        label: "prompt",
+        value: multichoiceState.parse(block.data).prompt,
+        multiline: true,
+      },
+    ],
+    Preview: ({ block }) => (
+      <MultichoicePreview state={multichoiceState.parse(block.data)} />
+    ),
+  },
 };
 
 /**
@@ -475,7 +597,9 @@ export const fallbackView: BlockView = {
 function invalidView(message: string): BlockView {
   return {
     Row: () => (
-      <span className="truncate text-destructive">invalid state: {message}</span>
+      <span className="truncate text-destructive">
+        invalid state: {message}
+      </span>
     ),
     fields: (block) =>
       Object.entries(block.data).flatMap(([name, value]) =>

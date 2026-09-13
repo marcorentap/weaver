@@ -146,6 +146,14 @@ export type LiveGraph = {
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
+  /**
+   * Replace a block's whole state in one local edit, for shapes a single
+   * field write cannot express (a kind's option list, say). The caller has
+   * already validated the new data against the kind; this marks the graph
+   * dirty so the next autosave persists it, the same path hiding a block
+   * takes. No-ops if `id` is locked.
+   */
+  updateBlockData: (id: BlockId, data: BlockData) => void;
   /** Apply an already-persisted label edit locally. The label lives at the
    *  top level of a block, not inside `data`. */
   updateLabel: (id: BlockId, label: string) => void;
@@ -826,6 +834,22 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           },
         },
         snapshot.dirty,
+      );
+    },
+    updateBlockData(id, data) {
+      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
+      const current = snapshot.graph.blocks[id];
+      if (!current) return;
+      pushUndo();
+      commit(
+        {
+          ...snapshot.graph,
+          blocks: {
+            ...snapshot.graph.blocks,
+            [id]: { ...current, data, modifiedAt: Date.now() },
+          },
+        },
+        true,
       );
     },
     updateLabel(id, label) {

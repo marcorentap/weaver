@@ -13,6 +13,7 @@ import type { OpenRouterRouting } from "@earendil-works/pi-ai";
 import { WEAVER_PWD, type KindRegistry } from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
+import { ASK_USER_TOOL } from "@plugins/user-input";
 import {
   ALLOWED_TOOLS,
   agentRunRequest,
@@ -540,6 +541,14 @@ export async function runAgent(
         execute: async (_toolCallId, args) => {
           const result = await tool.execute(args as Record<string, unknown>, {
             getSetting: ctx.getSetting,
+            // An agent run lives in the graph it appends to, so a plugin
+            // tool gets the same materialization the harness's own tools
+            // have: `addBlock` lands a new block right after the block the
+            // run is anchored on. The event travels to the renderer exactly
+            // like a harness-emitted block, so a tool block can hand its
+            // own state to a kind. See `ToolRunContext.addBlock`.
+            addBlock: (kind, data, label) =>
+              emit({ type: "block", kind, data, label }),
           });
           return {
             content: [{ type: "text" as const, text: result.content }],
@@ -809,10 +818,15 @@ export async function runAgent(
           args: JSON.stringify(sessionEvent.args ?? {}),
         };
         pendingArgs.set(sessionEvent.toolCallId, entry);
-        // A successful `display_media` already emits its own block, so it
-        // opens none here; a failed one still records a `tool` block (see
+        // A successful `display_media`/`ask_user` already emits its own
+        // block (the media block, or the question block), so it opens none
+        // here; a failed one still records a `tool` block (see
         // `tool_execution_end`) without a `tool_start` before it.
-        if (sessionEvent.toolName === displayMedia.name) return;
+        if (
+          sessionEvent.toolName === displayMedia.name ||
+          sessionEvent.toolName === ASK_USER_TOOL
+        )
+          return;
         emit({
           type: "tool_start",
           id: entry.id,
@@ -883,15 +897,17 @@ export async function runAgent(
         const pending = pendingArgs.get(sessionEvent.toolCallId);
         pendingArgs.delete(sessionEvent.toolCallId);
         partialTexts.delete(sessionEvent.toolCallId);
-        // A successful `display_media` already emitted its block, so
-        // recording the call as well would say nothing new. A rejected one
-        // has nothing to show, and a silent failure is worse than a
+        // A successful `display_media`/`ask_user` already emitted its block,
+        // so recording the call as well would say nothing new. A rejected
+        // one has nothing to show, and a silent failure is worse than a
         // visible one; its `tool_start` was skipped, so its wire id is
         // fresh and the renderer falls back to appending the block.
         if (
           sessionEvent.toolName === displayMedia.name &&
           !sessionEvent.isError
         )
+          return;
+        if (sessionEvent.toolName === ASK_USER_TOOL && !sessionEvent.isError)
           return;
         emit({
           type: "tool",
