@@ -576,12 +576,19 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       replyText = "";
     };
     // Pre-flight failures land as an appended error block too, and never
-    // set `running`, because there is nothing in flight to show a spinner for.
+    // set `running`, because there is nothing in flight to show a spinner
+    // for. `append` records the block as the run's tail; since no stream
+    // ever starts and the `finally` below never runs, that tail would stick
+    // and hold the error block (and everything after it) locked for good.
+    // Clear it right back so the error is editable and deletable like any
+    // other block.
+    const appendPreflightError = (text: string) => {
+      append(TEXT_KIND, { text }, "error");
+      setAppendTail(id, null);
+    };
     if (!endpoint || !apiKey || !model) {
-      append(
-        TEXT_KIND,
-        { text: "missing endpoint, API key, or model. Check settings" },
-        "error",
+      appendPreflightError(
+        "missing endpoint, API key, or model. Check settings",
       );
       return;
     }
@@ -598,15 +605,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         .filter((part) => part.trim().length > 0)
         .join("\n\n");
       if (!content) {
-        append(
-          TEXT_KIND,
-          {
-            text:
-              take.length > 1
-                ? "nothing to summarize — the selected blocks are empty"
-                : "nothing to summarize — the block is empty",
-          },
-          "error",
+        appendPreflightError(
+          take.length > 1
+            ? "nothing to summarize — the selected blocks are empty"
+            : "nothing to summarize — the block is empty",
         );
         return;
       }
@@ -627,7 +629,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     } else {
       prompt = snapshotBlock(snapshot.graph, id, kinds);
       if (!prompt.trim()) {
-        append(TEXT_KIND, { text: "block is empty. Nothing to send" }, "error");
+        appendPreflightError("block is empty. Nothing to send");
         return;
       }
       context = snapshotAbove(snapshot.graph, id, kinds);
