@@ -371,6 +371,7 @@ export default function SettingsPage() {
     setSummNoPromptTemplates,
     setSummNoThemes,
     setSummNoContextFiles,
+    setProviderField,
     setRemoteEnabled,
     setRemoteHost,
     setRemotePort,
@@ -670,6 +671,30 @@ export default function SettingsPage() {
           },
         ]
       : []),
+
+    // A provider detected from the endpoint above gets its own fields,
+    // read from and written back to its own slot in `aiProviderSettings`
+    // so switching endpoints never clobbers another provider's saved
+    // values. The first field opens a "Provider settings" group nested
+    // under the "AI provider" section; the rest join it. Nothing renders
+    // here for an endpoint that matches none.
+    ...(provider?.fields ?? []).map((field, i): SettingDef => {
+      const base = {
+        key: `provider.${provider!.id}.${field.key}`,
+        label: field.label,
+        description: field.description,
+        ...(i === 0
+          ? { section: "Provider settings" as const, parent: "AI provider" as const }
+          : {}),
+        value:
+          settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
+        onChange: (next: string) =>
+          setProviderField(provider!.id, field.key, next),
+      };
+      return field.options
+        ? { kind: "option" as const, ...base, options: field.options }
+        : { kind: "string" as const, ...base, placeholder: field.placeholder };
+    }),
 
     // The app-wide defaults for an inference run (`x` / `X`): the model it
     // falls back to when a block's own model field is blank, the reasoning
