@@ -3,16 +3,18 @@ import type { PluginTool } from "@repo/plugins";
 import { connectHindsight, resolveBank, toError } from "../../hindsight.ts";
 
 /**
- * Store a memory in the bank. The agent reaches for this to persist facts
- * it wants to remember across runs: user preferences, decisions, project
- * context, events. Standalone facts work best — one item per fact, phrased
- * as a statement ("Alice works at Google"), not an instruction.
+ * Queue a memory for storage in the bank. The agent reaches for this to
+ * persist facts it wants to remember across runs: user preferences,
+ * decisions, project context, events. Standalone facts work best — one
+ * item per fact, phrased as a statement ("Alice works at Google"), not an
+ * instruction. Fire-and-forget: the server acknowledges the queue and the
+ * tool returns without waiting for extraction/indexing to finish.
  */
 export const retainTool: PluginTool = {
   name: "hindsight_retain",
   label: "Hindsight: retain memory",
   description:
-    "Store a fact or event in the Hindsight memory bank so later runs can recall it. Use it to save preferences, decisions, or anything about the user or project worth remembering; store standalone facts ('Alice works at Google'), not questions or instructions.",
+    "Queue a fact or event for storage in the Hindsight memory bank so later runs can recall it. Use it to save preferences, decisions, or anything about the user or project worth remembering; store standalone facts ('Alice works at Google'), not questions or instructions. Retains asynchronously: the tool returns as soon as the server accepts the item — it does not wait for processing to complete.",
   parameters: Type.Object({
     content: Type.String({
       description:
@@ -55,6 +57,7 @@ export const retainTool: PluginTool = {
     let stored;
     try {
       stored = await client.retain(bank, content, {
+        async: true,
         ...(context ? { context } : {}),
         ...(timestamp ? { timestamp } : {}),
         ...(tags && tags.length > 0 ? { tags } : {}),
@@ -67,13 +70,14 @@ export const retainTool: PluginTool = {
     }
     const items = stored.items_count ?? 1;
     return {
-      content: `Stored ${items} item${items === 1 ? "" : "s"} in memory bank "${stored.bank_id}".${
+      content: `Queued ${items} item${items === 1 ? "" : "s"} in memory bank "${stored.bank_id}"; stored in the background.${
         timestamp ? " Backdated to " + timestamp + "." : ""
       }`,
       details: {
         bank: stored.bank_id,
         itemsCount: items,
         async: stored.async,
+        operationId: stored.operation_id,
       },
     };
   },
