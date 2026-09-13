@@ -10,6 +10,7 @@ import {
   type PluginTool,
 } from "@repo/plugins";
 import type { BuildResult } from "esbuild";
+import { agentHindsight } from "@plugins/agent-hindsight";
 import { agentSearxng } from "@plugins/agent-seerxng";
 import { richMedia } from "@plugins/rich-media";
 import { userInput } from "@plugins/user-input";
@@ -21,7 +22,7 @@ import { getStore } from "./store.js";
  * store and agent actually use. The configured directory adds plugins on
  * top.
  */
-const BUILT_IN: Plugin[] = [richMedia, agentSearxng, userInput];
+const BUILT_IN: Plugin[] = [richMedia, agentSearxng, agentHindsight, userInput];
 
 /** Store key the configured plugin directory lives under. */
 export const PLUGINS_DIR_SETTING = "weaver.plugins.dir";

@@ -24,6 +24,7 @@
     "@base-ui/react": "^1.7.0",
     "@earendil-works/pi-ai": "0.84.4",
     "@earendil-works/pi-coding-agent": "0.84.4",
+    "@plugins/agent-hindsight": "workspace:*",
     "@plugins/agent-seerxng": "workspace:*",
     "@plugins/rich-media": "workspace:*",
     "@plugins/user-input": "workspace:*",

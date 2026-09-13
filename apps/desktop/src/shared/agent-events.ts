@@ -144,4 +144,8 @@ export const ALLOWED_TOOLS = [
   "write",
   "edit",
   "web_search",
+  "hindsight_retain",
+  "hindsight_recall",
+  "hindsight_reflect",
+  "hindsight_list",
 ] as const;
