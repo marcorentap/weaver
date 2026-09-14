@@ -389,7 +389,12 @@ export async function runAgent(
           input: ["text", "image"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,
-          maxTokens: 8192,
+          // The `maxTokens` caps output: the SDK treats a model's
+          // `maxTokens` as a ceiling on what it will generate, `0` meaning
+          // no cap. The run's own setting (from the app's inference or
+          // summarization defaults) overrides the hardcoded default; when
+          // the request omits it, today's behavior is kept.
+          maxTokens: body.maxTokens ?? 8192,
           compat: tuning.compat,
           samplingParams: tuning.samplingParams,
         },

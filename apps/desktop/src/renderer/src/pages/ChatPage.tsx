@@ -1012,6 +1012,7 @@ function ChatView({
       aiProviderSettings,
       inferDefaultModel,
       inferThinkingLevel,
+      inferMaxTokens,
       inferNoExtensions,
       inferNoSkills,
       inferNoPromptTemplates,
@@ -1024,6 +1025,7 @@ function ChatView({
       apiKey: aiApiKey,
       model: custom?.model ?? inferDefaultModel,
       thinkingLevel: (custom?.thinkingLevel ?? inferThinkingLevel) || undefined,
+      maxTokens: inferMaxTokens,
       providerId: provider?.id,
       providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
       noExtensions: custom?.noExtensions ?? inferNoExtensions,
@@ -1068,6 +1070,7 @@ function ChatView({
       summDefaultModel,
       summProviderSettings,
       summThinkingLevel,
+      summMaxTokens,
       summAgent,
       summNoExtensions,
       summNoSkills,
@@ -1092,6 +1095,7 @@ function ChatView({
       thinkingLevel:
         (custom?.thinkingLevel ?? (summThinkingLevel || inferThinkingLevel)) ||
         undefined,
+      maxTokens: summMaxTokens,
       providerId: provider?.id,
       providerSettings: provider
         ? (summProviderSettings[provider.id] ?? aiProviderSettings[provider.id])

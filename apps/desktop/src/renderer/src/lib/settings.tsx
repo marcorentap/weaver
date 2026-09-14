@@ -86,9 +86,20 @@ type Settings = {
    *  pi's own levels (see `shared/agent-events.ts`), or blank for the SDK's
    *  default. App-wide default of the `X` modal's row. */
   inferThinkingLevel: string;
+  /** Cap on how many output tokens a default inference run's model may
+   *  produce. Zero means no cap (the provider's own default). The `X`
+   *  modal's per-run override draws from this when it leaves the field
+   *  blank. */
+  inferMaxTokens: number;
   /** Same for a default summarization run; blank falls back to
    *  `inferThinkingLevel`, like the default model beside it. */
   summThinkingLevel: string;
+  /** Same cap for a default summarization run, kept apart from
+   *  `inferMaxTokens` so a summary can be capped independently of the
+   *  model that answers blocks; zero means no cap (the provider's own
+   *  default). Each defaults to the same hardcoded cap a fresh install has
+   *  always had. */
+  summMaxTokens: number;
   /** What pi's `DefaultResourceLoader` loads on each inference run,
    *  inverted (`true` = don't load) so the names match the SDK flags the
    *  main process passes through. These are the app-wide defaults the `X`
@@ -170,6 +181,10 @@ const DEFAULTS: Settings = {
   // install has always had.
   inferThinkingLevel: "",
   summThinkingLevel: "",
+  // Matches the hardcoded cap a fresh install has always had, so nothing
+  // changes until a user tunes the rows; zero means no cap.
+  inferMaxTokens: 8192,
+  summMaxTokens: 8192,
   summProviderSettings: {},
   remoteEnabled: false,
   remoteHost: "",
@@ -243,6 +258,8 @@ type SettingsContextValue = {
   setSummNoContextFiles: (value: boolean) => void;
   setInferThinkingLevel: (value: string) => void;
   setSummThinkingLevel: (value: string) => void;
+  setInferMaxTokens: (value: number) => void;
+  setSummMaxTokens: (value: number) => void;
   setProviderField: (providerId: string, key: string, value: string) => void;
   setSummProviderField: (
     providerId: string,
@@ -309,6 +326,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
               stored?.inferThinkingLevel ?? DEFAULTS.inferThinkingLevel,
             summThinkingLevel:
               stored?.summThinkingLevel ?? DEFAULTS.summThinkingLevel,
+            inferMaxTokens:
+              stored?.inferMaxTokens ?? DEFAULTS.inferMaxTokens,
+            summMaxTokens: stored?.summMaxTokens ?? DEFAULTS.summMaxTokens,
             summProviderSettings:
               stored?.summProviderSettings ?? DEFAULTS.summProviderSettings,
             remoteEnabled: stored?.remoteEnabled ?? DEFAULTS.remoteEnabled,
@@ -460,6 +480,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: string) => set("summThinkingLevel", value),
     [set],
   );
+  const setInferMaxTokens = useCallback(
+    (value: number) => set("inferMaxTokens", value),
+    [set],
+  );
+  const setSummMaxTokens = useCallback(
+    (value: number) => set("summMaxTokens", value),
+    [set],
+  );
   const setRemoteEnabled = useCallback(
     (value: boolean) => set("remoteEnabled", value),
     [set],
@@ -515,6 +543,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummAgent,
       setInferThinkingLevel,
       setSummThinkingLevel,
+      setInferMaxTokens,
+      setSummMaxTokens,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,
@@ -548,6 +578,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummAgent,
       setInferThinkingLevel,
       setSummThinkingLevel,
+      setInferMaxTokens,
+      setSummMaxTokens,
       setRemoteEnabled,
       setRemoteHost,
       setRemotePort,

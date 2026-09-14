@@ -361,6 +361,8 @@ export default function SettingsPage() {
     setInferDefaultModel,
     setInferThinkingLevel,
     setSummThinkingLevel,
+    setInferMaxTokens,
+    setSummMaxTokens,
     setInferNoExtensions,
     setInferNoSkills,
     setInferNoPromptTemplates,
@@ -762,6 +764,17 @@ export default function SettingsPage() {
       onChange: setInferThinkingLevel,
     },
     {
+      kind: "number",
+      key: "inferMaxTokens",
+      label: "Max output tokens",
+      description:
+        "Cap on how many output tokens a default run's answer may use. 0 = no cap (provider default).",
+      value: settings.inferMaxTokens,
+      step: 1000,
+      min: 0,
+      onChange: setInferMaxTokens,
+    },
+    {
       kind: "option",
       key: "inferNoExtensions",
       label: "Pi extensions",
@@ -856,6 +869,17 @@ export default function SettingsPage() {
           ? `${settings.summDefaultModel} doesn't list reasoning support`
           : null,
       onChange: setSummThinkingLevel,
+    },
+    {
+      kind: "number",
+      key: "summMaxTokens",
+      label: "Max output tokens",
+      description:
+        "Cap on how many output tokens a summarization run's answer may use. 0 = no cap (provider default).",
+      value: settings.summMaxTokens,
+      step: 1000,
+      min: 0,
+      onChange: setSummMaxTokens,
     },
     {
       kind: "option",

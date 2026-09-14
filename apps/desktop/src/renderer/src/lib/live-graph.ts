@@ -60,6 +60,9 @@ type RunConnection = {
    *  leaves the SDK's default. Goes to the main process as the request's
    *  own `thinkingLevel`. */
   thinkingLevel?: string;
+  /** Cap on how many output tokens the run's model may produce, or 0 for
+   *  no cap. Goes to the main process as the request's own `maxTokens`. */
+  maxTokens?: number;
   noExtensions?: boolean;
   noSkills?: boolean;
   noPromptTemplates?: boolean;
@@ -446,6 +449,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       providerId,
       providerSettings,
       thinkingLevel,
+      maxTokens,
       noExtensions,
       noSkills,
       noPromptTemplates,
@@ -663,6 +667,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           providerId,
           providerSettings,
           thinkingLevel: thinkingLevel as ThinkingLevel | undefined,
+          maxTokens,
           env,
           noExtensions,
           noSkills,

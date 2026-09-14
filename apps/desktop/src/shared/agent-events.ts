@@ -114,6 +114,11 @@ export const agentRunRequest = z.object({
    *  `providerTuning` in `main/lib/run-agent.ts`); omitted for a run that
    *  didn't pick one, which leaves the SDK's default in charge. */
   thinkingLevel: z.enum(THINKING_LEVELS).optional(),
+  /** Cap on how many output tokens the run's model may produce, or 0 for
+   *  no cap (the provider's own default). The main process registers the
+   *  model with this as its `maxTokens`, which caps a plain call and an
+   *  agent run alike. Omitted runs keep the app's default. */
+  maxTokens: z.number().int().nonnegative().optional(),
   /**
    * The merged environment the anchoring block sees: every `environment`
    * block above it in the graph, closer ones overriding farther ones. The
