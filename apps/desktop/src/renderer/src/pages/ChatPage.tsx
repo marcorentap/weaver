@@ -620,10 +620,13 @@ function ChatView({
     saveChatGraph: saveGraphMutation,
     sessionNameOf,
   } = useChatStore();
-  /** The live session name, resolved from the store (not the mount-time
-   *  snapshot in `session`), so a rename made in this pane — or another
-   *  pane showing the same session — takes effect immediately. */
-  const liveSessionName = session ? sessionNameOf(session.id) : null;
+  /** The live session name. Reads straight off the sessions list the session
+   *  menu renders — the same source, so a rename shows in both at once — and
+   *  falls back to the store's own resolver for a session not listed yet (a
+   *  fresh, never-saved session still sits in its seed, not the list). */
+  const liveSessionName = session
+    ? sessions.find((s) => s.id === session.id)?.name ?? sessionNameOf(session.id)
+    : null;
   const [cursor, setCursor] = useState(0);
   /** The chat list root; page-up/page-down measures the rows inside it and
    *  the scroller that holds them (not guessed heights, since rows vary). */
