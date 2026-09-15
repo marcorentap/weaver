@@ -1941,16 +1941,27 @@ function ChatView({
             ? []
             : [
                 {
-                  label: `Hide ${selectedRows.length} blocks`,
+                  // Mirrors the single-block "Hide block"/"Show block"
+                  // toggle: when every selected block is already hidden,
+                  // offer to reveal them.
+                  label:
+                    selectedRows.every((entry) => entry.block.hidden)
+                      ? `Show ${selectedRows.length} blocks`
+                      : `Hide ${selectedRows.length} blocks`,
                   key: "h",
-                  detail: "kept in the graph, hidden from agent context",
+                  detail: selectedRows.every((entry) => entry.block.hidden)
+                    ? "restored to agent context"
+                    : "kept in the graph, hidden from agent context",
                   run: () => {
                     setPopup(null);
                     setVisualAnchor(null);
+                    const hidden = !selectedRows.every(
+                      (entry) => entry.block.hidden,
+                    );
                     // One undo unit for the whole range, same as delete.
                     engine.group(() => {
                       for (const entry of selectedRows)
-                        engine.setHidden(entry.block.id, true);
+                        engine.setHidden(entry.block.id, hidden);
                     });
                   },
                 },
