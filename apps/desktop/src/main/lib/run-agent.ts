@@ -228,6 +228,24 @@ function messageFailure(message: unknown): string | null {
   );
 }
 
+/** A turn the agent loop actually treats as fatal: only `stopReason ===
+ *  "error"`. pi-agent-core's `runLoop` returns exactly on `"error"` and
+ *  `"aborted"` (`"aborted"` is Ctrl+C, already normal); every other stop
+ *  reason — including one `messageFailure` would flag, like `"pending"` or a
+ *  leftover streaming reason — does NOT stop the loop, the agent proceeds to
+ *  another turn. Emitting a run-level `error` for one of those (the renderer
+ *  treats an `error` event as terminal) would have the UI declare the run
+ *  finished while the agent kept working in the background, so a weaver agent
+ *  run must mirror the loop and surface only its real terminal failure. The
+ *  plain-LLM path keeps the broader `messageFailure`, because a single
+ *  completion has no loop to continue after an odd stop reason. */
+function turnFailure(message: unknown): string | null {
+  const parsed = contentParts.safeParse(message);
+  if (!parsed.success || parsed.data.role !== "assistant") return null;
+  if (parsed.data.stopReason !== "error") return null;
+  return parsed.data.errorMessage ?? "model ended with an error";
+}
+
 /** Sail's completion-window values; anything else means its own default
  *  ("asap"). */
 const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
@@ -864,7 +882,7 @@ export async function runAgent(
       }
       if (sessionEvent.type === "message_end") {
         assistantText = "";
-        const failure = messageFailure(sessionEvent.message);
+        const failure = turnFailure(sessionEvent.message);
         if (failure) {
           emit({ type: "error", message: failure });
           return;
