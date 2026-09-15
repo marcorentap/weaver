@@ -245,6 +245,9 @@ type ChatStoreValue = {
   duplicateChatSession: (sourceId: string) => Promise<CreateSessionResult>;
   renameChatSession: (graphId: string, name: string) => Promise<MutationResult>;
   deleteChatSession: (graphId: string) => Promise<MutationResult>;
+  /** The live name of a session (seed or persisted list), so a pane that
+   *  mounted against a snapshot resolves renames made after the fact. */
+  sessionNameOf: (graphId: string) => string;
   saveChatGraph: (graphId: string, blocks: BlockInput[]) => Promise<MutationResult>;
 };
 
@@ -288,6 +291,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
       duplicateChatSession: duplicateSession,
       renameChatSession: renameSession,
       deleteChatSession: deleteSession,
+      sessionNameOf: summaryNameOf,
       saveChatGraph: saveSession,
     }),
     [snapshot],

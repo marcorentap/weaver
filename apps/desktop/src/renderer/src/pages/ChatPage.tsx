@@ -618,7 +618,12 @@ function ChatView({
     renameChatSession: renameSessionMutation,
     deleteChatSession: deleteSessionMutation,
     saveChatGraph: saveGraphMutation,
+    sessionNameOf,
   } = useChatStore();
+  /** The live session name, resolved from the store (not the mount-time
+   *  snapshot in `session`), so a rename made in this pane — or another
+   *  pane showing the same session — takes effect immediately. */
+  const liveSessionName = session ? sessionNameOf(session.id) : null;
   const [cursor, setCursor] = useState(0);
   /** The chat list root; page-up/page-down measures the rows inside it and
    *  the scroller that holds them (not guessed heights, since rows vary). */
@@ -1510,7 +1515,7 @@ function ChatView({
       setError("name is required");
       return;
     }
-    if (trimmed === session.name) {
+    if (trimmed === liveSessionName) {
       setPopup(null);
       return;
     }
@@ -1965,7 +1970,7 @@ function ChatView({
           {
             label: "Rename session",
             key: "r",
-            detail: session.name,
+            detail: liveSessionName ?? "Untitled",
             run: () => {
               setError(null);
               setPopup({ kind: "renameSession" });
@@ -2047,7 +2052,7 @@ function ChatView({
         <header className="flex items-center gap-3 border-b px-3 py-1">
           <span className="font-semibold">Chat</span>
           <span className="text-muted-foreground">
-            {session ? session.name : "No session"}
+            {liveSessionName ?? "No session"}
           </span>
         </header>
       </ShellHeader>
@@ -2302,8 +2307,8 @@ function ChatView({
       {popup?.kind === "renameSession" && session ? (
         <FieldEditor
           id="rename-session"
-          title={`Rename ${session.name}`}
-          field={{ name: "name", label: "name", value: session.name }}
+          title={`Rename ${liveSessionName}`}
+          field={{ name: "name", label: "name", value: liveSessionName ?? "" }}
           error={error}
           saving={saving}
           onSubmit={(value) => void renameSession(value)}
