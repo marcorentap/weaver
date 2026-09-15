@@ -81,17 +81,17 @@ function NormalMode({
     bindings: [
       {
         keys: ["Tab", " "],
-        help: { keys: "tab / space", label: "Tabs" },
+        help: [{ keys: "tab / space", label: "Tabs" }],
         run: onOpenTabs,
       },
       {
         keys: ["["],
-        help: { keys: "[", label: "Previous tab" },
+        help: [{ keys: "[", label: "Previous tab" }],
         run: () => onSwitch(-1),
       },
       {
         keys: ["]"],
-        help: { keys: "]", label: "Next tab" },
+        help: [{ keys: "]", label: "Next tab" }],
         run: () => onSwitch(1),
       },
     ],
@@ -103,7 +103,11 @@ function NormalMode({
 /**
  * The pane layer: every tab's panes are steered from the same layer, all on
  * the `ctrl+w` leader (`ctrl+w` + `alt+h/j/k/l` resizes). The layout owns the
- * panes, so the shortcuts always hit the active tab's active pane.
+ * panes, so the shortcuts always hit the active tab's active pane. Pressing
+ * `ctrl+w` runs nothing itself — it pushes the window frame that the
+ * followers (`v`, `s`, `h`, …) resolve against, one keypress at a time,
+ * exactly like the two-key chords it replaced. The resize followers are
+ * `repeatable`, so `alt+h` again keeps resizing without a fresh leader.
  */
 function PaneMode({
   onSplit,
@@ -120,68 +124,81 @@ function PaneMode({
     id: "panes",
     bindings: [
       {
-        chord: ["ctrl+w", "v"],
-        help: { keys: "ctrl+w v", label: "Split vertically" },
-        run: () => onSplit("row"),
-      },
-      {
-        chord: ["ctrl+w", "s"],
-        help: { keys: "ctrl+w s", label: "Split horizontally" },
-        run: () => onSplit("column"),
-      },
-      {
-        chord: ["ctrl+w", "h"],
-        help: { keys: "ctrl+w h", label: "Pane left" },
-        run: () => onMove("h"),
-      },
-      {
-        chord: ["ctrl+w", "j"],
-        help: { keys: "ctrl+w j", label: "Pane below" },
-        run: () => onMove("j"),
-      },
-      {
-        chord: ["ctrl+w", "k"],
-        help: { keys: "ctrl+w k", label: "Pane above" },
-        run: () => onMove("k"),
-      },
-      {
-        chord: ["ctrl+w", "l"],
-        help: { keys: "ctrl+w l", label: "Pane right" },
-        run: () => onMove("l"),
-      },
-      {
-        chord: ["ctrl+w", "ctrl+w"],
-        help: { keys: "ctrl+w ctrl+w", label: "Next pane" },
-        run: () => onMove("next"),
-      },
-      {
-        chord: ["ctrl+w", "q"],
-        help: { keys: "ctrl+w q", label: "Close pane" },
-        run: onClosePane,
-      },
-      {
-        chord: ["ctrl+w", "alt+h"],
-        repeatable: true, // alt+h again keeps resizing
-        help: { keys: "ctrl+w alt+h", label: "Resize left" },
-        run: () => onResize("h"),
-      },
-      {
-        chord: ["ctrl+w", "alt+l"],
-        repeatable: true,
-        help: { keys: "ctrl+w alt+l", label: "Resize right" },
-        run: () => onResize("l"),
-      },
-      {
-        chord: ["ctrl+w", "alt+j"],
-        repeatable: true,
-        help: { keys: "ctrl+w alt+j", label: "Resize down" },
-        run: () => onResize("j"),
-      },
-      {
-        chord: ["ctrl+w", "alt+k"],
-        repeatable: true,
-        help: { keys: "ctrl+w alt+k", label: "Resize up" },
-        run: () => onResize("k"),
+        keys: ["ctrl+w"],
+        // The followers live in the pushed frame below, out of reach of the
+        // help popup until `ctrl+w` is pressed, so the leader documents them
+        // all here.
+        help: [
+          { keys: "ctrl+w v", label: "Split vertically" },
+          { keys: "ctrl+w s", label: "Split horizontally" },
+          { keys: "ctrl+w h", label: "Pane left" },
+          { keys: "ctrl+w j", label: "Pane below" },
+          { keys: "ctrl+w k", label: "Pane above" },
+          { keys: "ctrl+w l", label: "Pane right" },
+          { keys: "ctrl+w ctrl+w", label: "Next pane" },
+          { keys: "ctrl+w q", label: "Close pane" },
+          { keys: "ctrl+w alt+h", label: "Resize left" },
+          { keys: "ctrl+w alt+l", label: "Resize right" },
+          { keys: "ctrl+w alt+j", label: "Resize down" },
+          { keys: "ctrl+w alt+k", label: "Resize up" },
+        ],
+        layer: {
+          id: "panes-window",
+          bindings: [
+            {
+              keys: ["v"],
+              run: () => onSplit("row"),
+            },
+            {
+              keys: ["s"],
+              run: () => onSplit("column"),
+            },
+            {
+              keys: ["h"],
+              run: () => onMove("h"),
+            },
+            {
+              keys: ["j"],
+              run: () => onMove("j"),
+            },
+            {
+              keys: ["k"],
+              run: () => onMove("k"),
+            },
+            {
+              keys: ["l"],
+              run: () => onMove("l"),
+            },
+            {
+              keys: ["ctrl+w"],
+              run: () => onMove("next"),
+            },
+            {
+              keys: ["q"],
+              run: onClosePane,
+            },
+            {
+              keys: ["alt+h"],
+              repeatable: true, // alt+h again keeps resizing
+              run: () => onResize("h"),
+            },
+            {
+              keys: ["alt+l"],
+              repeatable: true,
+              run: () => onResize("l"),
+            },
+            {
+              keys: ["alt+j"],
+              repeatable: true,
+              run: () => onResize("j"),
+            },
+            {
+              keys: ["alt+k"],
+              repeatable: true,
+              run: () => onResize("k"),
+            },
+          ],
+        },
       },
     ],
   });
@@ -206,7 +223,7 @@ function TabNumbers({
     id: "tab-numbers",
     bindings: Array.from({ length: Math.min(count, 9) }, (_, i) => ({
       keys: [String(i + 1)],
-      help: { keys: String(i + 1), label: `Switch to tab ${i + 1}` },
+      help: [{ keys: String(i + 1), label: `Switch to tab ${i + 1}` }],
       run: () => onPick(i),
     })),
   });

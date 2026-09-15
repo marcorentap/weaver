@@ -509,7 +509,7 @@ function PreviewModal({
         ? [
             {
               keys: ["Enter"],
-              help: { keys: "enter", label: "Open file in a new tab" },
+              help: [{ keys: "enter", label: "Open file in a new tab" }],
               run: () => {
                 const url = raw();
                 window.open(url, "_blank", "noopener,noreferrer");
@@ -527,7 +527,7 @@ function PreviewModal({
       // The player already owns arrow keys, so j/k stay clear too.
       {
         keys: ["j"],
-        help: { keys: "j / k", label: "Scroll" },
+        help: [{ keys: "j / k", label: "Scroll" }],
         run: (count) => scrollBy(count ?? 1),
       },
       {
@@ -536,27 +536,30 @@ function PreviewModal({
       },
       {
         keys: ["ctrl+d"],
-        help: { keys: "ctrl+d", label: "Scroll down half a page" },
+        help: [{ keys: "ctrl+d", label: "Scroll down half a page" }],
         run: () => scrollPage(1),
       },
       {
         keys: ["ctrl+u"],
-        help: { keys: "ctrl+u", label: "Scroll up half a page" },
+        help: [{ keys: "ctrl+u", label: "Scroll up half a page" }],
         run: () => scrollPage(-1),
       },
       {
         keys: ["G"],
-        help: { keys: "G", label: "Scroll to bottom" },
+        help: [{ keys: "G", label: "Scroll to bottom" }],
         run: (count) => jumpTo(count),
       },
       {
-        chord: ["g", "g"],
-        help: { keys: "gg", label: "Scroll to top" },
-        run: () => jumpTo(1),
+        keys: ["g"],
+        help: [{ keys: "gg", label: "Scroll to top" }],
+        layer: {
+          id: "preview-gg",
+          bindings: [{ keys: ["g"], run: () => jumpTo(1) }],
+        },
       },
       {
         keys: ["Escape", "q"],
-        help: { keys: "esc / q", label: "Close" },
+        help: [{ keys: "esc / q", label: "Close" }],
         run: onClose,
       },
     ],
@@ -1119,67 +1122,67 @@ function ChatView({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j / <n>j", label: "Next block, <n> at a time" },
+        help: [{ keys: "↓ / j / <n>j", label: "Next block, <n> at a time" }],
         run: (count = 1) => move(count),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k / <n>k", label: "Previous block, <n> at a time" },
+        help: [{ keys: "↑ / k / <n>k", label: "Previous block, <n> at a time" }],
         run: (count = 1) => move(-count),
       },
       {
         keys: ["ctrl+d"],
-        help: { keys: "ctrl+d", label: "Half page down" },
+        help: [{ keys: "ctrl+d", label: "Half page down" }],
         run: () => pageMove(1),
       },
       {
         keys: ["ctrl+u"],
-        help: { keys: "ctrl+u", label: "Half page up" },
+        help: [{ keys: "ctrl+u", label: "Half page up" }],
         run: () => pageMove(-1),
       },
       {
         keys: ["ArrowRight", "l"],
-        help: { keys: "→ / l", label: "Open nested contexts, then step in" },
+        help: [{ keys: "→ / l", label: "Open nested contexts, then step in" }],
         run: expand,
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: { keys: "← / h", label: "Close nested contexts, then step out" },
+        help: [{ keys: "← / h", label: "Close nested contexts, then step out" }],
         run: collapse,
       },
       {
         keys: ["J"],
-        help: { keys: "J", label: "Move block down" },
+        help: [{ keys: "J", label: "Move block down" }],
         run: () => moveWithinSiblings(1),
       },
       {
         keys: ["K"],
-        help: { keys: "K", label: "Move block up" },
+        help: [{ keys: "K", label: "Move block up" }],
         run: () => moveWithinSiblings(-1),
       },
       {
         keys: ["alt+j"],
-        help: { keys: "alt+j", label: "Move block down" },
+        help: [{ keys: "alt+j", label: "Move block down" }],
         run: () => moveWithinSiblings(1),
       },
       {
         keys: ["alt+k"],
-        help: { keys: "alt+k", label: "Move block up" },
+        help: [{ keys: "alt+k", label: "Move block up" }],
         run: () => moveWithinSiblings(-1),
       },
       {
         keys: [">"],
-        help: { keys: ">", label: "Nest under previous block" },
+        help: [{ keys: ">", label: "Nest under previous block" }],
         run: nest,
       },
       {
         keys: ["<"],
-        help: { keys: "<", label: "Unnest from parent block" },
+        help: [{ keys: "<", label: "Unnest from parent block" }],
         run: unnest,
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "Actions for selected block(s)" },
+        help: [{ keys: "enter", label: "Actions for selected block(s)" }],
         run: () => {
           if (visualAnchor !== null) setPopup({ kind: "selection" });
           else if (row) setPopup({ kind: "actions" });
@@ -1187,18 +1190,18 @@ function ChatView({
       },
       {
         keys: ["v"],
-        help: { keys: "v", label: "Toggle visual selection" },
+        help: [{ keys: "v", label: "Toggle visual selection" }],
         run: () =>
           setVisualAnchor((current) => (current === null ? index : null)),
       },
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "Cancel visual selection" },
+        help: [{ keys: "esc", label: "Cancel visual selection" }],
         run: () => setVisualAnchor(null),
       },
       {
         keys: ["ctrl+c"],
-        help: { keys: "ctrl+c", label: "Stop the nearest running inference" },
+        help: [{ keys: "ctrl+c", label: "Stop the nearest running inference" }],
         run: () => {
           // A run's replies are siblings after the anchoring block, not
           // descendants, so "up" means earlier in the rendered chain, not
@@ -1216,42 +1219,45 @@ function ChatView({
       },
       {
         keys: ["s"],
-        help: { keys: "s", label: "Recent sessions" },
+        help: [{ keys: "s", label: "Recent sessions" }],
         run: () => setPopup({ kind: "sessions" }),
       },
       {
         keys: ["o"],
-        help: { keys: "o", label: "Insert block after" },
+        help: [{ keys: "o", label: "Insert block after" }],
         run: () => beginCreate(row ? index + 1 : 0),
       },
       {
         keys: ["O"],
-        help: { keys: "O", label: "Insert block before" },
+        help: [{ keys: "O", label: "Insert block before" }],
         run: () => beginCreate(row ? index : 0),
       },
       {
         keys: ["i"],
-        help: { keys: "i", label: "Write a message after, run inference" },
+        help: [{ keys: "i", label: "Write a message after, run inference" }],
         run: () => beginCreateUser(row ? index + 1 : 0),
       },
       {
         keys: ["I"],
-        help: { keys: "I", label: "Write a message before, run inference" },
+        help: [{ keys: "I", label: "Write a message before, run inference" }],
         run: () => beginCreateUser(row ? index : 0),
       },
       {
         keys: ["G"],
-        help: { keys: "G / <n>G", label: "Jump to last block / line <n>" },
+        help: [{ keys: "G / <n>G", label: "Jump to last block / line <n>" }],
         run: (count) => jump(count ?? rows.length),
       },
       {
-        chord: ["g", "g"],
-        help: { keys: "gg", label: "Jump to first block" },
-        run: () => jump(1),
+        keys: ["g"],
+        help: [{ keys: "gg", label: "Jump to first block" }],
+        layer: {
+          id: "chat-gg",
+          bindings: [{ keys: ["g"], run: () => jump(1) }],
+        },
       },
       {
         keys: ["ctrl+o"],
-        help: { keys: "ctrl+o", label: "Show or hide clipped content" },
+        help: [{ keys: "ctrl+o", label: "Show or hide clipped content" }],
         run: () => {
           const next = !showEverything;
           setShowEverything(next);
@@ -1262,7 +1268,7 @@ function ChatView({
       },
       {
         keys: ["u"],
-        help: { keys: "u / <n>u", label: "Undo last change" },
+        help: [{ keys: "u / <n>u", label: "Undo last change" }],
         run: (count) => {
           // `<n>u` rewinds that many steps at once, vim-style. The engine
           // itself no-ops while a run is in flight, so a held or repeated
@@ -1272,7 +1278,7 @@ function ChatView({
       },
       {
         keys: ["ctrl+r"],
-        help: { keys: "ctrl+r", label: "Redo" },
+        help: [{ keys: "ctrl+r", label: "Redo" }],
         run: () => {
           engine.redo();
         },

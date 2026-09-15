@@ -44,7 +44,7 @@ export function FieldEditor({
       // Live only while focus is outside the input, which handles its own keys.
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "Cancel" },
+        help: [{ keys: "esc", label: "Cancel" }],
         run: onCancel,
       },
     ],

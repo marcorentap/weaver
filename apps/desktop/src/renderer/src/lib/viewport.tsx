@@ -60,23 +60,29 @@ export function useViewportBindings(
   return [
     {
       keys: ["ctrl+d"],
-      help: { keys: "ctrl+d", label: "Half page down" },
+      help: [{ keys: "ctrl+d", label: "Half page down" }],
       run: () => page(1),
     },
     {
       keys: ["ctrl+u"],
-      help: { keys: "ctrl+u", label: "Half page up" },
+      help: [{ keys: "ctrl+u", label: "Half page up" }],
       run: () => page(-1),
     },
     {
       keys: ["G"],
-      help: { keys: "G", label: "Jump to the bottom" },
+      help: [{ keys: "G", label: "Jump to the bottom" }],
       run: () => toExtent(true),
     },
+    // `gg`: the first `g` pushes a transient frame that the second `g`
+    // resolves, so a lone `g` parks and does nothing until its follower or
+    // the frame's 1500ms expiry arrives.
     {
-      chord: ["g", "g"],
-      help: { keys: "gg", label: "Jump to the top" },
-      run: () => toExtent(false),
+      keys: ["g"],
+      help: [{ keys: "gg", label: "Jump to the top" }],
+      layer: {
+        id: "viewport-gg",
+        bindings: [{ keys: ["g"], run: () => toExtent(false) }],
+      },
     },
   ];
 }

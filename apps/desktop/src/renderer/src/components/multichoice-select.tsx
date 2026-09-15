@@ -213,22 +213,22 @@ export function MultichoiceSelect({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "Next option" },
+        help: [{ keys: "↓ / j", label: "Next option" }],
         run: () => moveRow(1),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "Previous option" },
+        help: [{ keys: "↑ / k", label: "Previous option" }],
         run: () => moveRow(-1),
       },
       {
         keys: [" "],
-        help: { keys: "⎵", label: "Select / deselect" },
+        help: [{ keys: "⎵", label: "Select / deselect" }],
         run: () => toggleRow(index),
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "Option actions" },
+        help: [{ keys: "enter", label: "Option actions" }],
         run: () => {
           if (!target || target.kind === "note") return;
           setError(null);
@@ -237,17 +237,17 @@ export function MultichoiceSelect({
       },
       {
         keys: ["e"],
-        help: { keys: "e", label: "Edit text" },
+        help: [{ keys: "e", label: "Edit text" }],
         run: () => editTarget(target),
       },
       {
         keys: ["d"],
-        help: { keys: "d", label: "Delete option" },
+        help: [{ keys: "d", label: "Delete option" }],
         run: () => deleteRow(index),
       },
       {
         keys: ["i"],
-        help: { keys: "i", label: "Add option / note" },
+        help: [{ keys: "i", label: "Add option / note" }],
         run: () => {
           setError(null);
           setMenu("add");
@@ -255,12 +255,12 @@ export function MultichoiceSelect({
       },
       {
         keys: ["ctrl+enter"],
-        help: { keys: "ctrl+enter", label: "Submit answer" },
+        help: [{ keys: "ctrl+enter", label: "Submit answer" }],
         run: onClose,
       },
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "Close" },
+        help: [{ keys: "esc", label: "Close" }],
         run: onClose,
       },
     ],

@@ -11,6 +11,8 @@ import {
 import { KeyHelp } from "@/components/key-help";
 import { keyComboName } from "@shared/keys.js";
 
+export type HelpBinding = { keys: string; label: string };
+
 export type KeyBinding = {
   /**
    * Matched against `KeyboardEvent.key`, so "Enter" and "s" both work. A
@@ -20,29 +22,49 @@ export type KeyBinding = {
    */
   keys?: string[];
   /**
-   * A two-key sequence, `["Tab", "1"]` waiting for `Tab` then `1`, or
-   * `["ctrl+w", "v"]` waiting for the modified key then a plain `v`, instead
-   * of a single key. Both elements are named like a single binding: plain
-   * keys by `event.key`, modified ones by their `ctrl+`- / `alt+`-prefixed
-   * name, so `ctrl+w ctrl+w` is a valid second element too. A binding may
-   * declare `chord`, `keys`, or both.
+   * Listed in the help popup, one row per entry. A leader that pushes a
+   * `layer` documents every follower it reaches here ("ctrl+w v", "gg"),
+   * because the followers live in the transient frame — out of reach of the
+   * help popup until the leader is pressed. Omit to keep a binding
+   * undocumented.
    */
-  chord?: readonly [string, string];
+  help?: HelpBinding[];
   /**
-   * Keep the chord armed after a hit, so re-pressing the same follower
-   * repeats the action without a fresh leader (`ctrl+w alt+j` then `alt+j`
-   * keeps adding 10px). Chords without it clear after the first hit, so
-   * `ctrl+w h` moves focus once and the leader is gone. Auto-repeat holds
-   * count for exactly one action either way.
+   * Pressing this key runs `run`, then pushes `layer` onto the keymap stack
+   * as a transient frame: the keys that follow dispatch against that layer
+   * until one of its bindings fires (popping the frame unless it is
+   * `repeatable`), a key it does not bind arrives (cancelling it), or
+   * Escape cancels it. This is the layer-push that replaces the old fixed
+   * two-key chord. `s > t` — "s runs a function AND puts a layer with t on
+   * top" — is a single binding:
+   *
+   *     { keys: ["s"], run: onS, layer: { id: "s", bindings: [
+   *         { keys: ["t"], run: onT },
+   *       ] } }
+   *
+   * Frames nest to any depth (s > t > u), each follower layer resolving back
+   * to the one below when its binding fires. The layer in `layer:` is a live
+   * object, so its bindings may close over current component state if the
+   * binding is rebuilt on render.
+   */
+  layer?: KeyLayer;
+  /**
+   * A binding living inside a `layer` that, once hit, keeps that layer
+   * pushed so re-pressing the same follower repeats without a fresh leader
+   * (`ctrl+w alt+h` then `alt+h` keeps adding 10px). Followers without it
+   * pop their frame after the first hit, so `ctrl+w h` moves focus once and
+   * the frame is gone. Auto-repeat holds count for exactly one action either
+   * way.
    */
   repeatable?: boolean;
-  /** Listed in the help popup. Omit to keep a binding undocumented. */
-  help?: { keys: string; label: string };
   /**
-   * A leading digit run (`3` before `j`, `12` before `G`) is parsed and
-   * passed here; absent when no count was typed.
+   * The action. Optional only for a leader paired with `layer` that just
+   * opens a frame (the `g` of `gg`); every other binding runs something. A
+   * leading digit run (`3` before `j`, `12` before `G`) is parsed and passed
+   * here; absent when no count was typed. Only plain single-key bindings
+   * take a count — followers and modified keys never do.
    */
-  run: (count?: number) => void;
+  run?: (count?: number) => void;
 };
 
 export type KeyLayer = {
@@ -59,12 +81,13 @@ export type KeyLayer = {
    * Keys this layer documents but does not dispatch, because something else
    * owns them, like a text input, which the keymap deliberately ignores.
    */
-  docs?: { keys: string; label: string }[];
+  docs?: HelpBinding[];
   /**
    * The pane this layer belongs to, stamped by `useKeyLayer` when the
    * component sits under a `KeyFrameProvider`. A scoped layer dispatches
    * only while its pane is the one `KeymapProvider` was told has focus;
-   * scope-less layers (chrome, normal mode) are always reachable.
+   * scope-less layers (chrome, normal mode) are always reachable. Keypress-
+   * pushed frames inherit their source layer's scope.
    */
   scope?: string;
 };
@@ -131,6 +154,13 @@ function isTextEntry(target: EventTarget | null): boolean {
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
+/**
+ * One entry on the layer stack. `transient` frames are pushed by a keypress
+ * (a binding's `layer`) and resolve-and-pop like the old chords; persistent
+ * entries are declarative `useKeyLayer` layers that stay until unmounted.
+ */
+type StackEntry = { id: string; transient: boolean };
+
 export function KeymapProvider({
   activePaneId,
   children,
@@ -143,25 +173,29 @@ export function KeymapProvider({
   activePaneId: string | null;
   children: ReactNode;
 }) {
-  const [stack, setStack] = useState<string[]>([]);
+  const [stack, setStack] = useState<StackEntry[]>([]);
   const [layers] = useState(() => new Map<string, KeyLayer>());
   const [helpOpen, setHelpOpen] = useState(false);
 
-  // Vim-style count/chord state. Kept in refs, not state. They never affect
-  // what's on screen, only how the next keydown is interpreted, so there is
-  // nothing here worth a render.
+  // Vim-style count state, plus the transient-frame machinery. All kept in
+  // refs or imperative map writes, not state. Count never affects what's on
+  // screen; transient frames are entries in `stack`/`layers` only for the
+  // very next keydown, so there is nothing here worth a render in itself.
   const pendingCount = useRef("");
-  const pendingChord = useRef<string | null>(null);
   const countTimer = useRef<number | undefined>(undefined);
-  const chordTimer = useRef<number | undefined>(undefined);
+  const frameTimer = useRef<number | undefined>(undefined);
+  /** Registered ids of every live transient frame, so a timeout or cancel
+   *  can drop them without trusting a possibly-stale `stack` closure. */
+  const frameKeys = useRef(new Set<string>());
+  const seq = useRef(0);
 
-  const push = useCallback(
-    (id: string) => {
-      setStack((current) => [...current, id]);
-      return () => setStack((current) => current.filter((entry) => entry !== id));
-    },
-    [],
-  );
+  const push = useCallback((id: string) => {
+    setStack((current) => [...current, { id, transient: false }]);
+    return () =>
+      setStack((current) =>
+        current.filter((entry) => entry.id !== id),
+      );
+  }, []);
 
   useEffect(() => {
     function clearCount() {
@@ -170,183 +204,204 @@ export function KeymapProvider({
       countTimer.current = undefined;
     }
 
-    function clearChord() {
-      pendingChord.current = null;
-      clearTimeout(chordTimer.current);
-      chordTimer.current = undefined;
+    function clearFrames() {
+      clearTimeout(frameTimer.current);
+      frameTimer.current = undefined;
+      frameKeys.current.forEach((id) => layers.delete(id));
+      frameKeys.current.clear();
+      setStack((current) => current.filter((entry) => !entry.transient));
     }
 
-    // Innermost layer first; a modal layer swallows the key even when it
-    // doesn't bind it, same as plain dispatch below. A scoped layer (a page
-    // inside a pane) counts only while its pane is the focused one — a
-    // hidden tab's panes can never match, because their ids differ.
+    // Innermost reachable stack index: the layer the next key dispatches to.
+    // A scoped layer (a page inside a pane) counts only while its pane is
+    // the focused one — a hidden tab's panes can never match, because their
+    // ids differ.
     const scopeLive = (layer: KeyLayer) =>
       !layer.scope || layer.scope === activePaneId;
 
-    function forEachReachableLayer(visit: (layer: KeyLayer) => boolean) {
+    function topReachableIndex(): number {
       for (let i = stack.length - 1; i >= 0; i -= 1) {
-        const layer = layers.get(stack[i] as string);
-        if (!layer || !scopeLive(layer)) continue;
-        if (visit(layer)) return;
-        if (layer.modal) return;
+        const layer = layers.get(stack[i]!.id);
+        if (layer && scopeLive(layer)) return i;
       }
+      return -1;
     }
 
-    // The innermost modal layer, if any. Count prefixes are a
-    // non-modal-mode feature, so their presence turns digits back into
-    // ordinary keys, which a popup is then free to bind (a tab menu
-    // offering "1".."9").
-    function topModal(): KeyLayer | undefined {
-      for (let i = stack.length - 1; i >= 0; i -= 1) {
-        const layer = layers.get(stack[i] as string);
-        if (!layer || !scopeLive(layer)) continue;
-        if (layer.modal) return layer;
-      }
-      return undefined;
+    // A digit is a count prefix only when no modal layer is live, and a
+    // transient frame on top already intercepted it (see `onKeyDown`), so
+    // only persistent modals matter here.
+    function topModalExists(): boolean {
+      return stack.some((entry) => {
+        if (entry.transient) return false;
+        const layer = layers.get(entry.id);
+        return !!layer && layer.modal && scopeLive(layer);
+      });
     }
 
-    // Modified-key dispatch, shared by the DOM keydown handler and the
-    // forwarded leaders (Ctrl+W, swallowed in the main process so the
-    // default Close accelerator can't kill the window, then sent here over
-    // IPC). A modified key lands in one of three places, in this order:
-    //
-    // 1. as the follower of a pending chord (`ctrl+w ctrl+w` = next pane —
-    //    a second modified leader only ever arrives this way; the page's
-    //    own keydown is what the main process swallows);
-    // 2. as the leader of a modified chord (`ctrl+w`), parked until its
-    //    plain follower (`v`, `s`, `h`, …) arrives as a normal keydown;
-    // 3. as a plain modified binding (`ctrl+d` page-down). The `alt+h`
-    //    resizes are chord followers of the parked `ctrl+w` leader, matched
-    //    by their `alt+`-named combo.
-    const dispatchModifiedCombo = (combo: string): boolean => {
-      // A modified key arriving while a chord is pending resolves that
-      // chord's follower (`ctrl+w ctrl+w` = next pane). A DOM keydown for
-      // the only relevant modified leader (Ctrl+W) never reaches this
-      // branch — the page doesn't see it at all — so `ctrl+w ctrl+w`
-      // resolves here via the forwarded IPC event.
-      if (pendingChord.current) {
-        const leader = pendingChord.current;
-        clearChord();
-        let handled = false;
-        if (combo !== "Escape") {
-          forEachReachableLayer((layer) => {
-            const binding = layer.bindings.find(
-              (entry) =>
-                entry.chord?.[0] === leader && entry.chord[1] === combo,
-            );
-            if (!binding) return false;
-            binding.run();
-            handled = true;
-            return true;
-          });
+    // The topmost reachable transient frame's index, or -1 for none.
+    function topFrameIndex(): number {
+      for (let i = stack.length - 1; i >= 0; i -= 1) {
+        const entry = stack[i]!;
+        const layer = layers.get(entry.id);
+        if (layer && entry.transient && scopeLive(layer)) return i;
+      }
+      return -1;
+    }
+
+    /** Pop the topmost reachable transient frame (cancel that level of a
+     *  pending chord), and rest the timeout for whatever frame is left. */
+    function popTopFrame(): boolean {
+      const i = topFrameIndex();
+      if (i === -1) return false;
+      const id = stack[i]!.id;
+      layers.delete(id);
+      frameKeys.current.delete(id);
+      setStack((current) => current.filter((_, idx) => idx !== i));
+      // The closure `stack` still lists the frame we just popped; what
+      // remains are the frames that are genuinely still on the stack.
+      const remaining = stack.filter((entry) => entry.transient).length - 1;
+      clearTimeout(frameTimer.current);
+      if (remaining > 0) {
+        frameTimer.current = window.setTimeout(clearFrames, 1500);
+      } else {
+        frameTimer.current = undefined;
+      }
+      return true;
+    }
+
+    /** Register `target` as a transient frame on top of the stack, scoped to
+     *  the layer that pushed it, and arm its 1500ms expiry. */
+    function pushFrame(target: KeyLayer, scope: string | undefined) {
+      const key = `${target.id}\u0000frame${seq.current}`;
+      seq.current += 1;
+      const frame: KeyLayer = scope ? { ...target, scope } : { ...target };
+      layers.set(key, frame);
+      frameKeys.current.add(key);
+      setStack((current) => [...current, { id: key, transient: true }]);
+      clearTimeout(frameTimer.current);
+      frameTimer.current = window.setTimeout(clearFrames, 1500);
+    }
+
+    /**
+     * Resolve a key against the transient frame on top, reached when the
+     * caller has already established that a frame is the innermost reachable
+     * layer. A hit runs the follower binding, either pushing a deeper frame
+     * (s > t > u), staying armed for a `repeatable` follower, or popping
+     * back to the layer below. A miss pops the frame and swallows the key —
+     * exactly the old "a missed follower cancels the chord instead of
+     * falling through" rule.
+     */
+    function resolveFrame(combo: string): boolean {
+      const i = topFrameIndex();
+      if (i === -1) return false;
+      const layer = layers.get(stack[i]!.id)!;
+      clearCount();
+      if (combo === "Escape") {
+        popTopFrame();
+        return true;
+      }
+      const binding = layer.bindings.find((entry) =>
+        entry.keys?.includes(combo),
+      );
+      if (binding) {
+        if (binding.layer) {
+          binding.run?.(undefined);
+          pushFrame(binding.layer, layer.scope);
+        } else {
+          binding.run?.(undefined);
+          if (binding.repeatable) {
+            clearTimeout(frameTimer.current);
+            frameTimer.current = window.setTimeout(clearFrames, 1500);
+          } else {
+            popTopFrame();
+          }
         }
-        clearCount();
-        return handled;
-      }
-      let leads = false;
-      forEachReachableLayer((layer) => {
-        if (!layer.bindings.some((entry) => entry.chord?.[0] === combo))
-          return false;
-        leads = true;
-        return true;
-      });
-      if (leads) {
-        pendingChord.current = combo;
-        clearTimeout(chordTimer.current);
-        chordTimer.current = window.setTimeout(clearChord, 1500);
         return true;
       }
-      let handled = false;
-      forEachReachableLayer((layer) => {
-        const binding = layer.bindings.find((entry) =>
-          entry.keys?.includes(combo),
+      popTopFrame();
+      return true;
+    }
+
+    /**
+     * Dispatches `combo` against the layer stack, innermost first. Used for
+     * plain single keys (`countable`), modified combos, and forwarded
+     * swallowed leaders alike. A modal layer swallows keys it does not bind;
+     * a transient frame miss pops it and swallows the key; non-modal layers
+     * fall through.
+     */
+    function handleCombo(
+      combo: string,
+      opts: { countable: boolean },
+    ): boolean {
+      for (let i = stack.length - 1; i >= 0; i -= 1) {
+        const entry = stack[i]!;
+        const layer = layers.get(entry.id);
+        if (!layer || !scopeLive(layer)) continue;
+        const binding = layer.bindings.find((candidate) =>
+          candidate.keys?.includes(combo),
         );
-        if (!binding) return false;
-        binding.run();
-        handled = true;
-        return true;
-      });
-      return handled;
-    };
+        if (binding) {
+          if (binding.layer) {
+            // A leader: run its function, then push the follower frame. The
+            // count never feeds a leader — `g` in `gg` is a prefix, not an
+            // action, so any typed digits are consumed by it.
+            clearCount();
+            binding.run?.(undefined);
+            pushFrame(binding.layer, layer.scope);
+          } else if (opts.countable) {
+            const count = pendingCount.current
+              ? Number(pendingCount.current)
+              : undefined;
+            clearCount();
+            binding.run?.(count);
+          } else {
+            clearCount();
+            binding.run?.(undefined);
+          }
+          return true;
+        }
+        if (entry.transient) {
+          // Unbound key in a keypress-pushed frame: cancel it, swallow it.
+          popTopFrame();
+          return true;
+        }
+        if (layer.modal) return false;
+      }
+      return false;
+    }
 
     function onKeyDown(event: KeyboardEvent) {
       if (isTextEntry(event.target)) return;
 
       // The bare modifier keypress (the `Alt` of `alt+h`, the `Shift` of
-      // `shift+j`) is never a follower and must not cancel a parked leader:
-      // without this, `ctrl+w` then `alt+h` would resolve/clear the chord
-      // on the `Alt` keydown and the `h` would land against nothing.
+      // `shift+j`) is never a follower and must not cancel a parked frame:
+      // without this, `ctrl+w` then `alt+h` would cancel the pane frame on
+      // the `Alt` keydown and the `h` would land against nothing.
       if (/^(Alt|Control|Meta|Shift|CapsLock|NumLock|Fn|OS|Super)$/i.test(event.key)) {
         return;
       }
 
-      // This key the way bindings name it: plain keys by their `event.key`,
-      // modified ones by their `ctrl+`- / `alt+`-prefixed name. The main
-      // process leaves a ctrl/cmd+alt pairing alone, and so does this — an
-      // unclaimed browser shortcut keeps working.
-      const combo = keyComboName(event.key, {
-        ctrl: event.ctrlKey,
-        meta: event.metaKey,
-        alt: event.altKey,
-      });
-
-      // A leader that consumed the previous keydown resolves against this
-      // key, hit or miss, matched by the follower's own name (a plain `v`, a
-      // modified `ctrl+w`). The follower names itself with the leader's own
-      // ctrl/cmd stripped — the leader is already held, so the DOM reports
-      // `ctrl+h` for a `ctrl+w` + `h` and a `ctrl+alt+h` pairing for
-      // `ctrl+w` + `alt+h` (which `keyComboName` otherwise refuses). A miss
-      // cancels the chord instead of falling through to an unrelated
-      // single-key binding.
-      //
-      // A HIT on a `repeatable` binding keeps the chord armed: re-pressing
-      // the same follower repeats the action without a fresh leader, so
-      // `ctrl+w alt+j` then `alt+j` `alt+j` keeps adding 10px. Non-repeatable
-      // chords (split, move, close) clear after the first hit. Auto-repeat
-      // keydowns (a held key) are ignored — they neither re-run the binding
-      // nor cancel the chord — so holding a follower produces exactly one
-      // action. Any other key expires the chord.
-      if (pendingChord.current) {
-        const leader = pendingChord.current;
+      // A transient frame on top resolves the very next key, hit or miss,
+      // exactly as a pending chord did. The follower names itself with the
+      // leader's own ctrl/cmd stripped — the leader is still held, so the
+      // DOM reports `ctrl+h` for a `ctrl+w` + `h` and a `ctrl+alt+h` pairing
+      // for `ctrl+w` + `alt+h`, while the frame binds `alt+h`. Auto-repeat
+      // keydowns (a held follower) are ignored — they neither re-run the
+      // binding nor cancel the frame — so holding produces one action.
+      // `Escape` is a miss that only cancels the frame, never anything below.
+      const top = topReachableIndex();
+      if (top !== -1 && stack[top]!.transient) {
         event.preventDefault();
-        clearCount();
         if (event.repeat) return;
-        if (event.key === "Escape") {
-          clearChord();
-          return;
-        }
-        const follower = keyComboName(event.key, {
-          ctrl: false,
-          meta: false,
-          alt: event.altKey,
-        });
-        if (!follower) {
-          clearChord();
-          return;
-        }
-        let hit: KeyBinding | undefined;
-        forEachReachableLayer((layer) => {
-          const binding = layer.bindings.find(
-            (entry) =>
-              entry.chord?.[0] === leader && entry.chord[1] === follower,
-          );
-          if (!binding) return false;
-          binding.run();
-          hit = binding;
-          return true;
-        });
-        if (!hit) {
-          clearChord();
-          return;
-        }
-        if (!hit.repeatable) {
-          clearChord();
-          return;
-        }
-        // Keep the leader armed for the next press of this follower, and
-        // rest the expiry timer from this press.
-        clearTimeout(chordTimer.current);
-        chordTimer.current = window.setTimeout(clearChord, 1500);
+        const combo =
+          event.key === "Escape"
+            ? "Escape"
+            : keyComboName(event.key, {
+                ctrl: false,
+                meta: false,
+                alt: event.altKey,
+              });
+        if (combo) resolveFrame(combo);
         return;
       }
 
@@ -363,15 +418,24 @@ export function KeymapProvider({
         return;
       }
 
+      // This key the way bindings name it: plain keys by their `event.key`,
+      // modified ones by their `ctrl+`- / `alt+`-prefixed name. The main
+      // process leaves a ctrl/cmd+alt pairing alone, and so does this — an
+      // unclaimed browser shortcut keeps working.
+      const combo = keyComboName(event.key, {
+        ctrl: event.ctrlKey,
+        meta: event.metaKey,
+        alt: event.altKey,
+      });
+
       // A modified key reaches only bindings that asked for it by name, and
       // skips counts and digits entirely. `3ctrl+o` is not a thing; an
-      // unclaimed browser shortcut must keep working. All modified-key
-      // dispatch — a `ctrl+w` leader parked for its follower, a
-      // `ctrl+w ctrl+w` double-leader, `ctrl+w` + `alt+h/j/k/l` resize — lives in
-      // `dispatchModifiedCombo`, shared with the forwarded Ctrl+W leaders.
+      // unclaimed browser shortcut must keep working. Modified dispatch —
+      // a `ctrl+w` leader parking its pane frame, a plain `ctrl+d` page-down
+      // — lives here, shared with the forwarded Ctrl+W leaders.
       if (event.ctrlKey || event.metaKey || event.altKey) {
         if (!combo) return;
-        if (dispatchModifiedCombo(combo)) event.preventDefault();
+        if (handleCombo(combo, { countable: false })) event.preventDefault();
         return;
       }
 
@@ -379,11 +443,12 @@ export function KeymapProvider({
       // moves three rows, "12G" jumps to line 12. A leading zero can't start
       // one, so it is free to be an ordinary binding. A modal popup stops
       // all that: it owns the digits it binds, and swallows the ones it
-      // doesn't, like any other key.
+      // doesn't, like any other key. (A transient frame already consumed the
+      // digit above, before this branch.)
       if (
         /^[0-9]$/.test(event.key) &&
         !(event.key === "0" && pendingCount.current === "") &&
-        !topModal()
+        !topModalExists()
       ) {
         event.preventDefault();
         pendingCount.current += event.key;
@@ -392,52 +457,26 @@ export function KeymapProvider({
         return;
       }
 
-      // A key that leads some reachable chord waits for its second key
-      // instead of dispatching as a plain binding.
-      let leads = false;
-      forEachReachableLayer((layer) => {
-        if (!layer.bindings.some((entry) => entry.chord?.[0] === event.key))
-          return false;
-        leads = true;
-        return true;
-      });
-      if (leads) {
-        event.preventDefault();
-        pendingChord.current = event.key;
-        clearTimeout(chordTimer.current);
-        chordTimer.current = window.setTimeout(clearChord, 1500);
-        return;
-      }
-
-      let handled = false;
-      forEachReachableLayer((layer) => {
-        const binding = layer.bindings.find((entry) =>
-          entry.keys?.includes(event.key),
-        );
-        if (!binding) return false;
-        event.preventDefault();
-        const count = pendingCount.current
-          ? Number(pendingCount.current)
-          : undefined;
-        clearCount();
-        binding.run(count);
-        handled = true;
-        return true;
-      });
-      if (!handled) clearCount();
+      if (handleCombo(event.key, { countable: true })) event.preventDefault();
+      else clearCount();
     }
 
     // Ctrl+W and friends never reach the page's keydown — the main process
     // swallows them (so the default Close accelerator can't kill the window)
     // and forwards them here, keyed by the same `SWALLOWED_KEYS` table in
-    // shared/keys.ts. Feed each through the same modified-key dispatch, with
-    // the same guards as the keydown path (help open, or focus in a text
-    // field, swallows it), so a leader can never arm a chord under a modal
-    // or while typing.
+    // shared/keys.ts. Feed each through the same dispatch as a keydown, with
+    // the same guards (help open, or focus in a text field, swallows it), so
+    // a leader can never push a frame under a modal or while typing. A
+    // second swallowed `ctrl+w` while the pane frame is parked resolves its
+    // own follower (`ctrl+w ctrl+w` = next pane).
     const removeForwardedKeys = window.api.keymap.onChordLeader((combo) => {
       if (helpOpen) return;
       if (isTextEntry(document.activeElement)) return;
-      const handled = dispatchModifiedCombo(combo);
+      const top = topReachableIndex();
+      const handled =
+        top !== -1 && stack[top]!.transient
+          ? resolveFrame(combo)
+          : handleCombo(combo, { countable: false });
       // A swallowed key that no reachable layer bound the old design would
       // have suffered silently: the main process eats the key AND the
       // keymap has nothing to do with it, so the press just vanishes. Make
@@ -467,9 +506,12 @@ export function KeymapProvider({
   // Only the layers a key can actually reach, matching dispatch, everything
   // from the innermost modal layer up. Scoped layers of non-focused panes
   // are skipped, so the popup shows only the pane under the cursor's modes.
+  // Keypress-pushed frames are on the stack too; they surface nothing, since
+  // their followers are undocumented (the leader documents them), so empty
+  // sections are dropped.
   const reachable = stack
-    .flatMap((id) => {
-      const layer = layers.get(id);
+    .flatMap((entry) => {
+      const layer = layers.get(entry.id);
       return layer && (!layer.scope || layer.scope === activePaneId)
         ? [layer]
         : [];
@@ -477,6 +519,11 @@ export function KeymapProvider({
     .reduce<KeyLayer[]>(
       (kept, layer) => (layer.modal ? [layer] : [...kept, layer]),
       [],
+    )
+    .filter(
+      (layer) =>
+        layer.bindings.some((binding) => binding.help?.length) ||
+        (layer.docs && layer.docs.length > 0),
     );
 
   return (
@@ -487,9 +534,7 @@ export function KeymapProvider({
           layers={reachable.map((layer) => ({
             id: layer.id,
             bindings: [
-              ...layer.bindings.flatMap((binding) =>
-                binding.help ? [binding.help] : [],
-              ),
+              ...layer.bindings.flatMap((binding) => binding.help ?? []),
               ...(layer.docs ?? []),
             ],
           }))}

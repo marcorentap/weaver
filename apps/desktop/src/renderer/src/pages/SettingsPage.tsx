@@ -1309,23 +1309,23 @@ export default function SettingsPage() {
       ...viewport,
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j / <n>j", label: "Next setting, <n> at a time" },
+        help: [{ keys: "↓ / j / <n>j", label: "Next setting, <n> at a time" }],
         run: (count = 1) => move(count),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: {
+        help: [{
           keys: "↑ / k / <n>k",
           label: "Previous setting, <n> at a time",
-        },
+        }],
         run: (count = 1) => move(-count),
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: {
+        help: [{
           keys: "← / h",
           label: row?.kind === "group" ? "Close section" : "Previous value",
-        },
+        }],
         run: () => {
           if (row?.kind === "group") {
             // Only closing shuts a section; `h` on an already folded group
@@ -1338,10 +1338,10 @@ export default function SettingsPage() {
       },
       {
         keys: ["ArrowRight", "l"],
-        help: {
+        help: [{
           keys: "→ / l",
           label: row?.kind === "group" ? "Open section" : "Next value",
-        },
+        }],
         run: () => {
           if (row?.kind === "group") {
             // Unfold, or step into the first row once it is already open,
@@ -1355,7 +1355,7 @@ export default function SettingsPage() {
       },
       {
         keys: ["Enter"],
-        help: {
+        help: [{
           keys: "enter",
           label:
             row?.kind === "group"
@@ -1363,7 +1363,7 @@ export default function SettingsPage() {
               : def?.kind === "action"
                 ? "Run"
                 : "Type a value",
-        },
+        }],
         run: () =>
           row?.kind === "group"
             ? toggleGroup(row.key)

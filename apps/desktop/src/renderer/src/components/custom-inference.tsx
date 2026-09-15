@@ -329,38 +329,38 @@ export function CustomInferenceDialog({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "Next row" },
+        help: [{ keys: "↓ / j", label: "Next row" }],
         run: () => move(1),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "Previous row" },
+        help: [{ keys: "↑ / k", label: "Previous row" }],
         run: () => move(-1),
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: {
+        help: [{
           keys: "← / h",
           label: row?.kind === "option" ? "Previous value" : "Previous row",
-        },
+        }],
         run: () =>
           row?.kind === "option" && editing === null ? cycle(-1) : move(-1),
       },
       {
         keys: ["ArrowRight", "l"],
-        help: {
+        help: [{
           keys: "→ / l",
           label: row?.kind === "option" ? "Next value" : "Next row",
-        },
+        }],
         run: () =>
           row?.kind === "option" && editing === null ? cycle(1) : move(1),
       },
       {
         keys: ["Enter"],
-        help: {
+        help: [{
           keys: "enter",
           label: row?.kind === "action" ? "Run" : "Type a value",
-        },
+        }],
         run: () => {
           if (!row) return;
           if (row.kind === "action") submit();
@@ -369,7 +369,7 @@ export function CustomInferenceDialog({
       },
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "Close" },
+        help: [{ keys: "esc", label: "Close" }],
         run: onCancel,
       },
     ],

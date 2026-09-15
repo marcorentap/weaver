@@ -66,22 +66,22 @@ export function KeyMenu({
     bindings: [
       {
         keys: ["ArrowDown", "j"],
-        help: { keys: "↓ / j", label: "Next item" },
+        help: [{ keys: "↓ / j", label: "Next item" }],
         run: () => move(1),
       },
       {
         keys: ["ArrowUp", "k"],
-        help: { keys: "↑ / k", label: "Previous item" },
+        help: [{ keys: "↑ / k", label: "Previous item" }],
         run: () => move(-1),
       },
       {
         keys: ["Enter"],
-        help: { keys: "enter", label: "Run selected item" },
+        help: [{ keys: "enter", label: "Run selected item" }],
         run: () => items[index]?.run(),
       },
       {
         keys: ["Escape"],
-        help: { keys: "esc", label: "Close" },
+        help: [{ keys: "esc", label: "Close" }],
         run: onClose,
       },
       ...items.flatMap((item) =>
@@ -89,10 +89,10 @@ export function KeyMenu({
           ? [
               {
                 keys: [item.key],
-                help: {
+                help: [{
                   keys: item.keyLabel ?? item.key,
                   label: item.label,
-                },
+                }],
                 run: item.run,
               },
             ]
