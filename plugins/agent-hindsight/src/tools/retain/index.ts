@@ -20,11 +20,6 @@ export const retainTool: PluginTool = {
       description:
         "The fact or event to remember, as a standalone statement.",
     }),
-    bank: Type.Optional(
-      Type.String({
-        description: "Memory bank to store into. Defaults to the bank configured in Settings.",
-      }),
-    ),
     context: Type.Optional(
       Type.String({
         description: "Where this fact came from, e.g. '4, 2024 project review'.",
@@ -47,7 +42,7 @@ export const retainTool: PluginTool = {
       throw new Error("hindsight_retain needs `content`: the fact to store");
     }
     const { client, defaultBank } = connectHindsight(ctx);
-    const bank = resolveBank(args.bank, { client, defaultBank });
+    const bank = resolveBank({ client, defaultBank });
     const context = typeof args.context === "string" ? args.context : undefined;
     const timestamp = typeof args.timestamp === "string" ? args.timestamp : undefined;
     const tags = Array.isArray(args.tags)

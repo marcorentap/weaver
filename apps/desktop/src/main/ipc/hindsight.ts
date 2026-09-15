@@ -25,7 +25,7 @@ export function registerHindsightHandlers(): void {
     }
     try {
       const { client, defaultBank } = connectHindsight({ getSetting });
-      const bank = resolveBank(undefined, { client, defaultBank });
+      const bank = resolveBank({ client, defaultBank });
       await client.retain(bank, content.trim(), { async: true });
       return { ok: true, bank };
     } catch (error) {

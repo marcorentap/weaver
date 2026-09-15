@@ -34,11 +34,6 @@ export const listMemoriesTool: PluginTool = {
   description:
     "List the memories stored in a Hindsight bank as they are saved, with pagination and optional text/type filters. Use it to inspect or audit what the bank holds, not to answer a question — `hindsight_recall` is the search tool.",
   parameters: Type.Object({
-    bank: Type.Optional(
-      Type.String({
-        description: "Memory bank to list from. Defaults to the bank configured in Settings.",
-      }),
-    ),
     q: Type.Optional(
       Type.String({
         description: "Optional text filter; returns memories whose content matches.",
@@ -60,7 +55,7 @@ export const listMemoriesTool: PluginTool = {
   }) as unknown as Record<string, unknown>,
   execute: async (args, ctx) => {
     const { client, defaultBank } = connectHindsight(ctx);
-    const bank = resolveBank(args.bank, { client, defaultBank });
+    const bank = resolveBank({ client, defaultBank });
     const q = typeof args.q === "string" && args.q.trim() ? args.q.trim() : undefined;
     const type =
       typeof args.type === "string" ? (args.type as "world" | "experience" | "observation") : undefined;

@@ -23,11 +23,6 @@ export const recallTool: PluginTool = {
       description:
         "What to find, phrased as a question or a description of the missing information.",
     }),
-    bank: Type.Optional(
-      Type.String({
-        description: "Memory bank to search. Defaults to the bank configured in Settings.",
-      }),
-    ),
     types: Type.Optional(
       Type.Array(
         Type.Union([
@@ -64,7 +59,7 @@ export const recallTool: PluginTool = {
       throw new Error("hindsight_recall needs `query`: what to search the bank for");
     }
     const { client, defaultBank } = connectHindsight(ctx);
-    const bank = resolveBank(args.bank, { client, defaultBank });
+    const bank = resolveBank({ client, defaultBank });
 
     const types =
       Array.isArray(args.types) && args.types.every((t) => FACT_TYPES.includes(t as never))

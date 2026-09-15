@@ -51,17 +51,14 @@ export function connectHindsight(ctx: ToolRunContext): HindsightConnection {
   };
 }
 
-/** Pick the bank a tool call targets: the call's own `bank` argument wins,
- *  then the configured default bank. Throws when neither is set. */
-export function resolveBank(
-  requested: unknown,
-  connection: HindsightConnection,
-): string {
-  const fromCall = typeof requested === "string" && requested.trim() ? requested.trim() : undefined;
-  const bank = fromCall ?? connection.defaultBank;
+/** Return the bank the plugin is configured to use. The tools always target
+ *  the configured default bank — there is no per-call bank argument.
+ *  Throws when none is configured. */
+export function resolveBank(connection: HindsightConnection): string {
+  const bank = connection.defaultBank;
   if (!bank) {
     throw new Error(
-      "no memory bank: pass a `bank` to this tool, or set one in Settings, the Agent Hindsight section (Bank Id)",
+      "no memory bank: set a Bank Id in Settings, the Agent Hindsight section",
     );
   }
   return bank;

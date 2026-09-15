@@ -54,9 +54,9 @@ export const agentHindsight = definePlugin({
     {
       kind: "string",
       key: "bankId",
-      label: "Default bank",
+      label: "Bank",
       description:
-        "Memory bank for the tools to use when the agent names no bank. Leave blank to make every tool require its own `bank` argument.",
+        "The memory bank the tools store to and read from.",
       placeholder: "assistant",
       validate: (value) =>
         /^[\w.-]*$/.test(value)

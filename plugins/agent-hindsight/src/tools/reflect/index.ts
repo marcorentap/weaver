@@ -19,11 +19,6 @@ export const reflectTool: PluginTool = {
     query: Type.String({
       description: "The question to answer from the bank's memories.",
     }),
-    bank: Type.Optional(
-      Type.String({
-        description: "Memory bank to reflect over. Defaults to the bank configured in Settings.",
-      }),
-    ),
     context: Type.Optional(
       Type.String({
         description:
@@ -42,7 +37,7 @@ export const reflectTool: PluginTool = {
       throw new Error("hindsight_reflect needs `question`: what to ask the bank");
     }
     const { client, defaultBank } = connectHindsight(ctx);
-    const bank = resolveBank(args.bank, { client, defaultBank });
+    const bank = resolveBank({ client, defaultBank });
     const context = typeof args.context === "string" ? args.context : undefined;
     const budget =
       typeof args.budget === "string" && (BUDGETS as readonly string[]).includes(args.budget)
