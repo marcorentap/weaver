@@ -1,9 +1,5 @@
 import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import {
-  detectProvider,
-  type ProviderField,
-} from "@shared/provider-routing.js";
 import { THINKING_LEVEL_OPTIONS } from "@/lib/settings";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
@@ -129,7 +125,7 @@ export function CustomInferenceDialog({
     noThemes?: boolean;
     noContextFiles?: boolean;
   };
-  onRun: (run: CustomInferenceRun) => void;
+  onRun: (run: Partial<CustomInferenceRun>) => void;
   onCancel: () => void;
   /** The `S` summarization dialog's initial agentic state. Undefined means
    *  the run cannot go plain (the `X` inference dialog, always an agent
@@ -252,7 +248,7 @@ export function CustomInferenceDialog({
     // `summAgent` setting it prefills from).
     ...(agentic === undefined
       ? []
-      : [
+      : ([
           {
             key: "agentic",
             kind: "option",
@@ -263,7 +259,7 @@ export function CustomInferenceDialog({
             value: isAgentic ? "on" : "off",
             onChange: (value) => setIsAgentic(value === "on"),
           },
-        ]),
+        ] satisfies RowDef[])),
     // What pi's DefaultResourceLoader loads for this run, same rows the
     // settings page's "Inference settings" section shows; skipped for a
     // plain run, which has no loader. On/off here reads as the feature it
