@@ -651,6 +651,9 @@ function ChatView({
   const [showEverything, setShowEverything] = useState(false);
   const [popup, setPopup] = useState<Popup>(null);
   const [saving, setSaving] = useState(false);
+  /** True while the session menu's `R` generate-title call is in flight:
+   *  the rename row is disabled and the header title pulses. */
+  const [generatingTitle, setGeneratingTitle] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Where a pending "new block" flow will land, chosen before the kind and
    *  label are; `pendingKind` is the kind picked in the step after. */
@@ -1532,6 +1535,46 @@ function ChatView({
     setPopup(null);
   };
 
+  /** The session menu's `R` action: ask the model to name the session from
+   *  its graph context, then rename it to the result. A plain read-only
+   *  call (the engine's `generateTitle`) — nothing is streamed into the
+   *  graph or locked. Falls back to the inference settings exactly like an
+   *  inference run, so a fresh install that only configured one provider
+   *  gets a working title out of it. While it is in flight `generatingTitle`
+   *  is true, which dims the rename row and pulses the header title, so the
+   *  busy window reads as what it is instead of silently ignoring keys. */
+  const generateSessionTitle = async () => {
+    if (!session) return;
+    const {
+      aiEndpoint,
+      aiApiKey,
+      aiProviderSettings,
+      inferDefaultModel,
+      inferThinkingLevel,
+    } = settings;
+    const provider = detectProvider(aiEndpoint);
+    setGeneratingTitle(true);
+    try {
+      const title = await engine.generateTitle({
+        endpoint: aiEndpoint,
+        apiKey: aiApiKey,
+        model: inferDefaultModel,
+        thinkingLevel: inferThinkingLevel || undefined,
+        providerId: provider?.id,
+        providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
+      });
+      if (!title) {
+        setError("couldn't generate a title");
+        return;
+      }
+      if (title === liveSessionName) return;
+      const result = await renameSessionMutation(session.id, title);
+      if (result.error) setError(result.error);
+    } finally {
+      setGeneratingTitle(false);
+    }
+  };
+
   /**
    * The enter menu. Whatever the kind declares (preview, editable fields,
    * configure) comes first, then the actions every block has (copy id,
@@ -1973,10 +2016,20 @@ function ChatView({
           {
             label: "Rename session",
             key: "r",
-            detail: liveSessionName ?? "Untitled",
+            disabled: generatingTitle,
             run: () => {
               setError(null);
               setPopup({ kind: "renameSession" });
+            },
+          },
+          {
+            label: "Rename session from content",
+            key: "R",
+            disabled: generatingTitle,
+            run: () => {
+              setError(null);
+              setPopup(null);
+              void generateSessionTitle();
             },
           },
           {
@@ -2054,7 +2107,7 @@ function ChatView({
       <ShellHeader>
         <header className="flex items-center gap-3 border-b px-3 py-1">
           <span className="font-semibold">Chat</span>
-          <span className="text-muted-foreground">
+          <span className={cn("text-muted-foreground", generatingTitle && "animate-pulse")}>
             {liveSessionName ?? "No session"}
           </span>
         </header>

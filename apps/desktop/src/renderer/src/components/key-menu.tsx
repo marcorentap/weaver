@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Lock } from "lucide-react";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
@@ -9,6 +10,11 @@ export type KeyMenuItem = {
   detail?: string;
   /** Optional direct shortcut, on top of arrow keys plus enter. */
   key?: string;
+  /** When true the item reads as locked: dimmed with a lock glyph, skipped
+   *  by cursor navigation, and its key and enter both no-op — shown rather
+   *  than removed so the row it guards stays visible while a sibling
+   *  action is in flight. */
+  disabled?: boolean;
   /** How `key` reads as a label, for keys that aren't a printable
    *  character — the space bar is `" "` at the keyboard but `"⎵"` in the
    *  gutter and help. */
@@ -55,8 +61,16 @@ export function KeyMenu({
   const move = (delta: number) => {
     if (items.length === 0) return;
     setCursor((current) => {
-      const next = Math.min(current, items.length - 1) + delta;
-      return (next + items.length) % items.length;
+      if (items.every((item) => item.disabled)) return current;
+      let next = Math.min(current, items.length - 1) + delta;
+      // Hop over disabled rows, so the cursor never rests on an action
+      // enter cannot run. Wraps, and stays put if everything is locked.
+      for (let i = 0; i < items.length; i++) {
+        next = ((next % items.length) + items.length) % items.length;
+        if (!items[next]?.disabled) return next;
+        next += delta;
+      }
+      return current;
     });
   };
 
@@ -77,7 +91,7 @@ export function KeyMenu({
       {
         keys: ["Enter"],
         help: [{ keys: "enter", label: "Run selected item" }],
-        run: () => items[index]?.run(),
+        run: () => (items[index]?.disabled ? undefined : items[index]?.run()),
       },
       {
         keys: ["Escape"],
@@ -93,7 +107,7 @@ export function KeyMenu({
                   keys: item.keyLabel ?? item.key,
                   label: item.label,
                 }],
-                run: item.run,
+                run: item.disabled ? () => {} : item.run,
               },
             ]
           : [],
@@ -117,18 +131,26 @@ export function KeyMenu({
               <li key={item.label} aria-current={i === index}>
                 <button
                   type="button"
+                  disabled={item.disabled}
                   // Hovering moves the cursor, so the pointer and the keyboard
-                  // never disagree about which item is selected.
-                  onMouseEnter={() => setCursor(i)}
+                  // never disagree about which item is selected. A disabled
+                  // row isn't selectable, so hovering it leaves the cursor.
+                  onMouseEnter={() => !item.disabled && setCursor(i)}
                   onClick={item.run}
                   className={cn(
                     "flex w-full items-center gap-3 px-3 py-1 text-left",
                     i === index && "bg-muted text-foreground",
                     item.destructive && "text-destructive",
+                    item.disabled &&
+                      "cursor-not-allowed opacity-60 text-muted-foreground",
                   )}
                 >
                   <span className="w-8 shrink-0 text-muted-foreground">
-                    {item.keyLabel ?? item.key ?? " "}
+                    {item.disabled ? (
+                      <Lock className="size-3" />
+                    ) : (
+                      item.keyLabel ?? item.key ?? " "
+                    )}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {item.detail ? (

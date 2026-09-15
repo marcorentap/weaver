@@ -16,6 +16,7 @@ import {
   removeBlock,
   snapshotAbove,
   snapshotBlock,
+  snapshotGraph,
   TEXT_KIND,
 } from "@repo/core";
 // Type-only: `@repo/store` reaches for node:sqlite, so a value import here
@@ -34,6 +35,13 @@ import type { ThinkingLevel } from "@shared/agent-events.js";
  * not in the block, because the action is the summary itself — the anchor
  * is the thing to compress, not a reason to answer.
  */
+const TITLE_PROMPT = [
+  "The content below is a graph of blocks — this session's document.",
+  "Name the session: a short label, a few words, that tells what it is about.",
+  "Read it from the content, not a generic phrase.",
+  "Reply with only the title, no preamble or quotes.",
+].join("\n");
+
 const SUMMARIZE_PROMPT = [
   "Summarize the text below.",
   "Write in plain style: short, matter-of-fact sentences, no filler, no cliches, no formulaic transition phrases, no decorative adjectives.",
@@ -146,6 +154,13 @@ export type LiveGraph = {
     take: BlockId[],
     options: RunConnection,
   ) => Promise<void>;
+  /** Name the whole session from its graph context: a plain read-only LLM
+   *  call that flattens the visible graph, asks the model for a short
+   *  title, and returns it — or null when the graph is empty, the call
+   *  fails, or the model answers with nothing. Nothing is written or
+   *  appended; the caller renames the session to the result (`R` in the
+   *  session menu does). */
+  generateTitle: (options: RunConnection) => Promise<string | null>;
   /** Apply an already-persisted field edit locally, so the row reflects it
    *  without waiting on a round trip back down. */
   updateField: (id: BlockId, name: string, value: string | number) => void;
@@ -802,6 +817,59 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     });
   }
 
+  /** Generate a short title for the whole session from its graph context.
+   *  `snapshotGraph` flattens every visible block into one `<content>`
+   *  (the same view an inference run's `<weaver_graph>` context provides, so
+   *  the title reads the document the model otherwise reasons over), and a
+   *  plain read-only LLM call names the session from it — no tools, no
+   *  graph writes, no reply blocks appended. The graph itself is untouched,
+   *  so nothing streams in and nothing needs locking or undo. Returns the
+   *  produced title, or null when the graph is empty, the call fails, or
+   *  the model answers with nothing. The session menu's `R` action drives
+   *  it with the inference settings and renames the session to the result.
+   */
+  async function generateTitle(
+    connection: RunConnection,
+  ): Promise<string | null> {
+    const content = snapshotGraph(snapshot.graph, kinds);
+    if (!content.trim()) return null;
+    let title = "";
+    let failed = false;
+    const { done } = streamInference(
+      {
+        ...connection,
+        tools: connection.tools ?? [],
+        thinkingLevel: connection.thinkingLevel as ThinkingLevel | undefined,
+        context: "",
+        prompt: [
+          "<instruction>",
+          TITLE_PROMPT,
+          "</instruction>",
+          "",
+          "<content>",
+          content,
+          "</content>",
+        ].join("\n"),
+        plain: true,
+      },
+      (event) => {
+        if (event.type === "text_delta") {
+          title += event.text;
+        } else if (event.type === "text" && !title) {
+          // A non-streaming provider sends the whole answer in one `text`
+          // event; keep the accumulated deltas otherwise.
+          title = event.text;
+        } else if (event.type === "error") {
+          failed = true;
+        }
+      },
+    );
+    await done;
+    if (failed) return null;
+    const result = title.trim();
+    return result.length > 0 ? result : null;
+  }
+
   function abortRun(id: BlockId): boolean {
     const abort = runningAborts.get(id);
     if (!abort) return false;
@@ -819,6 +887,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     abortRun,
     runInference,
     summarize,
+    generateTitle,
     isLocked: (id) =>
       lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id),
     updateField(id, name, value) {
