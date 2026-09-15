@@ -119,6 +119,18 @@ export interface PluginListResult {
   plugins: PluginSummary[];
 }
 
+/** Result of `hindsight:retain`: the bank the item was queued to, or the
+ *  reason it could not be. Mirrors the agent's own `hindsight_retain` tool —
+ *  fire-and-forget, so nothing more than the target bank comes back. */
+export interface HindsightRetainResult {
+  ok: boolean;
+  /** The memory bank the content was queued into, on success. */
+  bank?: string;
+  /** Why the retain failed, on failure (misconfigured server, no bank,
+   *  or the server refused the item). */
+  error?: string;
+}
+
 /**
  * The renderer-facing API `contextBridge` exposes as `window.api`. Every
  * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair,
@@ -195,6 +207,13 @@ export interface WeaverApi {
       key: string,
       value: string,
     ): Promise<string | null>;
+  };
+  hindsight: {
+    /** Queue `content` for storage in the configured Hindsight memory bank,
+     *  without an agent run. Fire-and-forget, like the agent's own
+     *  `hindsight_retain` tool; resolves once the server acknowledges the
+     *  item. Returns which bank it was queued to, or the failure reason. */
+    retain(content: string): Promise<HindsightRetainResult>;
   };
   keymap: {
     /** A leader key the page's own keydown will never see because the main

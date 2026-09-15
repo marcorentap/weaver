@@ -6,6 +6,7 @@ import type {
 import type {
   CheckResult,
   CreateSessionResult,
+  HindsightRetainResult,
   LoadGraphResult,
   MutationResult,
   PluginListResult,
@@ -83,6 +84,13 @@ const api: WeaverApi = {
       ipcRenderer.invoke("plugins:validate", pluginId, key, value) as Promise<
         string | null
       >,
+  },
+  hindsight: {
+    retain: (content) =>
+      ipcRenderer.invoke(
+        "hindsight:retain",
+        content,
+      ) as Promise<HindsightRetainResult>,
   },
   keymap: {
     onChordLeader: (cb) => {

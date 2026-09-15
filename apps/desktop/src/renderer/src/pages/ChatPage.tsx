@@ -12,8 +12,11 @@ import { ChevronDown, ChevronRight, EyeOff, Lock, Plus } from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import {
   childIds,
+  findParent,
   GROUP_KIND,
   lastChildId,
+  snapshotBlock,
+  snapshotGraph,
   TEXT_KIND,
   textState,
   topLevelBlockIds,
@@ -73,6 +76,7 @@ type Popup =
   | { kind: "createUser" }
   | { kind: "createLabel" }
   | { kind: "renameSession" }
+  | { kind: "memory" }
   | null;
 
 /** One rendered row of the unfolded tree; media rows are taller than a line. */
@@ -654,6 +658,19 @@ function ChatView({
   /** True while the session menu's `R` generate-title call is in flight:
    *  the rename row is disabled and the header title pulses. */
   const [generatingTitle, setGeneratingTitle] = useState(false);
+  /** True while the memory menu's `r` retain is writing to the Hindsight
+   *  server: the row is disabled, so a second press can't double-queue. */
+  const [retaining, setRetaining] = useState(false);
+  /** The memory menu's one-shot outcome, a transient banner under the
+   *  header. Success confirms which bank the item went to; failure carries
+   *  the server's (or a misconfiguration's) reason. */
+  const [memoryFeedback, setMemoryFeedback] = useState<{
+    tone: "ok" | "error";
+    text: string;
+  } | null>(null);
+  /** Clears `memoryFeedback` after its lapse, so a later action never
+   *  inherits the previous retain's banner. */
+  const memoryTimerRef = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** Where a pending "new block" flow will land, chosen before the kind and
    *  label are; `pendingKind` is the kind picked in the step after. */
@@ -1234,6 +1251,14 @@ function ChatView({
         run: () => setPopup({ kind: "sessions" }),
       },
       {
+        keys: ["m"],
+        help: [{ keys: "m", label: "Memory" }],
+        run: () => {
+          setError(null);
+          setPopup({ kind: "memory" });
+        },
+      },
+      {
         keys: ["o"],
         help: [{ keys: "o", label: "Insert block after" }],
         run: () => beginCreate(row ? index + 1 : 0),
@@ -1572,6 +1597,84 @@ function ChatView({
       if (result.error) setError(result.error);
     } finally {
       setGeneratingTitle(false);
+    }
+  };
+
+  /** The memory menu's `r` action: queue the selected scope to the Hindsight
+   *  memory bank, without an agent run. With no visual selection the whole
+   *  graph is retained, wrapped exactly as an inference run's
+   *  `<weaver_graph>` context reads; with a selection only the selected
+   *  blocks are retained. A selected container carries its descendants, so a
+   *  child selected together with its own parent is not written twice. The
+   *  server's side is fire-and-forget (the plugin's retain tool is async), so
+   *  the menu closes and the outcome shows as a short banner under the
+   *  header either way. */
+  const retainMemory = async () => {
+    if (retaining) return;
+    setPopup(null);
+    setMemoryFeedback(null);
+    if (memoryTimerRef.current !== null) {
+      window.clearTimeout(memoryTimerRef.current);
+    }
+    const selected =
+      visualAnchor === null ? null : selectedRows.map((entry) => entry.block.id);
+    // Drop any selected block whose ancestor is also selected: its snapshot
+    // already carries everything nested under it, so keeping both would
+    // double the content. The topmost selected blocks are the whole scope.
+    const scope =
+      selected === null
+        ? null
+        : selected.filter((id) => {
+            for (
+              let parent = findParent(graph, id);
+              parent !== null;
+              parent = findParent(graph, parent)
+            ) {
+              if (selected.includes(parent)) return false;
+            }
+            return true;
+          });
+    const serialized =
+      scope === null
+        ? snapshotGraph(graph, kinds)
+        : scope
+            .map((id) => snapshotBlock(graph, id, kinds))
+            .filter((text) => text.length > 0)
+            .join("\n\n");
+    if (!serialized.trim()) {
+      setMemoryFeedback({
+        tone: "error",
+        text:
+          scope === null
+            ? "session is empty, nothing to retain"
+            : "selection is empty, nothing to retain",
+      });
+      return;
+    }
+    // Shape it the way the agent reads a graph — the `<weaver_graph>` wrapper —
+    // so a recalled memory is recognizably the document it came from.
+    const payload = ["<weaver_graph>", serialized, "</weaver_graph>"].join("\n");
+    setRetaining(true);
+    try {
+      const result = await window.api.hindsight.retain(payload);
+      setMemoryFeedback(
+        result.ok
+          ? { tone: "ok", text: `retained to memory bank "${result.bank}"` }
+          : { tone: "error", text: result.error ?? "retain failed" },
+      );
+    } catch (error) {
+      setMemoryFeedback({
+        tone: "error",
+        text: error instanceof Error ? error.message : "retain failed",
+      });
+    } finally {
+      setRetaining(false);
+      // The banner is transient; let it lapse so a later action doesn't read
+      // as if it belonged to this one.
+      memoryTimerRef.current = window.setTimeout(
+        () => setMemoryFeedback(null),
+        4000,
+      );
     }
   };
 
@@ -2102,6 +2205,22 @@ function ChatView({
     })),
   ];
 
+  /** The memory menu (`m`). One action so far: queue the session — the whole
+   *  session, or just the visual selection — to the Hindsight memory bank. The
+   *  row locks while the retain is in flight so a press can't double-queue. */
+  const memoryItems: KeyMenuItem[] = [
+    {
+      label: "Retain content to memory",
+      key: "r",
+      disabled: retaining,
+      detail:
+        visualAnchor === null
+          ? "whole session"
+          : `${selectedRows.length} block${selectedRows.length === 1 ? "" : "s"}`,
+      run: () => void retainMemory(),
+    },
+  ];
+
   return (
     <div ref={listRef} className="flex min-h-full flex-col">
       <ShellHeader>
@@ -2112,6 +2231,19 @@ function ChatView({
           </span>
         </header>
       </ShellHeader>
+
+      {memoryFeedback ? (
+        <div
+          className={cn(
+            "border-b px-3 py-1 text-sm",
+            memoryFeedback.tone === "error"
+              ? "border-destructive/30 bg-destructive/10 text-destructive"
+              : "border-emerald-400/30 bg-emerald-400/10 text-emerald-400",
+          )}
+        >
+          {memoryFeedback.text}
+        </div>
+      ) : null}
 
       {rows.length === 0 ? (
         <>
@@ -2187,6 +2319,15 @@ function ChatView({
           id="sessions"
           title="Recent sessions"
           items={sessionItems}
+          onClose={() => setPopup(null)}
+        />
+      ) : null}
+
+      {popup?.kind === "memory" ? (
+        <KeyMenu
+          id="memory"
+          title="Memory"
+          items={memoryItems}
           onClose={() => setPopup(null)}
         />
       ) : null}

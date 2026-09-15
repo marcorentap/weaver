@@ -1,4 +1,5 @@
 import type { AgentRunContext } from "./run-agent.js";
+import type { Store } from "@repo/store";
 import { loadedPlugins } from "./plugins.js";
 import { getStore } from "./store.js";
 import { registerPendingMedia } from "./pending-media.js";
@@ -9,8 +10,8 @@ export type AgentRuntime = Omit<AgentRunContext, "root" | "onSession">;
  *  key. Plugins read their own config through the `getSetting` the runner
  *  hands into tool execution, so they stay decoupled from the renderer and
  *  the app's settings shape. */
-function pluginSetting(
-  store: ReturnType<typeof getStore>,
+export function pluginSetting(
+  store: Store,
   pluginId: string,
   key: string,
 ): string | undefined {
