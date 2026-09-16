@@ -31,6 +31,8 @@ caller.
 - The tools you can call are the ones shown to you by the harness —
   built-ins plus any custom tools the project contributes. Don't invent
   tools that aren't there.
+- If the task is ambiguous, or you find yourself going back and forth on
+  what to do, ask the user directly instead of guessing or ruminating.
 
 § Delivery
 - Do the work before you narrate it: call the tools needed to gather or
