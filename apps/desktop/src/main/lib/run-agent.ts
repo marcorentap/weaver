@@ -228,17 +228,22 @@ function messageFailure(message: unknown): string | null {
   );
 }
 
-/** A turn the agent loop actually treats as fatal: only `stopReason ===
- *  "error"`. pi-agent-core's `runLoop` returns exactly on `"error"` and
- *  `"aborted"` (`"aborted"` is Ctrl+C, already normal); every other stop
- *  reason — including one `messageFailure` would flag, like `"pending"` or a
- *  leftover streaming reason — does NOT stop the loop, the agent proceeds to
- *  another turn. Emitting a run-level `error` for one of those (the renderer
- *  treats an `error` event as terminal) would have the UI declare the run
- *  finished while the agent kept working in the background, so a weaver agent
- *  run must mirror the loop and surface only its real terminal failure. The
- *  plain-LLM path keeps the broader `messageFailure`, because a single
- *  completion has no loop to continue after an odd stop reason. */
+/** A turn the agent loop treats as fatal: only `stopReason === "error"`.
+ *  pi-agent-core's `runLoop` returns on `"error"` and `"aborted"`
+ *  (`"aborted"` is Ctrl+C, already normal); every other stop reason — like
+ *  `"pending"` or a leftover streaming reason — does NOT stop the loop, the
+ *  agent proceeds to another turn. That alone was why a run-level `error`
+ *  (which the renderer treats as terminal) could only be justified for a
+ *  real `"error"`. It is still not enough on its own: the session decorates
+ *  that loop with auto-retry, so an `"error"` turn for a retryable fault
+ *  (rate limit, load, server error) is followed by pi's own backoff-and-
+ *  continue rather than by the loop ending. This helper therefore only
+ *  *records* whether a message ended in an error (`emit`-ing it here would
+ *  declare the run over while the session still worked in the background);
+ *  `runAgent` terminalizes on the settled run using the last value it set.
+ *  The plain-LLM path keeps `messageFailure`, which keeps emitting directly,
+ *  because a single completion has no loop — and no auto-retry — to resume
+ *  after an odd stop reason. */
 function turnFailure(message: unknown): string | null {
   const parsed = contentParts.safeParse(message);
   if (!parsed.success || parsed.data.role !== "assistant") return null;
@@ -834,6 +839,18 @@ export async function runAgent(
     // inline image can render mid-stream, well before `message_end`. Reset
     // per assistant message, since a run may take several turns.
     let assistantText = "";
+    // The failure of the run's final assistant turn, if any. Recorded from
+    // `message_end` rather than emitted on the spot: a `stopReason` of
+    // `"error"` is not necessarily the end. pi auto-retries retryable
+    // errors (rate limits, load, server faults) with its own backoff and
+    // continues the loop, so emitting a terminal `error` the moment such a
+    // message ends would make the harness show the run as finished while
+    // the session kept working in the background. The terminal event is only
+    // sent once the run's last turn is actually over (see the tail of
+    // `runAgent`), so the run cannot stop being shown as running until the
+    // agent really settles. A successful retry clears this and the run ends
+    // `done`.
+    let runFailure: string | null = null;
     const unsubscribe = session.subscribe((sessionEvent) => {
       if (sessionEvent.type === "tool_execution_start") {
         const entry = {
@@ -882,9 +899,9 @@ export async function runAgent(
       }
       if (sessionEvent.type === "message_end") {
         assistantText = "";
-        const failure = turnFailure(sessionEvent.message);
-        if (failure) {
-          emit({ type: "error", message: failure });
+        runFailure = turnFailure(sessionEvent.message);
+        if (runFailure !== null) {
+          // An errored turn has nothing to read, and may still be retried.
           return;
         }
         const thinking = messageThinking(sessionEvent.message);
@@ -967,7 +984,15 @@ export async function runAgent(
     }
     unsubscribe();
     session.dispose();
-    emit({ type: "done" });
+    // The one terminal event, sent only now that the agent's loop has
+    // actually settled: `done` on a clean finish, `error` when the final
+    // turn failed (after any retries pi attempted exhausted or gave up).
+    // Emitting it earlier — the moment a `message_end` with an `"error"`
+    // stop reason arrived — used to make the harness declare the run over
+    // while the session retried in the background; nothing after this line
+    // can still be running, so the run and what it shows stay in agreement.
+    if (runFailure !== null) emit({ type: "error", message: runFailure });
+    else emit({ type: "done" });
   } catch (error) {
     emit({
       type: "error",
