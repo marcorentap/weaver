@@ -48,6 +48,11 @@ export interface LinkOption {
   value: string;
   label?: string;
   detail?: string;
+  /** Accepting this does not finish the link: the menu stays open on the
+   *  written value so it can be narrowed further. Set by a provider whose
+   *  candidates nest — a `@file:` directory, which is a prefix to keep
+   *  typing into, not a finished value. */
+  expand?: boolean;
 }
 
 export interface ChatSessionSummary {
@@ -243,11 +248,7 @@ export interface WeaverApi {
      *  the merged environment at the block being edited, so `@file:`
      *  completes against that block's project rather than a fixed root;
      *  undefined leaves the provider at the process's own project root. */
-    search(
-      type: string,
-      query: string,
-      pwd?: string,
-    ): Promise<LinkOption[]>;
+    search(type: string, query: string, pwd?: string): Promise<LinkOption[]>;
   };
   hindsight: {
     /** Queue `content` for storage in the configured Hindsight memory bank,

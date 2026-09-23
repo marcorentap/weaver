@@ -61,9 +61,11 @@ type Item = {
   key: string;
   label: string;
   detail?: string;
-  /** `type` writes `@id:` and stays open for the value; `option` writes the
-   *  whole `@id:value` and closes. */
-  part: "type" | "option";
+  /** `type` writes `@id:` and stays open for the value; `expand` writes the
+   *  whole `@id:value` with no trailing space and stays open, because the
+   *  value nests (a directory); `option` writes the whole link with a
+   *  trailing space and closes it. */
+  part: "type" | "expand" | "option";
   value: string;
 };
 
@@ -105,7 +107,7 @@ export function LinkInput({
   pwd?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
-  const types = useLinkTypes();
+  const { types, failed: typesFailed } = useLinkTypes();
 
   const [caret, setCaret] = useState(value.length);
   /** The highlighted row, paired with the value it was chosen for. A new
@@ -117,12 +119,15 @@ export function LinkInput({
   });
   /** Value options with the query they answered, so a slow search cannot
    *  show the previous type's results while the next one is in flight. The
-   *  root is tagged too: a `pwd` change re-roots the search. */
+   *  root is tagged too: a `pwd` change re-roots the search. `failed`
+   *  distinguishes a rejected search from a search that found nothing —
+   *  both leave `options` empty, and only one is worth telling the user. */
   const [results, setResults] = useState<{
     typeId: string;
     query: string;
     pwd: string | undefined;
     options: LinkOption[];
+    failed: boolean;
   } | null>(null);
   /** Signature of the token esc dismissed, so it stays closed while the
    *  caret sits in that same token and reopens as soon as it changes. */
@@ -156,11 +161,24 @@ export function LinkInput({
     const timer = setTimeout(() => {
       void searchLinkOptions(typeId, valueQuery, pwd)
         .then((options) => {
-          if (!cancelled) setResults({ typeId, query: valueQuery, pwd, options });
+          if (!cancelled)
+            setResults({
+              typeId,
+              query: valueQuery,
+              pwd,
+              options,
+              failed: false,
+            });
         })
         .catch(() => {
           if (!cancelled)
-            setResults({ typeId, query: valueQuery, pwd, options: [] });
+            setResults({
+              typeId,
+              query: valueQuery,
+              pwd,
+              options: [],
+              failed: true,
+            });
         });
     }, DEBOUNCE_MS);
     return () => {
@@ -169,15 +187,16 @@ export function LinkInput({
     };
   }, [typeId, valueQuery, pwd]);
 
-  const optionsForCurrentQuery =
+  const resolved =
     results &&
     results.typeId === typeId &&
     results.query === valueQuery &&
     results.pwd === pwd
-      ? results.options
+      ? results
       : null;
-  const options = optionsForCurrentQuery ?? NO_OPTIONS;
-  const loading = typeId !== null && optionsForCurrentQuery === null;
+  const options = resolved?.options ?? NO_OPTIONS;
+  const loading = typeId !== null && resolved === null;
+  const failed = resolved?.failed ?? false;
 
   const items: Item[] = useMemo(() => {
     if (!token) return [];
@@ -194,7 +213,7 @@ export function LinkInput({
       key: `${option.label ?? option.value}\u0000${option.value}`,
       label: option.label ?? option.value,
       detail: option.detail,
-      part: "option" as const,
+      part: option.expand ? ("expand" as const) : ("option" as const),
       value: option.value,
     }));
   }, [token, typeMatches, options]);
@@ -206,12 +225,29 @@ export function LinkInput({
     signature !== null && signature !== dismissed && items.length > 0;
   const active = items.length > 0 ? Math.min(selected, items.length - 1) : 0;
 
+  /** What the menu says instead of rows: a fetch in flight, or a failure
+   *  worth naming. Silence would be read as "no matches", which is a
+   *  different thing from a provider that never answered. */
+  const notice =
+    open || token === null
+      ? null
+      : typeId !== null
+        ? failed
+          ? "link search failed"
+          : loading
+            ? "searching…"
+            : null
+        : typesFailed
+          ? "link types unavailable"
+          : null;
+
   const commit = (item: Item) => {
     if (!token) return;
+    const staysOpen = item.part !== "option";
     const replacement =
       item.part === "type"
         ? `@${item.value}:`
-        : `@${token.typeId}:${item.value} `;
+        : `@${token.typeId}:${item.value}${staysOpen ? "" : " "}`;
     const nextValue =
       value.slice(0, token.start) + replacement + value.slice(token.end);
     const nextCaret = token.start + replacement.length;
@@ -322,9 +358,16 @@ export function LinkInput({
             </li>
           ))}
         </ul>
-      ) : loading && valueQuery !== undefined ? (
-        <div className="absolute top-full right-0 left-0 z-10 mt-1 border bg-background px-2 py-1 text-muted-foreground shadow-lg">
-          searching…
+      ) : notice ? (
+        <div
+          className={cn(
+            "absolute top-full right-0 left-0 z-10 mt-1 border bg-background px-2 py-1 shadow-lg",
+            notice === "searching…"
+              ? "text-muted-foreground"
+              : "text-destructive",
+          )}
+        >
+          {notice}
         </div>
       ) : null}
     </div>
