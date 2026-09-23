@@ -4,12 +4,14 @@ import { Type } from "typebox";
 import { z } from "zod";
 import {
   createAgentSession,
-  DefaultResourceLoader,
   defineTool,
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
-import type { OpenRouterRouting } from "@earendil-works/pi-ai";
+import {
+  InMemoryCredentialStore,
+  type OpenRouterRouting,
+} from "@earendil-works/pi-ai";
 import { WEAVER_PWD, type KindRegistry } from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
@@ -25,18 +27,23 @@ import { readSource } from "./read-source.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
-
-/** Config directory handed to the agent. Sessions are in-memory and every
- *  discovery pass is disabled, so nothing is actually read from it. */
-const AGENT_DIR = "/tmp/weaver-agent";
+import { AGENT_DIR } from "./agent-dir.js";
+import {
+  createAgentResourceLoader,
+  createAgentSettings,
+} from "./agent-resources.js";
 
 /**
- * What pi's own `DefaultResourceLoader` loads for a run when the request
- * doesn't say: extensions, skills and project context files are part of a
- * weaver block's context (the graph + prompt handle those), so they default
- * on; pi's prompt templates and themes would change how surrounding weaver
- * chrome renders, so they stay off. The `X` modal and the settings page's
- * "Inference settings" section override these per run / app-wide.
+ * What a run gets when the request doesn't say. Extensions, skills and
+ * project context files are part of a weaver block's context (the graph +
+ * prompt handle those), so they default on; pi's prompt templates and themes
+ * would change how surrounding weaver chrome renders, so they stay off. The
+ * `X` modal and the settings page's "Inference settings" section override
+ * these per run / app-wide.
+ *
+ * Each of the first four is a *weaver* resource kind, discovered from
+ * `~/.agents` and `<cwd>/.agents` — never from pi's own directories. See
+ * `createAgentResourceLoader`.
  */
 const DISCOVERY_DEFAULTS = {
   noExtensions: false,
@@ -381,9 +388,14 @@ export async function runAgent(
 
   try {
     const modelRuntime = await ModelRuntime.create({
-      // Nothing on disk: the endpoint and key come from the caller's
-      // settings, and a catalog refresh per run would be a wasted round
-      // trip for a provider list nobody reads.
+      // Weaver keeps no model credentials on disk: the endpoint and key
+      // arrive with the run, and nothing persists them afterwards. An
+      // in-memory store is what keeps pi's default file-backed auth — and
+      // with it the `~/.pi/agent/auth.json` path that default resolves to —
+      // out of the process entirely. With no `modelsPath` either, the
+      // catalog refresh per run (a wasted round trip for a provider list
+      // nobody reads) never happens.
+      credentials: new InMemoryCredentialStore(),
       modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,
@@ -605,25 +617,20 @@ export async function runAgent(
         : resolve(ctx.root, weaverPwd)
       : ctx.root;
 
-    const resourceLoader = new DefaultResourceLoader({
+    const settingsManager = createAgentSettings(cwd);
+    const resourceLoader = createAgentResourceLoader({
       cwd,
-      agentDir: AGENT_DIR,
-      // A weaver agent's instructions are its prompt plus the graph above
-      // it. pi's own prompt templates and themes are not part of that and
-      // would silently change what a block does, so they're off by default
-      // (see `DISCOVERY_DEFAULTS`); extensions, skills and context files
-      // load unless the run (or the app's inference settings) opts out.
-      noExtensions: body.noExtensions ?? DISCOVERY_DEFAULTS.noExtensions,
-      noSkills: body.noSkills ?? DISCOVERY_DEFAULTS.noSkills,
-      noPromptTemplates:
-        body.noPromptTemplates ?? DISCOVERY_DEFAULTS.noPromptTemplates,
-      noThemes: body.noThemes ?? DISCOVERY_DEFAULTS.noThemes,
-      noContextFiles: body.noContextFiles ?? DISCOVERY_DEFAULTS.noContextFiles,
-      // A replacement, not an append: pi's default prompt (CLI-agent
-      // phrasing, SDK-built tool list) is replaced wholesale; this file is
-      // the whole system prompt. Tools still reach the model through the
-      // SDK's own tool array, so nothing about the tool list is lost.
+      settingsManager,
       systemPrompt: WEAVER_SYSTEM_PROMPT,
+      resources: {
+        extensions: !(body.noExtensions ?? DISCOVERY_DEFAULTS.noExtensions),
+        skills: !(body.noSkills ?? DISCOVERY_DEFAULTS.noSkills),
+        prompts: !(
+          body.noPromptTemplates ?? DISCOVERY_DEFAULTS.noPromptTemplates
+        ),
+        themes: !(body.noThemes ?? DISCOVERY_DEFAULTS.noThemes),
+      },
+      noContextFiles: body.noContextFiles ?? DISCOVERY_DEFAULTS.noContextFiles,
     });
     await resourceLoader.reload();
 
@@ -815,6 +822,7 @@ export async function runAgent(
         Parameters<typeof createAgentSession>[0]
       >["thinkingLevel"],
       resourceLoader,
+      settingsManager,
       sessionManager: SessionManager.inMemory(cwd),
       tools: [...tools, displayMedia.name],
       customTools: [displayMedia, ...mountedPluginTools, read, write, edit],
