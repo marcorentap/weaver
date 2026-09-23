@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { BlockField } from "@/blocks/views";
 import { ModalFrame } from "@/components/modal-frame";
+import { LinkInput } from "@/components/link-input";
 import { useKeyLayer } from "@/lib/keymap";
 
 /**
@@ -18,6 +19,7 @@ export function FieldEditor({
   onSubmit,
   onSubmitShift,
   onCancel,
+  linkPwd,
 }: {
   id: string;
   title: string;
@@ -34,6 +36,10 @@ export function FieldEditor({
    *  inference rather than running the default run). */
   onSubmitShift?: (value: string) => void;
   onCancel: () => void;
+  /** The `WEAVER_PWD` of the merged environment at the block this field
+   *  belongs to, for a linked field's `@file:` completion. Undefined falls
+   *  back to the process's project root. */
+  linkPwd?: string;
 }) {
   const [value, setValue] = useState(field.value);
 
@@ -73,7 +79,21 @@ export function FieldEditor({
       onClose={onCancel}
     >
       <div className="space-y-1 px-3 py-2">
-        {field.multiline ? (
+        {field.multiline && field.links ? (
+          // A linked field is still a multiline editor; the completion
+          // menu layers on top of the same textarea, including the keys
+          // that save and cancel it.
+          <LinkInput
+            value={value}
+            onChange={setValue}
+            onSubmit={onSubmit}
+            onSubmitShift={onSubmitShift}
+            onCancel={onCancel}
+            disabled={saving}
+            placeholder={field.placeholder}
+            pwd={linkPwd}
+          />
+        ) : field.multiline ? (
           <textarea
             // Content, so enter belongs to the text and saving moves to
             // ctrl/cmd+enter. The same trade every message box makes.

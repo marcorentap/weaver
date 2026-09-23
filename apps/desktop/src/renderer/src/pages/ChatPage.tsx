@@ -49,6 +49,7 @@ import { cn } from "@/lib/utils";
 import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
 import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
+import { pwdForBlock, pwdForPosition } from "@/lib/env";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
 import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
@@ -2422,6 +2423,7 @@ function ChatView({
           title={`Edit ${popup.field.label}`}
           meta={row?.block.label}
           field={popup.field}
+          linkPwd={row ? pwdForBlock(graph, row.block.id) : undefined}
           error={error}
           saving={saving}
           onSubmit={(value) => void saveField(popup.field, value)}
@@ -2484,7 +2486,14 @@ function ChatView({
         <FieldEditor
           id="create-user"
           title="New message"
-          field={{ name: "text", label: "message", value: "", multiline: true }}
+          field={{
+            name: "text",
+            label: "message",
+            value: "",
+            multiline: true,
+            links: true,
+          }}
+          linkPwd={creating ? pwdForPosition(graph, creating) : undefined}
           error={error}
           saving={saving}
           onSubmit={(value) => void createUserBlock(value)}

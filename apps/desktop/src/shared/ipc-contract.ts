@@ -27,6 +27,29 @@ export function mediaProtocolUrl(uri: string): string {
   return `${MEDIA_PROTOCOL}://local/${encodeURIComponent(uri)}`;
 }
 
+/**
+ * One `@`-link a user can attach to a message: `@<type>:<value>`. A type is
+ * what comes after the `@` (see `LinkTypeDescriptor`), a value is what comes
+ * after the `:`. The renderer completes both halves, so both cross this
+ * boundary.
+ */
+export interface LinkTypeDescriptor {
+  /** The token after `@`, e.g. "file" or "skill". */
+  id: string;
+  /** Human label for the completion list. */
+  label: string;
+  /** One line on what a link of this type points at. */
+  description: string;
+}
+
+/** One candidate for the half of a link being completed. `value` is what
+ *  gets written after the `:`; `label` and `detail` are display-only. */
+export interface LinkOption {
+  value: string;
+  label?: string;
+  detail?: string;
+}
+
 export interface ChatSessionSummary {
   id: string;
   name: string;
@@ -207,6 +230,24 @@ export interface WeaverApi {
       key: string,
       value: string,
     ): Promise<string | null>;
+  };
+  links: {
+    /** Every `@`-link type the app can complete, in menu order. Linked
+     *  types are contributed by main-process providers, so the renderer
+     *  learns them at run time rather than hardcoding a list that would
+     *  drift. */
+    types(): Promise<LinkTypeDescriptor[]>;
+    /** Candidates for one type's value half. `query` is the text typed
+     *  after the `:`; empty means "the provider's default list" (e.g. the
+     *  most recent files), not "no results". `pwd` is the `WEAVER_PWD` of
+     *  the merged environment at the block being edited, so `@file:`
+     *  completes against that block's project rather than a fixed root;
+     *  undefined leaves the provider at the process's own project root. */
+    search(
+      type: string,
+      query: string,
+      pwd?: string,
+    ): Promise<LinkOption[]>;
   };
   hindsight: {
     /** Queue `content` for storage in the configured Hindsight memory bank,

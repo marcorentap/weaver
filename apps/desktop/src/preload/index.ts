@@ -7,6 +7,8 @@ import type {
   CheckResult,
   CreateSessionResult,
   HindsightRetainResult,
+  LinkOption,
+  LinkTypeDescriptor,
   LoadGraphResult,
   MutationResult,
   PluginListResult,
@@ -83,6 +85,14 @@ const api: WeaverApi = {
     validate: (pluginId, key, value) =>
       ipcRenderer.invoke("plugins:validate", pluginId, key, value) as Promise<
         string | null
+      >,
+  },
+  links: {
+    types: () =>
+      ipcRenderer.invoke("links:types") as Promise<LinkTypeDescriptor[]>,
+    search: (type, query, pwd) =>
+      ipcRenderer.invoke("links:search", type, query, pwd) as Promise<
+        LinkOption[]
       >,
   },
   hindsight: {

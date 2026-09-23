@@ -4,11 +4,10 @@ import {
   ENV_KIND,
   envState,
   GROUP_KIND,
-  mergedEnvironment,
   TEXT_KIND,
   textState,
-  WEAVER_PWD,
 } from "@repo/core";
+import { pwdForBlock } from "@/lib/env";
 import { schemaMessage } from "@/lib/schema-error";
 import { MediaText } from "@/components/media-text";
 import { MarkdownText } from "@/components/markdown";
@@ -54,6 +53,11 @@ export type BlockField = {
   /** Content rather than a label. The editor gives it a text area where
    *  enter inserts a newline, and the row renders every line of it. */
   multiline?: boolean;
+  /** Offer `@`-link completion in the editor (see `LinkInput`). Only
+   *  meaningful on a multiline field, and only set where a message's links
+   *  are actually meaningful (a user block's text), never on a label or an
+   *  environment body where an `@` is just a character. */
+  links?: boolean;
   /** `value`'s real type once parsed. A `"number"` field round-trips
    *  through `Number()` before it's written; everything else stays a
    *  string as-is. */
@@ -298,18 +302,6 @@ function ToolPreview({ state }: { state: ToolState }) {
 }
 
 /**
- * The `WEAVER_PWD` the merged environment above `block` defines — the
- * directory a relative media path resolves against — or undefined when no
- * environment block above it sets the variable. Every media view asks for
- * this and plugs it into `mediaSrc`, so the media block and the "run
- * inference" agent agree on the working directory without anyone
- * hardcoding a second lookup.
- */
-function envPwd(graph: BlockGraph, block: Block): string | undefined {
-  return mergedEnvironment(graph, block.id)[WEAVER_PWD];
-}
-
-/**
  * Media renders inline. Big enough to actually watch or read a frame of, small
  * enough that a list of blocks still scrolls like a list; `p` opens the
  * full-size preview.
@@ -513,7 +505,7 @@ export const blockViews: Record<string, BlockView> = {
     Row: ({ block, graph }) => (
       <MediaRow
         state={mediaState.parse(block.data)}
-        pwd={envPwd(graph, block)}
+        pwd={pwdForBlock(graph, block.id)}
       />
     ),
     fields: (block) => [
@@ -527,7 +519,7 @@ export const blockViews: Record<string, BlockView> = {
     Preview: ({ block, graph }) => (
       <MediaPreview
         state={mediaState.parse(block.data)}
-        pwd={envPwd(graph, block)}
+        pwd={pwdForBlock(graph, block.id)}
       />
     ),
     // "Open in new tab" goes through `shell.openExternal`, the OS browser,
@@ -545,7 +537,7 @@ export const blockViews: Record<string, BlockView> = {
       const url = parseMediaUri(uri);
       return url && (url.protocol === "http:" || url.protocol === "https:")
         ? uri
-        : (resolveMediaUri(uri, envPwd(graph, block)) ?? uri);
+        : (resolveMediaUri(uri, pwdForBlock(graph, block.id)) ?? uri);
     },
   },
 
@@ -557,6 +549,9 @@ export const blockViews: Record<string, BlockView> = {
         label: "text",
         value: userState.parse(block.data).text,
         multiline: true,
+        // A user block is a message to the agent, so its text offers
+        // `@file:`/`@skill:` completion.
+        links: true,
       },
     ],
     // A user message previews exactly like a text block's does — the same

@@ -7,7 +7,7 @@ import { protocol, type CustomScheme } from "electron";
 import { mergedEnvironment, WEAVER_PWD } from "@repo/core";
 import { MEDIA_KIND, mediaInfo, parseMediaUri } from "@plugins/rich-media";
 import { MEDIA_PROTOCOL } from "../../shared/ipc-contract.js";
-import { projectRoot } from "../lib/project.js";
+import { projectRoot, weaverRoot } from "../lib/project.js";
 import { getStore } from "../lib/store.js";
 import { isPendingMedia as isPendingMediaThere, pendingMediaUris } from "../lib/pending-media.js";
 
@@ -142,7 +142,7 @@ function pwdForMediaUri(uri: string): string {
       const block = graph.blocks[id];
       if (!block || block.kind !== MEDIA_KIND || block.data.uri !== uri) continue;
       const pwd = mergedEnvironment(graph, id)[WEAVER_PWD];
-      if (pwd) return isAbsolute(pwd) ? pwd : resolve(projectRoot(), pwd);
+      if (pwd) return weaverRoot(pwd);
     }
   }
   return projectRoot();
@@ -171,11 +171,7 @@ function isStoredMediaPath(path: string): boolean {
       const uri = block.data.uri;
       if (typeof uri !== "string" || parseMediaUri(uri) !== null) continue;
       const pwd = mergedEnvironment(graph, id)[WEAVER_PWD];
-      const base = pwd
-        ? isAbsolute(pwd)
-          ? pwd
-          : resolve(projectRoot(), pwd)
-        : projectRoot();
+      const base = weaverRoot(pwd);
       if (resolve(base, uri) === want) return true;
     }
   }
