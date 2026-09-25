@@ -1,0 +1,151 @@
+# Weaver
+
+Desktop app that treats LLM context as an editable document instead of an
+append-only log. Context is a tree of **blocks** (the weaver graph); each block
+is one piece of context, and an inference run is anchored at a point in that
+tree, seeing only what precedes it.
+
+Electron + React 19 + TypeScript, pnpm/turbo monorepo, MIT.
+
+## Layout
+
+```
+apps/desktop/src/
+  main/            Electron main process (owns disk, SQLite, subprocesses)
+    index.ts       entry; windows, protocol registration
+    agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
+    ipc/           one file per IPC group: agent, chat, links, media-protocol, plugins, remote, settings, hindsight
+    lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
+                   read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts
+    remote/        server.ts (HTTP + streaming agent runs), instance.ts, keys.ts
+  preload/         the only typed bridge exposed to the renderer
+  renderer/src/    React UI (no Node access)
+    lib/           chat-store, live-graph (client model), inference, keymap, pages, routes, settings, viewport, links
+    components/, blocks/, pages/
+  shared/          types shared across processes: ipc-contract, agent-events, blocks/kinds, provider-routing
+packages/core      Block graph model + kind system (no app deps)
+packages/store     SQLite persistence (node:sqlite)
+packages/plugins   Plugin contract (definePlugin)
+plugins/*          bundled plugins: rich-media, user-input, agent-seerxng, agent-hindsight
+```
+
+Dependency direction is one-way: `desktop → plugins → store/core → plugins package`.
+Renderer must never value-import `@repo/store` (it pulls in `node:sqlite`); use
+`import type`.
+
+## Commands
+
+Requires Node >= 24 and pnpm (see the root `package.json` `engines` and
+`packageManager` fields). If they are not on your PATH, fix that outside the
+repo — do not bake a machine-specific bin directory into this file.
+
+```sh
+pnpm install          # postinstall build scripts are allowlisted in pnpm-workspace.yaml
+pnpm dev              # turbo dev (apps/desktop: electron-vite dev)
+pnpm build
+pnpm lint             # eslint --max-warnings 0; zero warnings tolerated
+pnpm check-types
+pnpm format           # prettier over **/*.{ts,tsx,md} — run before committing
+```
+
+There is no test runner and no test suite. Verify by building, type-checking,
+and running the app.
+
+## Core model
+
+Everything lives in `packages/core`.
+
+- `Block` = `{ id, kind, label, createdAt, modifiedAt, next, children, data, hidden? }`.
+  The graph is a binary tree used as a linked list of linked lists: `next` is
+  the following sibling, `children` the first nested block. **Order is stored,
+  never derived from timestamps.** `hidden` excludes a subtree from rendering,
+  snapshots, and merged environment, without deleting it.
+- Tree operations (`insertBlock`, `moveBlock`, `removeBlock`, `positionOf`,
+  `assertTree`, …) are pure `graph → graph` functions. Use them; never rewrite
+  links by hand. `assertTree` is the invariant: one root, no loops, nothing
+  unreachable.
+- Snapshots are how a block becomes LLM text: `snapshotBlock` (one block, its
+  label as prefix), `snapshotAbove` (everything preceding a block — a block's
+  view of "the graph so far"), `snapshotGraph` (all top-level). Unknown kinds
+  throw rather than guess.
+- A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
+  `snapshot`, `hooks` (named async state→state functions), `callbacks`
+  (declarative references to another block's hook), `schedule` (self-driving
+  timer request), `defaults`. Everything parses through the schema, so no
+  consumer ever sees partially-specified state.
+- Hooks get a `HookContext`: `call` another block's hook, read `graph`,
+  `registry`, and mutate via `addBlock`/`clearChildren` only.
+
+Adding a block kind means adding a `defineKind` to a plugin's `kinds` (or
+`packages/core/src/kinds` for core kinds) — the renderer, snapshots, and store
+validation pick it up from the registry.
+
+## Plugins
+
+`packages/plugins/src/index.ts` defines the contract (`definePlugin`: `id`,
+`name`, `settings`, `kinds`, `tools`). Bundled ones are imported directly in
+`main/lib/plugins.ts`; additional directories are loaded from
+`~/.weaver/plugins` (override via the `weaver.plugins.dir` setting).
+
+- Settings fields are declared, never persisted by the plugin — the app binds
+  them to its own store (`plugins.*` IPC).
+- Tools are SDK-agnostic (`PluginTool`: TypeBox `parameters`, `execute(args, ctx)`
+  returning `{ content, details }`). `ctx.addBlock` is optional; fall back to
+  text when the harness can't materialize blocks.
+
+## Agent runs
+
+`main/lib/run-agent.ts` (`runAgent`) is caller-agnostic — used by the Electron
+IPC handler and by the remote HTTP server, so a remote run acts on the
+_server's_ filesystem. It mounts a `weaver` provider on pi's `ModelRuntime`
+(endpoint/key from the request) and either runs plain (no tools, used for
+summarization) or creates a full pi session with our custom tools
+(read/write/edit/display_media) plus plugin tools and plugin-provided kinds.
+
+- Resources (skills, extensions, context files) are discovered from `~/.agents`
+  and `<cwd>/.agents`, never from pi's own directories. `AGENT_DIR` is honored.
+- The system prompt is `main/agent/system-prompt.md`, injected via
+  `WEAVER_SYSTEM_PROMPT`, replacing pi's default.
+- Events are zod-validated in `shared/agent-events.ts` and streamed to the
+  renderer as a discriminated `AgentEvent` union until `done`/`error`. A
+  terminal `error` is only emitted once pi's session settles after auto-retry,
+  never on the first failed attempt.
+- `display_media` deliberately only turns a URI into a media block, so the model
+  can't hand-write a kind's own fields.
+
+## Conventions
+
+- Comments explain **why**, in full prose sentences, often at length. This
+  codebase documents its reasoning inline; match that register. Do not add
+  comments that restate the code.
+- Types are inferred from zod schemas (`z.infer`); a schema is the single
+  source of truth, and `parse` is the only way in.
+- IPC is grouped by domain and typed end-to-end via `shared/ipc-contract.ts`
+  and the preload bridge. Add a method there, not an ad-hoc channel.
+- Prettier is the formatter; ESLint runs with `--max-warnings 0`.
+- Keep renderer code free of Node and of `@repo/store` value imports.
+
+## Environment
+
+| Variable               | Read by    | Meaning                                                  |
+| ---------------------- | ---------- | -------------------------------------------------------- |
+| `WEAVER_PWD`           | weaver     | project dir for a run; relative paths resolve against it |
+| `WEAVER_STORE`         | store      | SQLite path (default `~/.weaver/store.db`)               |
+| `PI_CODING_AGENT_DIR`  | agent-dir  | agent dir (default `~/.agents`)                          |
+| `WEAVER_SYSTEM_PROMPT` | run engine | replaces the default pi system prompt                    |
+
+`WEAVER_PWD` is merged from the environment blocks above a block
+(`mergedEnvironment`), and is the same root used by `@file:`/`@skill:` link
+completion and `weaver-media://` resolution.
+
+## Commits
+
+Terse single-line subjects, no body, imperative, conventional prefix:
+
+```
+feat: discover agent resources from .agents, not .pi
+fix: keep the run shown as running while pi auto-retries
+refactor: drop bank param from hindsight agent tools
+```
+
+Do not commit unless asked.
