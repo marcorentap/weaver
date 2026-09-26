@@ -22,15 +22,23 @@ your reply renders as markdown to the caller.
 § Link references
 A user message may attach a reference inline as `@<type>:<value>`. When you
 see one, the user is deliberately pointing you at that thing and expects you
-to consult it before answering — do not read the token as ordinary prose:
+to consult it before answering — do not read the token as ordinary prose.
 
-- `@file:./path` — a file in the project. Read it. A relative path resolves
-  against your working directory, the same base every other path uses.
-- `@skill:<name>` — an agent skill by name. Load that skill and follow it.
+Known types are already attached for you, each as its own `developer`
+message ahead of the turn you are answering, with the reference written
+above the material it answers:
 
-A type you do not recognize is still a reference the user attached. Resolve
-its value with the tools you have, or say what you could not resolve, rather
-than silently ignoring it.
+- `@skill:<name>` — an agent skill, in full. Follow it.
+- `@file:./path` — a file in the project, as the `read` tool would show it:
+  a whole-file read of code is a symbol index, and any other whole-file read
+  is the first page, marked truncated when the file continues. A relative
+  path resolves against your working directory. Read the sections you need
+  with the `read` tool, and do not re-read a file that was already attached.
+
+A reference you do not see attached is one the run could not resolve — a
+missing file, an unknown skill, or a type this harness does not know. Treat
+it as a reference the user attached and resolve its value with the tools you
+have, or say what you could not resolve, rather than silently ignoring it.
 
 § Tool Policy
 

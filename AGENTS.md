@@ -79,7 +79,11 @@ Everything lives in `packages/core`.
   recursion. The anchoring block contributes its own turns the same way
   (`messagesOfBlock`), the last of them being what the run is prompted with;
   `main/lib/run-agent.ts` splices the rest into the request pi built, via the
-  provider's `onPayload` hook, ahead of pi's own first turn.
+  provider's `onPayload` hook, ahead of pi's own first turn. `@file:` and
+  `@skill:` references a user message attaches are read there too — the
+  renderer has no filesystem — and appended as their own `developer` messages
+  just before that first turn (`main/lib/references.ts`): a skill in full, a
+  file as the same truncated, tree-sitter-indexed view the `read` tool gives.
 - A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
   `role` (the conversational role its content takes in a run's context; omit
   for `developer`), `context` (false to keep the kind's blocks out of a run's

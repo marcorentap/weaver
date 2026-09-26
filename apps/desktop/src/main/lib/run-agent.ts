@@ -24,7 +24,8 @@ import {
   type AgentRunRequest,
   type ThinkingLevel,
 } from "../../shared/agent-events.js";
-import { readSource } from "./read-source.js";
+import { formatReadResult, readSource } from "./read-source.js";
+import { referenceMessages } from "./references.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
@@ -654,6 +655,25 @@ export async function runAgent(
         : resolve(ctx.root, weaverPwd)
       : ctx.root;
 
+    // `@file:`/`@skill:` references the user attached to a message become
+    // `developer` context of their own, read here (the renderer has no
+    // filesystem) and against this run's own `cwd` (so a relative path means
+    // what the `read` tool would mean by it). They follow the graph context,
+    // so the material sits just ahead of the turn being answered, and a
+    // reference repeated across turns is carried once. See
+    // `referenceMessages`.
+    const references = await referenceMessages(
+      [
+        ...body.context
+          .filter((message) => message.role === "user")
+          .map((message) => message.content),
+        body.prompt,
+      ],
+      cwd,
+    );
+    const context =
+      references.length > 0 ? [...body.context, ...references] : body.context;
+
     const settingsManager = createAgentSettings(cwd);
     const resourceLoader = createAgentResourceLoader({
       cwd,
@@ -727,17 +747,8 @@ export async function runAgent(
             { cause: error },
           );
         }
-        const header = !result.truncated
-          ? ""
-          : result.byteStart !== undefined
-            ? `[bytes ${result.byteStart}-${result.byteEnd}]\n\n`
-            : result.totalLines !== undefined
-              ? `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}]\n\n`
-              : `[lines ${result.startLine}-${result.endLine}+]\n\n`;
         return {
-          content: [
-            { type: "text" as const, text: `${header}${result.content}` },
-          ],
+          content: [{ type: "text" as const, text: formatReadResult(result) }],
           details: {},
         };
       },
@@ -881,7 +892,7 @@ export async function runAgent(
       const next = extensionPayload
         ? await extensionPayload(payload, model)
         : payload;
-      return spliceContext(next ?? payload, body.context);
+      return spliceContext(next ?? payload, context);
     };
 
     // Arguments arrive with the call and the result with its end, so they

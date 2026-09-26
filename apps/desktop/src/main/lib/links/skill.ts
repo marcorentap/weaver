@@ -47,6 +47,17 @@ function skillsFor(root: string): SkillSummary[] {
   return summaries;
 }
 
+/**
+ * The `SKILL.md` a `@skill:<name>` points at, or null when no discovered
+ * skill carries that name. It uses the same directories a run loads from, so
+ * a reference resolves to the skill the model would have loaded, not a
+ * same-named one from somewhere the app never reads.
+ */
+export function skillFileFor(name: string, root: string): string | null {
+  const skill = skillsFor(root).find((candidate) => candidate.name === name);
+  return skill?.filePath ?? null;
+}
+
 export const skillProvider: LinkProvider = {
   id: "skill",
   label: "skill",

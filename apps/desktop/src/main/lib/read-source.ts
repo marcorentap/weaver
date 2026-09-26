@@ -176,6 +176,25 @@ export type ReadSourceResult = {
   byteEnd?: number;
 };
 
+/**
+ * How a read is shown to a reader: the content as-is when the whole of it
+ * was read, or under a header saying which part this is when the read was
+ * cut short — `[lines 12-40 of 200]` for a window, `[lines 1-80+]` when the
+ * source continues past a capped scan, `[bytes 0-4096]` for a byte read.
+ * The `read` tool and a resolved `@file:` reference speak the same way, so
+ * a file the model asked for and a file the user attached read alike.
+ */
+export function formatReadResult(result: ReadSourceResult): string {
+  if (!result.truncated) return result.content;
+  const header =
+    result.byteStart !== undefined
+      ? `[bytes ${result.byteStart}-${result.byteEnd}]\n\n`
+      : result.totalLines !== undefined
+        ? `[lines ${result.startLine}-${result.endLine} of ${result.totalLines}]\n\n`
+        : `[lines ${result.startLine}-${result.endLine}+]\n\n`;
+  return `${header}${result.content}`;
+}
+
 /** `offset`/`limit` windowed onto `lines`, shared by file content and
  *  directory listings alike: a listing is just lines with no bytes behind
  *  them. */
