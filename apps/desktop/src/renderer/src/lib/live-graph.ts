@@ -1014,10 +1014,15 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       {
         ...connection,
         tools: connection.tools ?? [],
-        thinkingLevel: connection.thinkingLevel as ThinkingLevel | undefined,
         // After the spread, so a title run is capped no matter what the
         // caller's connection carries (the inference defaults allow 8192).
         maxTokens: TITLE_MAX_TOKENS,
+        // Reasoning off, likewise after the spread. The cap above is spent
+        // by whatever the model streams, and thinking is streamed too, so an
+        // inherited level can burn the whole budget before the first word of
+        // the title arrives — leaving nothing to name the session with. A
+        // name is a read of the material, not a problem to reason about.
+        thinkingLevel: "off" satisfies ThinkingLevel,
         context,
         prompt: TITLE_PROMPT,
         plain: true,
