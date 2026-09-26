@@ -383,23 +383,29 @@ const chatPayload = z
  * `developer` role. `onPayload` is the one point at which the finished
  * payload can still be rewritten, so the graph goes in there — after the
  * system prompt and ahead of the session's own messages, the first of which
- * is the anchoring block's content. The block being run therefore stays the
- * model's last turn, and the turns pi builds after it (a tool call and its
- * result) stay where they are, so a run's own work is never reshuffled.
+ * is the anchoring block's content (and, in a plain run, ahead of the run's
+ * own prompt, so the material reads above the ask). The block being run
+ * therefore stays the model's last turn, and the turns pi builds after it (a
+ * tool call and its result) stay where they are, so a run's own work is never
+ * reshuffled.
  */
 function spliceContext(payload: unknown, context: ContextMessage[]): unknown {
   if (context.length === 0) return payload;
   const parsed = chatPayload.safeParse(payload);
   if (!parsed.success) return payload;
-  const [system, ...rest] = parsed.data.messages;
+  // Only a message whose role is actually `system` is kept in front of the
+  // context. An agent run always has pi's system prompt there, but a plain
+  // run has none, and its first message is the user turn it is asked to
+  // answer — treating that as the system message would push the context
+  // below the ask it is supposed to sit above, and leave the ask in the
+  // system slot.
+  const [first, ...rest] = parsed.data.messages;
   return {
     ...parsed.data,
-    // A request with no system prompt at all has nothing to keep in front of
-    // the graph; the context is then simply where the conversation starts.
     messages:
-      system === undefined
-        ? [...context, ...rest]
-        : [system, ...context, ...rest],
+      first?.role === "system"
+        ? [first, ...context, ...rest]
+        : [...context, ...parsed.data.messages],
   };
 }
 
@@ -499,9 +505,11 @@ export async function runAgent(
       return;
     }
 
-    // A plain call: the graph above the block (none, for the title and
-    // summarization runs, whose instruction and content already ship inside
-    // the prompt) and then the prompt itself as the run's `user` turn.
+    // A plain call: the run's `context` as material and then the prompt
+    // itself as the run's `user` turn. A plain run carries no session, so
+    // its message list starts with that prompt and has no system prompt for
+    // `spliceContext` to keep in front of the context — the context goes
+    // first, above the ask, which is where material belongs.
     // Nothing else happens here, by design — no session, no tools, no
     // system prompt, no resource loading, no environment shading — so the
     // model sees exactly what the run asked for, nothing the harness would
