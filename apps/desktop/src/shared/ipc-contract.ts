@@ -71,6 +71,18 @@ export interface MutationResult {
   error: string | null;
 }
 
+/**
+ * A started run, as the preload bridge hands it back. `cancel` aborts the run
+ * and detaches this caller from its stream; `answer` releases a run that
+ * asked a question mid-flight — the `wait` agent event names the block, this
+ * settles the tool call that raised it. Answering a run that is not waiting,
+ * or a question it already answered, does nothing.
+ */
+export interface AgentRunHandle {
+  cancel: () => void;
+  answer: (id: string, value: string | null) => Promise<void>;
+}
+
 export interface CreateSessionResult extends MutationResult {
   id: string | null;
   /** The name the session carries in the store. Present on create/duplicate
@@ -214,13 +226,14 @@ export interface WeaverApi {
       endpoint: string,
       apiKey: string,
     ): Promise<ProviderUsageResult>;
-    /** Starts a run and subscribes `onEvent` to its events. Returns a
-     *  `cancel` function that aborts the run and unsubscribes; also
-     *  unsubscribes itself once a terminal (`done`/`error`) event arrives. */
+    /** Starts a run and subscribes `onEvent` to its events. Returns the
+     *  handle that aborts it — which also unsubscribes; the subscription
+     *  ends itself at a terminal (`done`/`error`) event too — and that
+     *  answers a question it raised (see `AgentRunHandle`). */
     run(
       request: AgentRunRequest,
       onEvent: (event: AgentEvent) => void,
-    ): () => void;
+    ): AgentRunHandle;
   };
   plugins: {
     /** The configured plugin directory and every loaded plugin. */

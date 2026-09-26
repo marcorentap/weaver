@@ -26,14 +26,11 @@ function buildRows(state: MultichoiceState): Row[] {
     kind: "other",
     label: OTHER_OPTION,
     checked: otherPicked,
-    detail:
-      otherPicked && state.other.trim() ? state.other.trim() : undefined,
+    detail: otherPicked && state.other.trim() ? state.other.trim() : undefined,
   });
   rows.push({
     kind: "note",
-    label: state.note.trim()
-      ? `Note: ${state.note.trim()}`
-      : "Note: (blank)",
+    label: state.note.trim() ? `Note: ${state.note.trim()}` : "Note: (blank)",
   });
   return rows;
 }
@@ -102,6 +99,19 @@ export function MultichoiceSelect({
   const commit = (next: MultichoiceState) => {
     onUpdate(next);
     setError(null);
+  };
+
+  /**
+   * Submit the answer as it stands and close. Setting the flag is the whole
+   * of answering: the picks, the Other text and the note are already in the
+   * block, each committed as it was made, so this is what says "that is my
+   * answer" rather than "here is one more thought". A run stopped on this
+   * block resumes on it, and a block nobody is waiting on simply keeps the
+   * record that its answer was settled.
+   */
+  const submit = () => {
+    if (!state.answered) commit({ ...state, answered: true });
+    onClose();
   };
 
   const toggleRow = (rowIndex: number) => {
@@ -256,7 +266,7 @@ export function MultichoiceSelect({
       {
         keys: ["ctrl+enter"],
         help: [{ keys: "ctrl+enter", label: "Submit answer" }],
-        run: onClose,
+        run: submit,
       },
       {
         keys: ["Escape"],

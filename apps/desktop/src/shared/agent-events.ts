@@ -66,9 +66,25 @@ export const agentEvent = z.discriminatedUnion("type", [
     ok: z.boolean(),
   }),
   /** A media block the `display_media` tool created. `data` is validated
-   *  against the media kind's schema before it is sent. */
+   *  against the media kind's schema before it is sent. The run carries on
+   *  from here; a block this tool showed is all there was to it. */
   z.object({
     type: z.literal("block"),
+    kind: z.string(),
+    label: z.string(),
+    data: z.record(z.string(), z.unknown()),
+  }),
+  /** A block a run has stopped on: the tool that raised it is still inside
+   *  its own call, and the run cannot take another step until the person
+   *  answers the block. Like `block`, the `data` was validated against the
+   *  kind's schema before it was sent, so the renderer can materialize it the
+   *  same way; unlike `block`, the run stays running afterwards, and `id` is
+   *  what the answer travels back under (`agent:run:answer`). A `kind` that
+   *  declares no `resume` is never raised this way, because nothing could ever
+   *  release it. */
+  z.object({
+    type: z.literal("wait"),
+    id: z.string(),
     kind: z.string(),
     label: z.string(),
     data: z.record(z.string(), z.unknown()),

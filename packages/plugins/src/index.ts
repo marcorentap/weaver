@@ -58,6 +58,28 @@ export type ToolRunContext = {
    * a tool can pass its own state and let the harness reject a bad shape.
    */
   addBlock?: (kind: string, data: BlockData, label: string) => void;
+  /**
+   * Append a new block of `kind` and hold the run until that block resumes
+   * it: until the person answers it, its kind's `resume` reads an answer out
+   * of the updated state, and that text settles this promise. The one call a
+   * tool makes when the answer to a question it must ask is not something it
+   * can guess; a tool that just wants to show something uses `addBlock`, which
+   * returns at once.
+   *
+   * Resolves with the answer, or null when nothing will answer it: a harness
+   * that cannot materialize blocks, a run that was cancelled, or a block the
+   * user discarded before answering. Null is not an empty answer — a kind
+   * that resumes at all resumes with text — so a tool can tell "nobody
+   * answered" from "answered with nothing" and say so to the model rather
+   * than reporting an answer that never came. Like `addBlock`, optional: a
+   * tool that needs an answer must only pause when it is there, and fall back
+   * to plain text when it is not.
+   */
+  wait?: (
+    kind: string,
+    data: BlockData,
+    label: string,
+  ) => Promise<string | null>;
 };
 
 /**

@@ -8,6 +8,11 @@ import { defineKind } from "@repo/core";
  * block's own state, so a later run that reads the graph — or that is
  * anchored on this block and re-run — sees the question and the answer both
  * as context.
+ *
+ * The same block is also what a run raised *during* a turn stops on: a tool
+ * that needs an answer it cannot guess hands the question here and waits,
+ * and the submission below is what starts the run again, in the same run,
+ * with the answer as the tool's result. See `multichoiceResume`.
  */
 export const MULTICHOICE_KIND = "multichoice";
 
@@ -32,6 +37,19 @@ export const multichoiceState = z.object({
   other: z.string(),
   /** The user's additional note, free text attached to the answer. */
   note: z.string(),
+  /**
+   * Whether the person submitted this answer, which is not the same thing as
+   * having picked options: a run stopped on this block resumes on the
+   * submission, so a multi-select question is answered once rather than once
+   * per checkbox, and a pick made while thinking it over is not yet an
+   * answer to anything.
+   *
+   * Defaulted rather than required because blocks written before this field
+   * existed are still in sessions: they read as never submitted, which is
+   * what makes them continue to behave exactly as they did — the answer they
+   * hold is theirs to show, and only a run parked on one asks for the flag.
+   */
+  answered: z.boolean().default(false),
 });
 export type MultichoiceState = z.infer<typeof multichoiceState>;
 
@@ -57,6 +75,22 @@ export function multichoiceAnswer(state: MultichoiceState): string {
 }
 
 /**
+ * What a run stopped on this block resumes with: the submitted answer as the
+ * same bullets the block reads as, or null while it has not been submitted.
+ *
+ * The submission flag, not the picked options, is what releases the run: the
+ * block is answered when the person says it is. An answer nothing was picked
+ * into still says so in words, because a run has to come back with something
+ * it can act on — "I picked nothing and left no note" is information, and an
+ * empty string would leave the model to guess whether anyone had answered at
+ * all.
+ */
+export function multichoiceResume(state: MultichoiceState): string | null {
+  if (!state.answered) return null;
+  return multichoiceAnswer(state) || "(nothing picked and no note)";
+}
+
+/**
  * How a multichoice block reads as a document: the question alone, then the
  * user's answer as a bullet list under a `user:` marker. Unanswered it is
  * just the question, exactly what the block holds before the user answered.
@@ -64,6 +98,11 @@ export function multichoiceAnswer(state: MultichoiceState): string {
  * The marker belongs here because nothing outside the text can say who is
  * speaking. In a conversation, something can: see `turns` below, where the
  * same block arrives as an assistant turn and a user turn instead.
+ *
+ * What reads as an answer here is the answer text, not `answered`: a block
+ * written before submission existed holds an answer with no flag, and a
+ * block someone has picked options into but not submitted holds choices with
+ * no answer yet. The text is the one thing both agree on.
  */
 export function multichoiceSnapshot(state: MultichoiceState): string {
   const prompt = state.prompt.trim();
@@ -105,5 +144,13 @@ export const multichoiceKind = defineKind({
   schema: multichoiceState,
   snapshot: multichoiceSnapshot,
   turns: multichoiceTurns,
-  defaults: { prompt: "", options: [], selected: [], other: "", note: "" },
+  resume: multichoiceResume,
+  defaults: {
+    prompt: "",
+    options: [],
+    selected: [],
+    other: "",
+    note: "",
+    answered: false,
+  },
 });

@@ -10,6 +10,7 @@ import type {
 import {
   childIds,
   findParent,
+  findPrevSibling,
   insertBlock,
   lastChildId,
   mergedEnvironment,
@@ -101,6 +102,14 @@ export type LiveGraphSnapshot = {
    *  hook's and an inference run's own state update land all at once when
    *  they resolve. */
   running: ReadonlySet<BlockId>;
+  /**
+   * Blocks a running inference is parked on: the questions it raised that
+   * nobody has answered yet. A run stops inside the tool call that asked,
+   * so nothing else about it moves until one of these is answered — which is
+   * why the answer is the one edit that stays open on a run's own output
+   * (see `lockedBlockIds`). Empty whenever no run is waiting on anything.
+   */
+  waiting: ReadonlySet<BlockId>;
   /** For each running inference, the block it is currently appending
    *  after: the run's anchor until the first reply lands, then whichever
    *  reply landed most recently. This is only ever a block the run itself
@@ -134,6 +143,11 @@ export type LiveGraph = {
    * as siblings appended right after `id`, chained one after the next in
    * the order they streamed in, never nested under it. A re-run adds
    * another reply rather than replacing the last one.
+   *
+   * A run can also stop partway, on a question one of its tools raised (see
+   * `waiting` in the snapshot): the tool call waits there until the block
+   * that question landed in is answered, and only then does the run stream
+   * its next turn. Everything the run had already appended stays put.
    *
    * Lives on the engine, not a component, so the fetch stream survives the
    * view that started it unmounting (switching tabs and back). It keeps
@@ -250,17 +264,24 @@ export type LiveGraph = {
  * it contributes nothing locked; walking from its `next` in that case
  * would run off the end of the whole chain instead of stopping at the
  * run's own content, since there is no run content yet to stop at.
+ *
+ * Blocks the run is *waiting* on are exempt. Locking is about content the
+ * run is still writing; a question a run parked on is the one piece of its
+ * output that exists to be edited, and the edit is what sets it going again
+ * (see `defineKind.resume`), so it has to be reachable by the same paths
+ * every other block is. Everything the run wrote around it stays locked.
  */
 export function lockedBlockIds(
   graph: BlockGraph,
   appendTails: ReadonlyMap<BlockId, BlockId>,
+  waiting: ReadonlySet<BlockId> = new Set(),
 ): Set<BlockId> {
   const locked = new Set<BlockId>();
   for (const [anchor, tail] of appendTails) {
     if (tail === anchor) continue;
     let cur = graph.blocks[anchor]?.next ?? null;
     while (cur !== null) {
-      locked.add(cur);
+      if (!waiting.has(cur)) locked.add(cur);
       if (cur === tail) break;
       cur = graph.blocks[cur]?.next ?? null;
     }
@@ -287,6 +308,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     dirty: false,
     savedAt: null,
     running: new Set(),
+    waiting: new Set(),
     appendTails: new Map(),
     canUndo: false,
     canRedo: false,
@@ -325,6 +347,21 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   /** Cancel handle per in-flight inference, so an abort can be aimed at a
    *  specific block rather than being a global stop. */
   const runningAborts = new Map<BlockId, () => void>();
+  /**
+   * The waits a still-running inference has raised, keyed by the block that
+   * holds the question: the wire id its answer goes back under, the anchor of
+   * the run it belongs to, and that run's own answer callback. Hanging off
+   * the engine rather than the run is what lets a state edit anywhere reach
+   * them — see `resolveWaits`.
+   */
+  const pendingWaits = new Map<
+    BlockId,
+    {
+      id: string;
+      runId: BlockId;
+      answer: (id: string, value: string | null) => void;
+    }
+  >();
 
   function emit() {
     for (const listener of listeners) listener();
@@ -339,6 +376,34 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       canRedo: hasRedo(),
     };
     emit();
+    // A commit is one of the few moments an answer can appear, whatever path
+    // wrote it — a kind's own dialog, a field edit, a hook's result — so this
+    // is where a parked run is released. Costs nothing when none is parked,
+    // which is nearly always.
+    resolveWaits();
+  }
+
+  /**
+   * Release every wait whose block now holds something to release it with.
+   * Nothing but the kind's own `resume` decides that: the text it reads out of
+   * the block's state is what the tool call behind the wait receives, and a
+   * kind that says null is a block the person has not answered yet. A block
+   * that was deleted instead of answered releases its run with no answer,
+   * which is how a tool hears that the question is gone rather than waiting
+   * forever on a form that no longer exists.
+   */
+  function resolveWaits() {
+    if (pendingWaits.size === 0) return;
+    for (const [blockId, wait] of [...pendingWaits]) {
+      const block = snapshot.graph.blocks[blockId];
+      const value = block
+        ? (kinds[block.kind]?.resume?.(block.data) ?? null)
+        : null;
+      if (block && value === null) continue;
+      pendingWaits.delete(blockId);
+      setWaiting(blockId, false);
+      wait.answer(wait.id, value);
+    }
   }
 
   function setRunning(id: BlockId, active: boolean) {
@@ -364,6 +429,18 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     if (tail === null) next.delete(id);
     else next.set(id, tail);
     snapshot = { ...snapshot, appendTails: next };
+    emit();
+  }
+
+  /** Mark a block as one a run is parked on, or release it from that state.
+   *  Separate from `setRunning`, which is about the run's own anchor: a run
+   *  is both running and waiting while a question of its is open, and the
+   *  two say different things. */
+  function setWaiting(id: BlockId, waiting: boolean) {
+    const next = new Set(snapshot.waiting);
+    if (waiting) next.add(id);
+    else next.delete(id);
+    snapshot = { ...snapshot, waiting: next };
     emit();
   }
 
@@ -511,7 +588,6 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // streamed delta.
     pushUndo();
     const parentId = findParent(snapshot.graph, id);
-    let afterId: BlockId | null = id;
     const append = (
       kind: string,
       data: BlockData,
@@ -531,8 +607,16 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         data,
         ...(hidden ? { hidden: true } : {}),
       };
+      // Where the next block goes is the run's own tail, not a position
+      // remembered here: while a run is parked on a question, the block it is
+      // parked on is the tail *and* editable, so it can be discarded before
+      // the run resumes — which repairs the tail out from under this (see
+      // `deleteBlock`). Falling back to the anchor covers the rest: a run
+      // whose own insertion point somehow vanished still appends into the
+      // graph rather than throwing into whoever is streaming events at it.
+      const tail = snapshot.appendTails.get(id) ?? id;
+      const afterId = snapshot.graph.blocks[tail] ? tail : id;
       commit(insertBlock(snapshot.graph, child, { parentId, afterId }), true);
-      afterId = newId;
       setAppendTail(id, newId);
       return newId;
     };
@@ -707,7 +791,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     setAppendTail(id, id);
     try {
       let failure: string | null = null;
-      const { done, cancel } = streamInference(
+      const { done, cancel, answer } = streamInference(
         {
           endpoint,
           apiKey,
@@ -807,6 +891,38 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               return;
             }
             append(event.kind, event.data, event.label);
+          } else if (event.type === "wait") {
+            // The run is stopped inside the tool call that raised this, so
+            // the question has to be both visible and answerable. A kind the
+            // renderer does not know, or data its own schema rejects, leaves
+            // nobody able to see the question, let alone answer it, so the
+            // run is released straight away with no answer instead of being
+            // held open by a block that never appeared. Otherwise the block
+            // lands and the engine watches it: whatever edit later makes its
+            // kind's `resume` say something is what answers the tool.
+            resetStreaming();
+            const target = kinds[event.kind];
+            let parsed = false;
+            if (target) {
+              try {
+                target.parse(event.data);
+                parsed = true;
+              } catch {
+                // Treated exactly like an unknown kind, below.
+              }
+            }
+            if (!parsed) {
+              answer(event.id, null);
+              return;
+            }
+            const blockId = append(event.kind, event.data, event.label);
+            pendingWaits.set(blockId, { id: event.id, runId: id, answer });
+            setWaiting(blockId, true);
+            // A block that is answered as it lands — a tool handing over a
+            // state that already holds one — parks nothing: the same check
+            // every later edit goes through releases it here and now, so the
+            // run is never held open by a question nobody has left to ask.
+            resolveWaits();
           } else if (event.type === "error") {
             failure = event.message;
           }
@@ -822,6 +938,16 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         "error",
       );
     } finally {
+      // A run that ended with a question still open — cancelled while the
+      // user was deciding, or errored around it — leaves nothing to answer,
+      // so the block stops being marked as the thing holding the run up.
+      // Whatever the tool call painted behind it was already released by
+      // whoever ended the run (see `agent:run:cancel`).
+      for (const [blockId, wait] of [...pendingWaits]) {
+        if (wait.runId !== id) continue;
+        pendingWaits.delete(blockId);
+        setWaiting(blockId, false);
+      }
       runningAborts.delete(id);
       setRunning(id, false);
       setAppendTail(id, null);
@@ -923,9 +1049,20 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     summarize,
     generateTitle,
     isLocked: (id) =>
-      lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id),
+      lockedBlockIds(
+        snapshot.graph,
+        snapshot.appendTails,
+        snapshot.waiting,
+      ).has(id),
     updateField(id, name, value) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
+      if (
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(id)
+      )
+        return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
       pushUndo();
@@ -945,7 +1082,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     updateBlockData(id, data) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
+      if (
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(id)
+      )
+        return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
       pushUndo();
@@ -961,7 +1105,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     updateLabel(id, label) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) return;
+      if (
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(id)
+      )
+        return;
       const current = snapshot.graph.blocks[id];
       if (!current) return;
       pushUndo();
@@ -977,7 +1128,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
     },
     setHidden(id, hidden) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id))
+      if (
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(id)
+      )
         return false;
       const current = snapshot.graph.blocks[id];
       if (!current || (current.hidden ?? false) === hidden) return false;
@@ -997,7 +1154,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     addBlock(block, at) {
       if (
         at.afterId &&
-        lockedBlockIds(snapshot.graph, snapshot.appendTails).has(at.afterId)
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(at.afterId)
       )
         return false;
       pushUndo();
@@ -1006,7 +1167,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     },
     moveBlock(id, at) {
       if (!snapshot.graph.blocks[id]) return false;
-      const locked = lockedBlockIds(snapshot.graph, snapshot.appendTails);
+      const locked = lockedBlockIds(
+        snapshot.graph,
+        snapshot.appendTails,
+        snapshot.waiting,
+      );
       if (locked.has(id) || (at.afterId && locked.has(at.afterId)))
         return false;
       pushUndo();
@@ -1014,8 +1179,23 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       return true;
     },
     deleteBlock(id) {
-      if (lockedBlockIds(snapshot.graph, snapshot.appendTails).has(id)) {
+      if (
+        lockedBlockIds(
+          snapshot.graph,
+          snapshot.appendTails,
+          snapshot.waiting,
+        ).has(id)
+      ) {
         return false;
+      }
+      // A run's tail is where its next block goes, and the one block of its
+      // own output it is parked on is editable — including out of the graph.
+      // Dropping a tail therefore hands the run the block before it, its own
+      // anchor in the worst case, so a run that resumes after its question
+      // was discarded appends into a graph that still has an insertion point.
+      for (const [anchor, tail] of snapshot.appendTails) {
+        if (tail !== id) continue;
+        setAppendTail(anchor, findPrevSibling(snapshot.graph, id) ?? anchor);
       }
       pushUndo();
       commit(removeBlock(snapshot.graph, id), true);

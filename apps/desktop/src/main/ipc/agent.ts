@@ -13,8 +13,17 @@ import { schemaMessage } from "../lib/schema-error.js";
 /** In-flight runs, keyed by `runId`, so `agent:run:cancel` can abort one
  *  without a `Request`/`AbortSignal` to listen on. Entries are removed once
  *  a run reaches `done`/`error` on its own, or once cancelled. A local run
- *  aborts its session; a remote run aborts the HTTP stream. */
-const runs = new Map<string, { abort: () => void }>();
+ *  aborts its session; a remote run aborts the HTTP stream. `answer` is how
+ *  a run parked on a question is released, and is absent for a run that
+ *  cannot be asked one: a remote run raised its questions on the machine
+ *  that ran it, not here. */
+const runs = new Map<
+  string,
+  {
+    abort: () => void;
+    answer?: (id: string, value: string | null) => void;
+  }
+>();
 
 /**
  * One agent run, dispatched to wherever the settings say: this machine when
@@ -28,10 +37,31 @@ async function handleRun(
   rawRequest: AgentRunRequest,
 ): Promise<void> {
   const channel = `agent:run:event:${runId}`;
+  /** The questions this run has raised and is parked on: the wire id of each
+   *  `wait` event, mapped to the resolver its tool call is sitting on. */
+  const waits = new Map<string, (value: string | null) => void>();
+  /**
+   * Release every unanswered question with no answer. Anything that ends a
+   * run out from under a waiting tool call — a cancel, a renderer that went
+   * away — has to do this, because the agent's loop is parked inside that
+   * call: a promise nobody settles never lets the run finish, and never lets
+   * the session be disposed. Null is the honest value here; no user is left
+   * to answer.
+   */
+  const settleWaits = () => {
+    for (const resolve of waits.values()) resolve(null);
+    waits.clear();
+  };
   const emit = (agentEvent: AgentEvent) => {
     // The renderer's channel listener may be gone if it navigated mid-run;
-    // a dead renderer must not take the main process down with it.
-    if (!event.sender.isDestroyed()) event.sender.send(channel, agentEvent);
+    // a dead renderer must not take the main process down with it. Nor may
+    // it leave a question hanging: with nobody left to answer, the run is
+    // released as unanswered and allowed to finish on its own.
+    if (event.sender.isDestroyed()) {
+      settleWaits();
+      return;
+    }
+    event.sender.send(channel, agentEvent);
   };
 
   try {
@@ -59,11 +89,30 @@ async function handleRun(
       {
         ...buildAgentRuntime(),
         root: projectRoot(),
-        onSession: (abort) => runs.set(runId, { abort }),
+        // Park a tool call until the user answers the block it raised. The
+        // promise is set up before the `wait` event is emitted (see
+        // `runAgent`), so an answer that comes back fast cannot arrive
+        // before there is somewhere to put it.
+        wait: (id) =>
+          new Promise<string | null>((resolve) => waits.set(id, resolve)),
+        onSession: (abort) =>
+          runs.set(runId, {
+            abort: () => {
+              settleWaits();
+              abort();
+            },
+            answer: (id, value) => {
+              const resolve = waits.get(id);
+              if (!resolve) return;
+              waits.delete(id);
+              resolve(value);
+            },
+          }),
       },
       emit,
     );
   } finally {
+    settleWaits();
     runs.delete(runId);
   }
 }
@@ -367,4 +416,10 @@ export function registerAgentHandlers(): void {
     runs.get(runId)?.abort();
     runs.delete(runId);
   });
+  ipcMain.handle(
+    "agent:run:answer",
+    (_event, runId: string, id: string, value: string | null) => {
+      runs.get(runId)?.answer?.(id, value);
+    },
+  );
 }

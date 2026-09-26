@@ -10,11 +10,10 @@ export const askUserTool: PluginTool = {
   name: ASK_USER_TOOL,
   label: "Ask the user",
   description: [
-    "Raise a multiple-choice question the user answers inside the graph. Adds a `multichoice` block right after the current block: a prompt, the options you supply, plus the built-in Other option and an additional-note input the user always has.",
-    "Nothing here waits for or continues with the answer: the run ends, the user answers the block whenever they like, and re-running inference on that block (or on anything below it) reads the answer as context. Re-run on the block itself and the question arrives as your own assistant turn with the answer as the user turn after it, so you continue from their answer rather than from the question.",
+    "Ask the user a multiple-choice question and wait for their answer. Adds a `multichoice` block right after the current block — a prompt, the options you supply, plus the built-in Other option and an additional-note input the user always has — and the run stops there until they submit it. Their answer comes back as this tool's result, so you continue from it in the same run, having actually been told.",
+    "Since this blocks, ask when the answer changes what you do next and you cannot find it out yourself: which of two readings of the task is meant, a choice between approaches, a value only they know. Do not ask what you can check — read the file, run the command, look it up. Do not ask to confirm something they already told you, and do not ask a question you could answer by picking a sensible default and saying which one you picked.",
+    "A question raised this way also lands in the graph as a block, so a later run above it reads the question as an assistant turn and the answer as a user turn. On a run that cannot stop for an answer — a harness with no user attached, like a remote instance — this adds the same block but does not wait, and tells you so: in that case say what you would have asked rather than assuming an answer.",
     "When a multichoice block above you in the graph reaches you, it arrives as turns rather than as text: the question as an assistant turn, and — once the user has answered — their answer as a user turn, with one bullet per picked option: `- option`, `- Other: <text>` when Other was picked (with whatever they typed into it), and `- Note: <text>` for their additional note. Nothing marks the answer as an answer, because the role already says the user is the one speaking. A question with no user turn after it has not been answered yet, so read the options it lists as suggestions, not as an answer.",
-    "Prefer asking whenever asking is cheaper than guessing: if you are confused or stuck — running out of direction, going in circles, unsure which of several readings of the task is right — ask a clarification here instead of spending more turns burning tool calls on the wrong guess.",
-    "Do not ask the user to do something you can check yourself — check first, ask only what only they know.",
   ].join("\n"),
   parameters: Type.Object({
     prompt: Type.String({
@@ -58,16 +57,41 @@ export const askUserTool: PluginTool = {
     // A fixed, short name for the block — never the question, which can be
     // long and read as body text in the graph.
     const label = "ask user";
-    ctx.addBlock(
-      MULTICHOICE_KIND,
-      { prompt, options, selected: [], other: "", note: "" },
-      label,
-    );
+    const question = {
+      prompt,
+      options,
+      selected: [],
+      other: "",
+      note: "",
+      answered: false,
+    };
+    // The ordinary path: the block lands and this call stays inside `execute`
+    // until the user submits an answer to it, which the harness passes back
+    // here. `wait` is what does the materializing, so the block is not added
+    // twice.
+    if (ctx.wait) {
+      const answer = await ctx.wait(MULTICHOICE_KIND, question, label);
+      return {
+        content:
+          answer === null
+            ? `the question "${prompt}" was not answered — nobody was left to answer it, ` +
+              "or it was discarded. Say what you need from the user instead of " +
+              "assuming an answer, and do not raise the same question again."
+            : `the user answered:\n${answer}`,
+        details: { kind: MULTICHOICE_KIND, answered: answer !== null },
+      };
+    }
+    // A caller that can put a block in the graph but cannot hold a run for it
+    // (a bare tool host). The question is still worth raising; nothing here
+    // waits on it, so say that plainly rather than leaving the model to think
+    // the silence is an answer.
+    ctx.addBlock(MULTICHOICE_KIND, question, label);
     return {
       content:
-        `added a multichoice block asking: ${prompt}. ` +
-        "The user answers it in the block. Nothing continues from here on their answer; re-run inference on that block to pick it up.",
-      details: { kind: MULTICHOICE_KIND },
+        `added a multichoice block asking: ${prompt}. Nothing here can wait for ` +
+        "an answer, so tell the user the question is in the graph — re-running " +
+        "inference on that block is what picks the answer up.",
+      details: { kind: MULTICHOICE_KIND, answered: false },
     };
   },
 };

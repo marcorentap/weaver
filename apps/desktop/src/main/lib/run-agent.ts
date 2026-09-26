@@ -13,7 +13,12 @@ import {
   type OpenRouterRouting,
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { WEAVER_PWD, type ContextMessage, type KindRegistry } from "@repo/core";
+import {
+  WEAVER_PWD,
+  type BlockData,
+  type ContextMessage,
+  type KindRegistry,
+} from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import { ASK_USER_TOOL } from "@plugins/user-input";
@@ -102,6 +107,22 @@ export type AgentRunContext = {
   pluginTools: PluginTool[];
   /** One plugin's setting value, `undefined` when unset. */
   getSetting: (pluginId: string, key: string) => string | undefined;
+  /**
+   * Park a tool call on a question until a person answers it. The runner
+   * calls this when a plugin tool asks to wait (see `ToolRunContext.wait`),
+   * with the wire `id` the emitted `wait` event will carry; whatever it
+   * returns settles the tool call, so a caller that can reach a user must
+   * resolve it — with the answer, or with null when nobody will answer — or
+   * the agent's loop stays parked on it forever. Omitted by a caller with no
+   * user to reach (the remote server), which leaves such tools to fall back
+   * on their own text.
+   */
+  wait?: (
+    id: string,
+    kind: string,
+    data: BlockData,
+    label: string,
+  ) => Promise<string | null>;
   /** Called once a run exists so the caller can abort it (IPC cancel,
    *  a remote client disconnecting). Agent and plain-LLM runs each call it
    *  once they have a live request to tear down. */
@@ -606,6 +627,15 @@ export async function runAgent(
     // narrow descriptor (see `@repo/plugins`); this wraps it in the SDK's
     // shape and hands a read-only settings context through, so a plugin
     // reads its own config without knowing the app's store.
+    //
+    // A caller with nobody to ask omits `wait`, and a tool that wants an
+    // answer treats its absence the same way it treats a missing `addBlock`:
+    // it falls back on text rather than parking a run nothing can release.
+    const waitFor = ctx.wait;
+    // Wire ids for the questions a tool raises. A per-run counter, on the
+    // same terms as the tool ids below: unique without depending on anyone
+    // else's id scheme, since all the renderer does with one is hand it back.
+    let nextWaitId = 0;
     const mountedPluginTools = ctx.pluginTools.map((tool) =>
       defineTool({
         name: tool.name,
@@ -627,6 +657,28 @@ export async function runAgent(
             // own state to a kind. See `ToolRunContext.addBlock`.
             addBlock: (kind, data, label) =>
               emit({ type: "block", kind, data, label }),
+            // A question the tool cannot answer itself: the block lands in
+            // the graph and the run stops inside this very call until it is
+            // answered, with the answer arriving as the tool's own result so
+            // the model continues from it rather than from having asked. See
+            // `ToolRunContext.wait`.
+            wait: waitFor
+              ? (kind, data, label) => {
+                  // A kind that declares no `resume` has nothing a person
+                  // could do to release the run, so the question is refused
+                  // before a block nobody can answer lands in the graph: the
+                  // tool hears "no answer" and says so, instead of the run
+                  // hanging on a form that can never be submitted.
+                  if (!ctx.kinds[kind]?.resume) return Promise.resolve(null);
+                  const id = String(++nextWaitId);
+                  // Registered by the caller before the event goes out, so an
+                  // answer that comes back fast cannot outrun the promise it
+                  // belongs to.
+                  const answer = waitFor(id, kind, data, label);
+                  emit({ type: "wait", id, kind, label, data });
+                  return answer;
+                }
+              : undefined,
           });
           return {
             content: [{ type: "text" as const, text: result.content }],
@@ -932,8 +984,9 @@ export async function runAgent(
         };
         pendingArgs.set(sessionEvent.toolCallId, entry);
         // A successful `display_media`/`ask_user` already emits its own
-        // block (the media block, or the question block), so it opens none
-        // here; a failed one still records a `tool` block (see
+        // block (the media block, or the question block a `wait` event
+        // carries), so it opens none here; a failed one still records a
+        // `tool` block (see
         // `tool_execution_end`) without a `tool_start` before it.
         if (
           sessionEvent.toolName === displayMedia.name ||
@@ -1010,7 +1063,8 @@ export async function runAgent(
         const pending = pendingArgs.get(sessionEvent.toolCallId);
         pendingArgs.delete(sessionEvent.toolCallId);
         partialTexts.delete(sessionEvent.toolCallId);
-        // A successful `display_media`/`ask_user` already emitted its block,
+        // A successful `display_media`/`ask_user` already emitted its block
+        // (a media block, or the question block that releases the run),
         // so recording the call as well would say nothing new. A rejected
         // one has nothing to show, and a silent failure is worse than a
         // visible one; its `tool_start` was skipped, so its wire id is

@@ -18,18 +18,28 @@ import type { AgentEvent, AgentRunRequest } from "@shared/agent-events.js";
  * simplification of the original's split try/catch, which already treated
  * `done` and `error` as terminal through a resolved await or a `failure`
  * variable checked after it.
+ *
+ * `answer` is the other half of a run that asked something: it settles the
+ * tool call parked behind a `wait` event, so the same stream — which keeps
+ * emitting into `onEvent` — carries on from the answer. Both it and `cancel`
+ * are the bridge's own handle to this one run, so neither can be aimed at
+ * another run happening at the same time.
  */
 export function streamInference(
   request: AgentRunRequest,
   onEvent: (event: AgentEvent) => void,
-): { done: Promise<void>; cancel: () => void } {
+): {
+  done: Promise<void>;
+  cancel: () => void;
+  answer: (id: string, value: string | null) => void;
+} {
   // `Promise.withResolvers` would read cleaner here, but this project's
   // shared tsconfig pins `lib` to `es2022`, which predates it.
   let finish: () => void;
   const done = new Promise<void>((resolve) => {
     finish = resolve;
   });
-  const runCancel = window.api.agent.run(request, (event) => {
+  const run = window.api.agent.run(request, (event) => {
     onEvent(event);
     if (event.type === "done" || event.type === "error") finish();
   });
@@ -37,8 +47,14 @@ export function streamInference(
   // process's terminal event never reaches `onEvent` after an abort. Resolve
   // the promise ourselves, or the engine would keep the run flagged forever.
   const cancel = () => {
-    runCancel();
+    run.cancel();
     finish();
   };
-  return { done, cancel };
+  // Fire-and-forget, like the run itself: the answer travels by IPC and the
+  // run's own events say what became of it, so there is nothing here to
+  // await. A run that already ended simply has nowhere to put it.
+  const answer = (id: string, value: string | null) => {
+    void run.answer(id, value);
+  };
+  return { done, cancel, answer };
 }

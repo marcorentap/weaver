@@ -8,7 +8,14 @@ import {
   useTransition,
 } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronDown, ChevronRight, EyeOff, Lock, Plus } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  EyeOff,
+  Lock,
+  MessageCircleQuestion,
+  Plus,
+} from "lucide-react";
 import type { Block, BlockGraph, BlockId, Position } from "@repo/core";
 import {
   childIds,
@@ -241,6 +248,7 @@ function BlockRow({
   inSelection,
   line,
   running,
+  waiting,
   flashing,
   locked,
   hidden,
@@ -263,6 +271,9 @@ function BlockRow({
   line: number | null;
   /** Whether this block has a hook in flight right now. */
   running: boolean;
+  /** Whether a running inference is stopped on this block, waiting for its
+   *  answer before it can take another step. */
+  waiting: boolean;
   /** Whether a running inference appends its next block right after this
    *  row. Flashes the bottom border. */
   flashing: boolean;
@@ -406,6 +417,12 @@ function BlockRow({
           <Lock
             className="size-3 shrink-0 text-muted-foreground"
             aria-label="Locked while streaming in"
+          />
+        ) : null}
+        {waiting ? (
+          <MessageCircleQuestion
+            className="size-3 shrink-0 text-foreground"
+            aria-label="Waiting for your answer"
           />
         ) : null}
         {hidden ? (
@@ -693,7 +710,16 @@ function ChatView({
     openActions: boolean;
     runInference?: boolean;
     customInference?: boolean;
+    /** The block is a question a run is stopped on, so the row is followed
+     *  and its own answer dialog opened with it: the run cannot move again
+     *  until someone submits an answer. */
+    answerWait?: boolean;
   } | null>(null);
+  /** The waiting block whose answer dialog has already been opened, so that
+   *  following a question happens once per question rather than once per
+   *  render. Set (and never cleared) as the question-following block below
+   *  spots a new one; a question a run raises later has a new block id. */
+  const [handledWaitId, setHandledWaitId] = useState<BlockId | null>(null);
   const { settings, hydrated } = useSettings();
 
   // ---- Live graph state --------------------------------------------------
@@ -708,11 +734,12 @@ function ChatView({
   // session's engine the first time it is asked for; every later mount
   // reattaches to whatever the registry already has.
   const engine = getLiveGraph(session?.id ?? "none", initialGraph);
-  const { graph, dirty, savedAt, running, appendTails } = useSyncExternalStore(
-    engine.subscribe,
-    engine.getSnapshot,
-    engine.getSnapshot,
-  );
+  const { graph, dirty, savedAt, running, waiting, appendTails } =
+    useSyncExternalStore(
+      engine.subscribe,
+      engine.getSnapshot,
+      engine.getSnapshot,
+    );
   const liveNodes = chatNodes(graph);
 
   // One real `setInterval` per block asking for one, at its own configured
@@ -778,7 +805,27 @@ function ChatView({
   // engine-level definition (`live-graph.ts`'s `lockedBlockIds`); the
   // engine itself rejects edits and deletes against these, this just
   // decides what the menu offers so a rejected action never even shows.
-  const lockedIds = lockedBlockIds(graph, appendTails);
+  const lockedIds = lockedBlockIds(graph, appendTails, waiting);
+  // A run stopped on a question cannot move until it is answered, so the
+  // newest waiting block is followed and its answer dialog opened with it,
+  // through the same `pendingFocus` path creating and moving a block take.
+  // Keyed on the waiting set rather than on the block's own data, so closing
+  // the dialog without answering does not put it straight back in the user's
+  // face — only a further question does. State rather than a ref for the
+  // "already followed" marker, because this adjusts what the engine told us
+  // during a render, exactly as the focus consumption below does.
+  const askedId = [...waiting].pop() ?? null;
+  if (askedId !== null && askedId !== handledWaitId) {
+    setHandledWaitId(askedId);
+    setPendingFocus({
+      id: askedId,
+      openActions: false,
+      // Only the multichoice kind has an answer dialog to open; any other
+      // resumable kind is at least brought into view, its own actions being
+      // where its answer lives.
+      answerWait: graph.blocks[askedId]?.kind === MULTICHOICE_KIND,
+    });
+  }
   // Follows a block to its new row the instant it shows up in `rows`.
   // Immediately for a top-level block, one render later for a nested one,
   // since expanding its container also happens during this same "adjust
@@ -789,6 +836,7 @@ function ChatView({
     if (i !== -1) {
       setCursor(i);
       if (pendingFocus.openActions) setPopup({ kind: "actions" });
+      if (pendingFocus.answerWait) setPopup({ kind: "multichoiceSelect" });
       if (pendingFocus.runInference) void runInference(pendingFocus.id);
       if (pendingFocus.customInference) setPopup({ kind: "customInference" });
       setPendingFocus(null);
@@ -2313,6 +2361,7 @@ function ChatView({
                 }
                 line={lineNumber(i)}
                 running={running.has(entry.block.id)}
+                waiting={waiting.has(entry.block.id)}
                 flashing={runningTailIds.has(entry.block.id)}
                 locked={lockedIds.has(entry.block.id)}
                 hidden={Boolean(entry.block.hidden)}

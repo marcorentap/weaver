@@ -98,7 +98,9 @@ Everything lives in `packages/core`.
   context; omit to include them), `snapshot` (the block as a document, for
   previews and summaries), `turns` (the block as conversation, for a kind
   whose one block spans more than one speaker; omit for the ordinary single
-  turn of `role` + `snapshot`), `hooks` (named async state→state functions),
+  turn of `role` + `snapshot`), `resume` (whether and how a run stopped on
+  one of its blocks starts again; omit for a kind no run can be paused on),
+  `hooks` (named async state→state functions),
   `callbacks` (declarative references to another block's hook), `schedule`
   (self-driving timer request), `defaults`. Everything parses through the
   schema, so no consumer ever sees partially-specified state.
@@ -120,7 +122,9 @@ validation pick it up from the registry.
   them to its own store (`plugins.*` IPC).
 - Tools are SDK-agnostic (`PluginTool`: TypeBox `parameters`, `execute(args, ctx)`
   returning `{ content, details }`). `ctx.addBlock` is optional; fall back to
-  text when the harness can't materialize blocks.
+  text when the harness can't materialize blocks. `ctx.wait` is the same shape
+  for a question the tool cannot answer itself: it materializes a block and
+  parks the run inside the tool call until that block's kind resumes it.
 
 ## Agent runs
 
@@ -141,6 +145,17 @@ summarization) or creates a full pi session with our custom tools
   never on the first failed attempt.
 - `display_media` deliberately only turns a URI into a media block, so the model
   can't hand-write a kind's own fields.
+- A run can stop partway. A tool that calls `ctx.wait(kind, data, label)`
+  materializes that block and leaves the agent loop parked inside its own call;
+  `runAgent` emits a `wait` event (not `block`), and the caller resolves it
+  through `AgentRunContext.wait`, which the IPC handler wires to
+  `agent:run:answer` and the remote server omits (so a remote run degrades to
+  the tool's own text). On the renderer side the block lands as the run's output
+  and its engine watches it: `live-graph.ts` holds it in `pendingWaits`, exempts
+  it from the run's lock (`lockedBlockIds`) because answering _is_ an edit, and
+  answers the tool the moment the block's `resume` reads a value out of the
+  updated state. A run that is cancelled, whose renderer is gone, or whose
+  question is deleted is released with null instead of hanging.
 
 ## Conventions
 

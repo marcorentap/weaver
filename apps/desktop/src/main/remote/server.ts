@@ -1,4 +1,9 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type Server,
+  type ServerResponse,
+} from "node:http";
 import type { AgentRunContext } from "../lib/run-agent.js";
 import { runAgent } from "../lib/run-agent.js";
 import type { RemoteKeyStore } from "./keys.js";
@@ -148,6 +153,12 @@ async function streamRun(
       kinds: options.agent.kinds,
       pluginTools: options.agent.pluginTools,
       getSetting: options.agent.getSetting,
+      // No `wait`: a question a tool raises is answered by a person looking at
+      // this server's graph, and this stream is one-way — the client that gets
+      // the `wait` event has no channel back to the tool call behind it. A
+      // question-raising tool therefore sees no one to ask (see
+      // `ToolRunContext.wait`) and says as much instead of stopping the run
+      // until the client disconnects.
       onSession: (abort) => {
         aborts.push(abort);
       },

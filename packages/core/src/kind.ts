@@ -138,6 +138,13 @@ export type BlockKind = {
    * `snapshot`. See `defineKind.turns`.
    */
   turns: ((data: BlockData, ctx: SnapshotContext) => ContextMessage[]) | null;
+  /**
+   * The text a run waiting on this block resumes with, read out of the
+   * block's own state, or null while the block holds no answer yet. Null as
+   * a whole when the kind declares none, which is every kind that no run can
+   * be parked on. See `defineKind.resume`.
+   */
+  resume: ((data: BlockData) => string | null) | null;
   /** Names of hooks this kind exposes, callable by id from other blocks,
    *  e.g. a timer's target, or by the harness itself, e.g. a scheduler's
    *  tick. */
@@ -213,6 +220,28 @@ export function defineKind<S>(def: {
    */
   turns?: (state: S, ctx: SnapshotContext) => readonly ContextMessage[];
   /**
+   * Whether a run can stop on a block of this kind and be started again by
+   * the person answering it, and with what. Give the value the run resumes
+   * with, read out of the block's state, or null while the state holds no
+   * answer — the difference between "waiting for the user" and "the user
+   * answered", which is exactly what a paused run needs from the block it is
+   * paused on. Omit for a kind a run can never be paused on, which is most of
+   * them: there is nothing to answer in a file, a tool call, or a timer.
+   *
+   * The declaration lives here because only the kind knows what answering one
+   * of its blocks means. `multichoice` resumes with its submitted answer as
+   * bullets; a kind asking for a yes would resume with the fact that it was
+   * confirmed. Nothing else in the app has to know: a run parked on a block
+   * is released by whatever edit makes this return a value, from the block's
+   * own dialog, a field edit, or a hook, and the text is what the tool call
+   * that raised it receives as its result.
+   *
+   * Meant to be a pure read of state. Answering is a state change like any
+   * other, so a run resumes on the same path every other edit takes, and a
+   * kind that forgets to record the answer as state never releases the run.
+   */
+  resume?: (state: S) => string | null;
+  /**
    * Named functions this kind exposes. Each receives the block's current
    * state, already parsed, and returns its next state. Sync for pure
    * transforms, async for anything that does IO first, e.g. an HTTP fetch.
@@ -234,6 +263,7 @@ export function defineKind<S>(def: {
 }): BlockKind {
   const hooks = def.hooks ?? {};
   const turns = def.turns;
+  const resume = def.resume;
   return {
     kind: def.kind,
     role: def.role ?? "developer",
@@ -246,6 +276,7 @@ export function defineKind<S>(def: {
     turns: turns
       ? (data, ctx) => [...turns(def.schema.parse(data), ctx)]
       : null,
+    resume: resume ? (data) => resume(def.schema.parse(data)) : null,
     hooks: Object.keys(hooks),
     callbacks: def.callbacks ?? [],
     defaults:

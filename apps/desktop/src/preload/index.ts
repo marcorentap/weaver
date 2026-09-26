@@ -134,10 +134,22 @@ const api: WeaverApi = {
       };
       ipcRenderer.on(channel, listener);
       void ipcRenderer.invoke("agent:run:start", runId, request);
-      return () => {
-        if (done) return;
-        void ipcRenderer.invoke("agent:run:cancel", runId);
-        cleanup();
+      return {
+        cancel: () => {
+          if (done) return;
+          void ipcRenderer.invoke("agent:run:cancel", runId);
+          cleanup();
+        },
+        // The question's own `id` comes from the run's `wait` event; the
+        // `runId` is the one main keyed the run under, so the answer is
+        // aimed at this run and no other that may be in flight beside it.
+        answer: (id: string, value: string | null) =>
+          ipcRenderer.invoke(
+            "agent:run:answer",
+            runId,
+            id,
+            value,
+          ) as Promise<void>,
       };
     },
   },
