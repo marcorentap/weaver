@@ -308,12 +308,19 @@ export function assertTree(graph: BlockGraph): void {
  * caller that has already said who wrote the block — a turn-by-turn
  * serialization puts a `user`/`assistant` block in a message of that role,
  * where `assistant: ` in front of the text would only repeat it.
+ *
+ * `options.context` on marks the snapshot as one going to a model as the
+ * run's context, which a kind may opt out of (`BlockKind.context`): such a
+ * block returns "" here, and so does one "nested" beneath the block being
+ * snapshotted, since the options carry down the recursion. A snapshot for
+ * any other purpose — a block the user asked to summarize, a preview — is
+ * taken without it and shows the block as it is.
  */
 export function snapshotBlock(
   graph: BlockGraph,
   id: BlockId,
   registry: KindRegistry,
-  options?: { label?: boolean },
+  options?: { label?: boolean; context?: boolean },
 ): string {
   const block = getBlock(graph, id);
   if (block.hidden) return "";
@@ -321,9 +328,13 @@ export function snapshotBlock(
   if (!kind) {
     throw new Error(`no kind registered for block kind: ${block.kind}`);
   }
+  if (options?.context && !kind.context) return "";
   const body = kind.snapshot(block.data, {
     block,
-    nested: (childId) => snapshotBlock(graph, childId, registry),
+    // The mode carries into the subtree: the snapshot being taken is of the
+    // block above, and everything nested under it is part of that same
+    // snapshot rather than a new one.
+    nested: (childId) => snapshotBlock(graph, childId, registry, options),
     children: childIds(graph, id),
   });
   if (!body || !block.label || options?.label === false) return body;

@@ -53,9 +53,17 @@ export function parseEnv(text: string): Record<string, string> {
 export const environmentKind = defineKind({
   kind: ENV_KIND,
   schema: envState,
-  // Names only, not values. An environment block configures processes, and
-  // its values (API keys, paths) have no business flowing into the model's
-  // context; the agent reads them from its own environment instead.
+  // An environment block is config, not context. Its job is done before the
+  // model is called: `mergedEnvironment` turns it into the run's own
+  // environment, where `WEAVER_PWD` becomes the working directory and the
+  // rest reach the agent's tools. Telling the model about it would only
+  // spend tokens describing what it can see by looking — and the names
+  // alone say little — so the block stays out of the context entirely.
+  //
+  // It still snapshots to its variable names: an explicit action on the
+  // block, such as summarizing it, reads the block itself and is not the
+  // run's context (`BlockKind.context`).
+  context: false,
   snapshot: (state) => {
     const keys = Object.keys(parseEnv(state.text));
     return keys.length === 0 ? "" : keys.join(", ");

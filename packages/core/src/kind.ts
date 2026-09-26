@@ -105,6 +105,20 @@ export type BlockKind = {
    *  `MessageRole`. */
   role: MessageRole;
   /**
+   * Whether blocks of this kind are part of a run's context at all. A kind
+   * that opts out contributes nothing to what the model reads, wherever in
+   * the graph one of its blocks sits — including nested inside another
+   * block, whose snapshot would otherwise carry it along. This is for a
+   * kind whose content does its work outside the model: an environment
+   * block configures the run rather than informing it, so sending it would
+   * only spend tokens saying what the agent can find out by looking.
+   *
+   * Opting out is about a run's context, not about the block: such a block
+   * still renders, still snapshots for an explicit action like summarizing
+   * it, and is still whatever else its kind makes it.
+   */
+  context: boolean;
+  /**
    * The schema of this kind's state, kept alongside the erased `parse`. A
    * caller can describe the kind from it, or derive a JSON Schema to hand a
    * model that creates blocks. Reading it is fine; every write still goes
@@ -166,6 +180,10 @@ export function defineKind<S>(def: {
    *  sits in. Omit for a kind that is not a conversational turn of its own;
    *  the default, `developer`, is for context rather than speech. */
   role?: MessageRole;
+  /** Whether blocks of this kind reach the model as context. Omit to be
+   *  part of it, which is what a kind that says something wants. See
+   *  `BlockKind.context`. */
+  context?: boolean;
   schema: ZodType<S>;
   snapshot: (state: S, ctx: SnapshotContext) => string;
   /**
@@ -192,6 +210,7 @@ export function defineKind<S>(def: {
   return {
     kind: def.kind,
     role: def.role ?? "developer",
+    context: def.context ?? true,
     schema: def.schema as ZodType<unknown>,
     parse: (data) => def.schema.parse(data),
     // Parsing here means `def.snapshot` only ever receives complete state,

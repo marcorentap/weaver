@@ -48,9 +48,9 @@ function roleOf(block: Block, registry: KindRegistry): MessageRole {
  *   not a turn whose role already says who wrote it drops its label, which
  *   would only repeat the role ("assistant: …").
  * - Empty snapshots are dropped instead of becoming empty messages. A hidden
- *   block and a group with nothing under it both snapshot to "", and a
- *   provider reading an empty message has been told nothing in the loudest
- *   possible way.
+ *   block, a group with nothing under it, and a kind that opted out of
+ *   context (`BlockKind.context`) all snapshot to "", and a provider reading
+ *   an empty message has been told nothing in the loudest possible way.
  */
 export function messagesAbove(
   graph: BlockGraph,
@@ -63,6 +63,10 @@ export function messagesAbove(
     const role = roleOf(getBlock(graph, sibling), registry);
     const content = snapshotBlock(graph, sibling, registry, {
       label: role === "developer",
+      // This is a run's context, so a kind that opted out of one is absent —
+      // here and, through the option carry-down, nested in any block that
+      // does contribute.
+      context: true,
     });
     if (!content.trim()) continue;
     const open = messages[messages.length - 1];
