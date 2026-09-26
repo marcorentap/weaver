@@ -76,9 +76,10 @@ Everything lives in `packages/core`.
   user). A kind may also opt out of a run's context entirely (`context: false`;
   `environment` does, since its variables already reached the run), which drops
   its blocks wherever they sit — the option carries down `snapshotBlock`'s
-  recursion. `main/lib/run-agent.ts` splices the list into the request pi built,
-  via the provider's `onPayload` hook, with the anchoring block's own content as
-  the final `user` turn.
+  recursion. The anchoring block contributes its own turns the same way
+  (`messagesOfBlock`), the last of them being what the run is prompted with;
+  `main/lib/run-agent.ts` splices the rest into the request pi built, via the
+  provider's `onPayload` hook, ahead of pi's own first turn.
 - A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
   `role` (the conversational role its content takes in a run's context; omit
   for `developer`), `context` (false to keep the kind's blocks out of a run's

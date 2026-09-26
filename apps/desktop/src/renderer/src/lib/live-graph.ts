@@ -14,6 +14,7 @@ import {
   lastChildId,
   mergedEnvironment,
   messagesAbove,
+  messagesOfBlock,
   moveBlock as moveBlockCore,
   removeBlock,
   snapshotBlock,
@@ -664,12 +665,36 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       ].join("\n");
       context = [];
     } else {
-      prompt = snapshotBlock(snapshot.graph, id, kinds);
+      // Everything above the block, then the block's own turns. The last of
+      // them is what the run is prompted with, because a request has to end
+      // on a user turn for the model to have something to answer — and for
+      // most kinds that last turn is the block's document, exactly as a
+      // prompt has always been. A kind whose one block holds more than one
+      // voice brings its earlier turns along: an answered question is the
+      // question as an assistant turn, then the person's answer as the
+      // prompt. Its earlier turns go ahead of it rather than inside the
+      // document, so what the model reads is the exchange the block holds
+      // and not one message with a question and an answer run together.
+      const above = messagesAbove(snapshot.graph, id, kinds);
+      const anchor = kinds[block.kind]?.turns
+        ? messagesOfBlock(snapshot.graph, id, kinds)
+        : [];
+      const last = anchor[anchor.length - 1];
+      // A block whose turns do not end on the user's own — a question nobody
+      // has answered yet, which holds the question and nothing after it —
+      // has no turn a request can be prompted with. It falls back to the
+      // document, which at least reads as the thing being asked about.
+      if (last && last.role === "user") {
+        prompt = last.content;
+        context = [...above, ...anchor.slice(0, -1)];
+      } else {
+        prompt = snapshotBlock(snapshot.graph, id, kinds);
+        context = above;
+      }
       if (!prompt.trim()) {
         appendPreflightError("block is empty. Nothing to send");
         return;
       }
-      context = messagesAbove(snapshot.graph, id, kinds);
     }
     // The environment the block sees, walked up the graph the same way the
     // agent's own context is. The main process turns `WEAVER_PWD` into the

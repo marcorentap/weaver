@@ -43,13 +43,24 @@ function roleOf(block: Block, registry: KindRegistry): MessageRole {
  * of an exchange: a question a run raised and the person's answer to it are
  * one `multichoice` block and two turns. Nothing here needs to know which
  * kind does that; it asks the kind and takes what it is given.
+ *
+ * This is the whole of how a block becomes turns, for the graph above a run
+ * (`messagesAbove`) and for the block a run is anchored on alike, so a block
+ * cannot read one way in context and another when it is the one being run.
+ * The exclusions are here rather than at the callers for the same reason:
+ * hidden, opted out, and (for a kind whose turns are built from state)
+ * nothing to say are all answers of "this block contributes no turns".
  */
-function messagesOfBlock(
+export function messagesOfBlock(
   graph: BlockGraph,
   id: BlockId,
   registry: KindRegistry,
 ): ContextMessage[] {
   const block = getBlock(graph, id);
+  // A hidden block contributes nothing, here or as the subject of a run: its
+  // subtree is hidden with it, and hiding is how a person takes material out
+  // of what the model reads without deleting it.
+  if (block.hidden) return [];
   const kind = registry[block.kind];
   if (!kind) {
     throw new Error(`no kind registered for block kind: ${block.kind}`);
@@ -109,7 +120,6 @@ export function messagesAbove(
 ): ContextMessage[] {
   const messages: ContextMessage[] = [];
   for (const sibling of precedingBlockIds(graph, id)) {
-    if (getBlock(graph, sibling).hidden) continue;
     for (const message of messagesOfBlock(graph, sibling, registry)) {
       if (!message.content.trim()) continue;
       const open = messages[messages.length - 1];

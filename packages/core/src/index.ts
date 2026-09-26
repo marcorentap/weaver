@@ -30,7 +30,7 @@ import type {
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
 import type { ContextMessage } from "./messages";
-import { messagesAbove } from "./messages";
+import { messagesAbove, messagesOfBlock } from "./messages";
 import type { GroupState, TextState } from "./kinds/text";
 import {
   GROUP_KIND,
@@ -90,6 +90,7 @@ export {
   lastChildId,
   mergedEnvironment,
   messagesAbove,
+  messagesOfBlock,
   moveBlock,
   parseEnv,
   positionOf,

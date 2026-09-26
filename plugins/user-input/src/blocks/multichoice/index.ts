@@ -86,6 +86,10 @@ export function multichoiceSnapshot(state: MultichoiceState): string {
  * The `user:` marker `multichoiceSnapshot` writes has no place in these
  * turns. There the role says who is speaking, and an answer quoting itself
  * back would read as a person narrating their own reply.
+ *
+ * This holds wherever the block is read from: as context above a later run,
+ * and as the block a run is anchored on, where the answer is what the model
+ * is prompted with and the question is the turn it continues from.
  */
 function multichoiceTurns(state: MultichoiceState): ContextMessage[] {
   const turns: ContextMessage[] = [];
