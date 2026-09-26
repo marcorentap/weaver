@@ -43,6 +43,13 @@ const TITLE_PROMPT = [
   "Reply with only the title, no preamble or quotes.",
 ].join("\n");
 
+/** Hard output cap for the session-title run. The instruction asks for a few
+ *  words, but a chatty model will happily answer with a paragraph, and that
+ *  paragraph becomes the session's name. The cap is enforced by the provider
+ *  (the request's own `maxTokens`), not by trimming the answer afterwards, so
+ *  the model's own stream ends early instead of running on past the name. */
+const TITLE_MAX_TOKENS = 24;
+
 /**
  * The instruction a summarization run sends the model. The run is isolated:
  * only the target's own turns go along as the run's context — never the graph
@@ -1008,6 +1015,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         ...connection,
         tools: connection.tools ?? [],
         thinkingLevel: connection.thinkingLevel as ThinkingLevel | undefined,
+        // After the spread, so a title run is capped no matter what the
+        // caller's connection carries (the inference defaults allow 8192).
+        maxTokens: TITLE_MAX_TOKENS,
         context,
         prompt: TITLE_PROMPT,
         plain: true,
