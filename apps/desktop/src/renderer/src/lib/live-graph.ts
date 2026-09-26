@@ -32,12 +32,15 @@ import { streamInference } from "@/lib/inference";
 import type { ThinkingLevel } from "@shared/agent-events.js";
 
 /**
- * The instruction the session-title run sends the model, with the visible
- * graph above it as the run's context. Read-only: the title is returned to
- * the caller, nothing is written or appended.
+ * The instruction the session-title run sends the model. The session travels
+ * above it as a single `developer` message holding the whole graph as a JSON
+ * list of `{ role, content }` turns, so the model reads the session as data
+ * to label rather than as a conversation it is part of and should continue.
+ * Read-only: the title is returned to the caller, nothing is written or
+ * appended.
  */
 const TITLE_PROMPT = [
-  "The content above is a graph of blocks — this session's document.",
+  "The JSON above is a session's messages, each with a role and its content.",
   "Name the session: a short label, a few words, that tells what it is about.",
   "Read it from the content, not a generic phrase.",
   "Reply with only the title, no preamble or quotes.",
@@ -993,11 +996,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
 
   /** Generate a short title for the whole session from its graph context.
    *  The visible graph — `messagesOfGraph`'s scope, the same material an
-   *  inference run reads as context, read as turns rather than flattened
-   *  into one string so a person's message, a run's reply and the material
-   *  between them keep their roles — is the run's context, and a
-   *  plain read-only LLM call names the session from it — no tools, no
-   *  graph writes, no reply blocks appended. The graph itself is untouched,
+   *  inference run reads as context — is serialized to a JSON list of
+   *  `{ role, content }` turns so a person's message, a run's reply and the
+   *  material between them keep their roles without reading as a conversation
+   *  to continue, and a plain read-only LLM call names the session from it —
+   *  no tools, no graph writes, no reply blocks appended. The graph itself is untouched,
    *  so nothing streams in and nothing needs locking or undo. Returns the
    *  produced title, or null when the graph is empty, the call fails, or
    *  the model answers with nothing. The session menu's `R` action drives
@@ -1006,8 +1009,19 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   async function generateTitle(
     connection: RunConnection,
   ): Promise<string | null> {
-    const context = messagesOfGraph(snapshot.graph, kinds);
-    if (context.length === 0) return null;
+    const messages = messagesOfGraph(snapshot.graph, kinds);
+    if (messages.length === 0) return null;
+    // The session is handed over as serialized data, not as the run's own
+    // turns: sent turn-by-turn, the model reads a conversation still in
+    // progress and is as likely to answer its last message as to name it.
+    // As JSON in one `developer` message it is unmistakably material to
+    // label, and the ask above it stays the only turn to answer.
+    const context = [
+      {
+        role: "developer" as const,
+        content: JSON.stringify(messages, null, 2),
+      },
+    ];
     let title = "";
     let failed = false;
     const { done } = streamInference(
