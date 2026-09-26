@@ -1,6 +1,7 @@
-import { open, readdir, stat } from "node:fs/promises";
+import { open, readdir, readFile, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { attachableImage } from "@plugins/rich-media";
 import { runSsh, shellQuote, sshPath } from "./ssh.js";
 import { MAX_READ_BYTES, buildSymbolIndex } from "./symbol-index.js";
 
@@ -42,9 +43,13 @@ type Backend =
 function resolveBackend(source: string, cwd: string): Backend {
   const url = parseSource(source);
   if (!url) {
-    return { kind: "local", path: isAbsolute(source) ? source : resolve(cwd, source) };
+    return {
+      kind: "local",
+      path: isAbsolute(source) ? source : resolve(cwd, source),
+    };
   }
-  if (url.protocol === "file:") return { kind: "local", path: fileURLToPath(url) };
+  if (url.protocol === "file:")
+    return { kind: "local", path: fileURLToPath(url) };
   if (url.protocol === "ssh:") return { kind: "ssh", url };
   return { kind: "http", url };
 }
@@ -52,7 +57,11 @@ function resolveBackend(source: string, cwd: string): Backend {
 /** Reads exactly `[start, start + length)`, or fewer bytes at real EOF.
  *  Never more, so a caller can tell "hit the end of the file" apart from
  *  "there is more after what I asked for" just by comparing lengths. */
-async function readLocalRange(path: string, start: number, length: number): Promise<Buffer> {
+async function readLocalRange(
+  path: string,
+  start: number,
+  length: number,
+): Promise<Buffer> {
   const handle = await open(path, "r");
   try {
     const buf = Buffer.alloc(length);
@@ -83,7 +92,11 @@ async function readLocalDirectory(path: string): Promise<string[]> {
     .sort((a, b) => a.localeCompare(b));
 }
 
-async function readHttpRange(url: URL, start: number, length: number): Promise<Buffer> {
+async function readHttpRange(
+  url: URL,
+  start: number,
+  length: number,
+): Promise<Buffer> {
   const to = start + length - 1;
   const res = await fetch(url, { headers: { Range: `bytes=${start}-${to}` } });
   if (!res.ok && res.status !== 206) {
@@ -100,7 +113,11 @@ async function readHttpRange(url: URL, start: number, length: number): Promise<B
 /** `tail -c +N | head -c L` bounds the remote side to the range asked for,
  *  rather than streaming a whole huge file down the pipe and truncating on
  *  this end. */
-async function readSshRange(url: URL, start: number, length: number): Promise<Buffer> {
+async function readSshRange(
+  url: URL,
+  start: number,
+  length: number,
+): Promise<Buffer> {
   const path = shellQuote(sshPath(url));
   const command =
     start > 0
@@ -136,7 +153,11 @@ async function readSshDirectory(url: URL): Promise<string[]> {
     .sort((a, b) => a.localeCompare(b));
 }
 
-async function fetchRange(backend: Backend, start: number, length: number): Promise<Buffer> {
+async function fetchRange(
+  backend: Backend,
+  start: number,
+  length: number,
+): Promise<Buffer> {
   switch (backend.kind) {
     case "local":
       return readLocalRange(backend.path, start, length);
@@ -256,7 +277,9 @@ export async function readSource(
   }
   if (directoryLines !== null) {
     if (byteMode) {
-      throw new Error("byteOffset/byteLength read a file; this path is a directory");
+      throw new Error(
+        "byteOffset/byteLength read a file; this path is a directory",
+      );
     }
     return windowLines(directoryLines, offset, limit);
   }
@@ -283,11 +306,19 @@ export async function readSource(
     if (backend.kind === "local") {
       const index = await buildSymbolIndex(backend.path);
       if (index) {
-        return { content: index.content, truncated: false, totalLines: index.totalLines };
+        return {
+          content: index.content,
+          truncated: false,
+          totalLines: index.totalLines,
+        };
       }
     }
     const firstPage = await scanText(backend, null);
-    const result = windowLines(firstPage.text.split("\n"), undefined, undefined);
+    const result = windowLines(
+      firstPage.text.split("\n"),
+      undefined,
+      undefined,
+    );
     if (!firstPage.eof) {
       result.truncated = true;
       result.totalLines = undefined;
@@ -298,7 +329,8 @@ export async function readSource(
   // Windowed read: scan forward until the window is covered, then slice.
   // `totalLines` is only known once the scan reaches EOF (small files,
   // windows near the end); a scan stopped at the IO cap reports no total.
-  const until = limit === undefined ? Number.MAX_SAFE_INTEGER : (offset ?? 1) - 1 + limit;
+  const until =
+    limit === undefined ? Number.MAX_SAFE_INTEGER : (offset ?? 1) - 1 + limit;
   const scanned = await scanText(backend, until);
   const result = windowLines(scanned.text.split("\n"), offset, limit);
   if (!scanned.eof) {
@@ -325,7 +357,8 @@ async function scanText(
   const chunks: Buffer[] = [];
   let pos = 0;
   let newlines = 0;
-  const pageSize = until === null || backend.kind === "local" ? MAX_BYTES : 256 * 1024;
+  const pageSize =
+    until === null || backend.kind === "local" ? MAX_BYTES : 256 * 1024;
   while (true) {
     const remaining = MAX_SCAN_BYTES - pos;
     if (remaining <= 0) break;
@@ -343,4 +376,101 @@ async function scanText(
     pos += buf.length;
   }
   return { text: Buffer.concat(chunks).toString("utf8"), eof: false };
+}
+
+/**
+ * How many bytes of a picture a read will carry. Bigger than anything a
+ * provider would take as a content part (pi resizes what reaches a request
+ * anyway), but bounded: an image is read whole, and a read tool that can pull
+ * an arbitrarily large file into the process's memory is a way to hang the
+ * app on one tool call.
+ */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+export type ReadImage = {
+  mimeType: string;
+  /** The picture as base64, ready to become a content part, or null when
+   *  the source is over `MAX_IMAGE_BYTES`. */
+  data: string | null;
+  /** The source's size in bytes, or null when it is over the cap and its
+   *  size was not knowable without reading past it (an `ssh://` host, where
+   *  the read is bounded by a byte count rather than a stat). */
+  bytes: number | null;
+};
+
+/** A whole source, or the fact that it is over `cap`. `over` carries the
+ *  source's size when that was known without reading it (a local stat, an
+ *  HTTP `Content-Length`) and null when it was not. */
+async function fetchWhole(
+  backend: Backend,
+  cap: number,
+): Promise<{ buf: Buffer } | { over: number | null }> {
+  switch (backend.kind) {
+    case "local": {
+      const info = await stat(backend.path);
+      if (info.size > cap) return { over: info.size };
+      return { buf: await readFile(backend.path) };
+    }
+    case "ssh": {
+      // One byte past the cap, never returned: enough to tell "at the cap"
+      // from "over it" without a second round trip.
+      const path = shellQuote(sshPath(backend.url));
+      const buf = await runSsh(backend.url, `head -c ${cap + 1} -- ${path}`);
+      return buf.length > cap ? { over: null } : { buf };
+    }
+    case "http": {
+      const res = await fetch(backend.url);
+      if (!res.ok && res.status !== 206) {
+        throw new Error(
+          `${backend.url} responded ${res.status} ${res.statusText}`,
+        );
+      }
+      const declared = Number(res.headers.get("content-length") ?? "");
+      if (Number.isFinite(declared) && declared > cap)
+        return { over: declared };
+      const buf = Buffer.from(await res.arrayBuffer());
+      return buf.length > cap ? { over: buf.length } : { buf };
+    }
+  }
+}
+
+/**
+ * The bytes of an image source, for a run whose model can be handed them.
+ *
+ * `null` when `source` names no picture a provider takes (see
+ * `attachableImage`): the caller wants its ordinary text read then, which is
+ * how an svg, a text file, or a directory whose name looks like an image
+ * reads. A directory is checked for, since `MAX_IMAGE_BYTES`'s whole-file
+ * read of one would be a read error where a listing belongs.
+ *
+ * Anything else *is* a picture, and the caller should not fall back to the
+ * text read for it: those bytes are not text, and rendering them as such
+ * fills a run's context with mojibake. `data` is null only for an image over
+ * `MAX_IMAGE_BYTES`, where the caller can still say it is a picture and why
+ * nothing was attached.
+ *
+ * Every backend a read supports is covered — a local file, an `http(s)://`
+ * URL, an `ssh://` host — and the picture is read whole whatever `range`
+ * the caller's text read would have used: half a png is not a smaller
+ * picture, it is a corrupt one.
+ */
+export async function readImage(
+  source: string,
+  cwd: string,
+): Promise<ReadImage | null> {
+  const image = attachableImage(source);
+  if (!image) return null;
+  const backend = resolveBackend(source, cwd);
+  if (backend.kind === "local" && (await isLocalDirectory(backend.path))) {
+    return null;
+  }
+  const whole = await fetchWhole(backend, MAX_IMAGE_BYTES);
+  if ("over" in whole) {
+    return { mimeType: image.mimeType, data: null, bytes: whole.over };
+  }
+  return {
+    mimeType: image.mimeType,
+    data: whole.buf.toString("base64"),
+    bytes: whole.buf.length,
+  };
 }

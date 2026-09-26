@@ -11,14 +11,8 @@ import {
 import {
   InMemoryCredentialStore,
   type OpenRouterRouting,
-  type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import {
-  WEAVER_PWD,
-  type BlockData,
-  type ContextMessage,
-  type KindRegistry,
-} from "@repo/core";
+import { WEAVER_PWD, type BlockData, type KindRegistry } from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import { ASK_USER_TOOL } from "@plugins/user-input";
@@ -29,7 +23,15 @@ import {
   type AgentRunRequest,
   type ThinkingLevel,
 } from "../../shared/agent-events.js";
-import { formatReadResult, readSource } from "./read-source.js";
+import {
+  formatReadResult,
+  MAX_IMAGE_BYTES,
+  readImage,
+  readSource,
+  type ReadImage,
+} from "./read-source.js";
+import { spliceContext, weaveContext } from "./context-wire.js";
+import { modelTakesImages } from "./model-vision.js";
 import { referenceMessages } from "./references.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
@@ -366,66 +368,32 @@ function providerTuning(
 }
 
 /**
- * The request bodies a run's context is spliced into. The provider weaver
- * mounts speaks `openai-completions`, whose payload is `{ messages, … }`;
- * anything shaped differently is left alone rather than guessed at.
+ * What the `read` tool says when it was pointed at a picture rather than at
+ * text. The words carry the whole answer for a run that cannot be handed the
+ * picture — a text-only model, or one over the size a request will take —
+ * and they name the file and its type for a run that can, where alone the
+ * image part would leave the model looking at a picture it cannot refer to.
  */
-const chatPayload = z
-  .object({ messages: z.array(z.record(z.string(), z.unknown())) })
-  .passthrough();
-
-/**
- * The graph above the run's block, spliced into the request pi built.
- *
- * pi assembles each request from its session's own message list, and that
- * list has no room for what weaver sends: the graph above the block, turn by
- * turn, with every block that is neither a user nor an assistant turn in the
- * `developer` role. `onPayload` is the one point at which the finished
- * payload can still be rewritten, so the graph goes in there — after the
- * system prompt and ahead of the session's own messages, the first of which
- * is the anchoring block's content (and, in a plain run, ahead of the run's
- * own prompt, so the material reads above the ask). The block being run
- * therefore stays the model's last turn, and the turns pi builds after it (a
- * tool call and its result) stay where they are, so a run's own work is never
- * reshuffled.
- */
-function spliceContext(payload: unknown, context: ContextMessage[]): unknown {
-  if (context.length === 0) return payload;
-  const parsed = chatPayload.safeParse(payload);
-  if (!parsed.success) return payload;
-  // Only a message whose role is actually `system` is kept in front of the
-  // context. An agent run always has pi's system prompt there, but a plain
-  // run has none, and its first message is the user turn it is asked to
-  // answer — treating that as the system message would push the context
-  // below the ask it is supposed to sit above, and leave the ask in the
-  // system slot.
-  const [first, ...rest] = parsed.data.messages;
-  return {
-    ...parsed.data,
-    messages:
-      first?.role === "system"
-        ? [first, ...context, ...rest]
-        : [...context, ...parsed.data.messages],
-  };
+function imageReadNote(
+  path: string,
+  image: ReadImage,
+  attached: boolean,
+): string {
+  const size = image.bytes === null ? null : formatBytes(image.bytes);
+  if (attached) {
+    return `${path} is a picture (${image.mimeType}), attached below.`;
+  }
+  if (image.data === null) {
+    const over = size ?? `over ${formatBytes(MAX_IMAGE_BYTES)}`;
+    return `${path} is a picture (${image.mimeType}), ${over} — too large to attach (limit ${formatBytes(MAX_IMAGE_BYTES)}).`;
+  }
+  return `${path} is a picture (${image.mimeType}${size ? `, ${size}` : ""}). This model takes no image input, so the file's bytes are not attached.`;
 }
 
-/**
- * Stream options that splice `context` into whatever request they carry,
- * composing with any payload hook the caller already had (pi hands one to
- * extensions for `before_provider_request`) rather than replacing it.
- */
-function weaveContext(
-  options: SimpleStreamOptions,
-  context: ContextMessage[],
-): SimpleStreamOptions {
-  const hook = options.onPayload;
-  return {
-    ...options,
-    onPayload: async (payload, model) => {
-      const next = hook ? await hook(payload, model) : payload;
-      return spliceContext(next ?? payload, context);
-    },
-  };
+function formatBytes(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
 }
 
 /**
@@ -469,6 +437,41 @@ export async function runAgent(
       body.providerSettings,
       body.thinkingLevel,
     );
+    /**
+     * Whether the model at the other end takes images, asked at most once per
+     * run and remembered.
+     *
+     * The answer comes from a probe of the endpoint's `/models`, falling back
+     * on pi's bundled catalog (`model-vision.ts`), and it is asked lazily
+     * because the two things that need it learn it at different moments: a run
+     * whose own context already carries a picture has to know before it starts
+     * — the registered model's `input` (below) is what pi reads when it decides
+     * whether a tool result's pictures reach the request — while a `read` of a
+     * picture can turn up at any point in a run that started with text alone.
+     * A run with no picture in it never asks at all. The probe itself is
+     * cached per endpoint for the life of the process, so asking twice costs
+     * nothing.
+     */
+    let modelVision: boolean | null = null;
+    const takesImages = async (): Promise<boolean> => {
+      modelVision ??= await modelTakesImages(
+        body.endpoint,
+        body.apiKey,
+        body.model,
+      );
+      return modelVision;
+    };
+
+    const anchorImages = body.promptImages ?? [];
+    const wantsImages =
+      anchorImages.length > 0 ||
+      body.context.some((message) => (message.images?.length ?? 0) > 0);
+    if (wantsImages) await takesImages();
+    // Read once, here, for the wire: `spliceContext` and `weaveContext`
+    // decide from it whether a turn's pictures go out. False means "not
+    // established" as much as it means "no" — either way there is nothing
+    // to attach but the description the block already wrote.
+    const vision = modelVision === true;
     modelRuntime.registerProvider("weaver", {
       baseUrl: body.endpoint,
       apiKey: body.apiKey,
@@ -485,7 +488,11 @@ export async function runAgent(
           id: body.model,
           name: body.model,
           reasoning: tuning.reasoning,
-          input: ["text", "image"],
+          // The registered model describes what it accepts; a probe that
+          // came back "text only" is the one case that says otherwise. An
+          // unprobed run keeps the permissive default it has always had, and
+          // a later `read` of a picture asks on its own if it needs to.
+          input: modelVision === false ? ["text"] : ["text", "image"],
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,
           // The `maxTokens` caps output: the SDK treats a model's
@@ -504,6 +511,30 @@ export async function runAgent(
       emit({ type: "error", message: `unknown model: ${body.model}` });
       return;
     }
+
+    /**
+     * The agent's working directory and environment. The block's own merged
+     * environment (every `environment` block above it, closer overriding
+     * farther) shades the host's own for this run: `WEAVER_PWD` becomes the
+     * directory the agent starts in, and the remaining variables reach its
+     * tools. A relative `WEAVER_PWD` resolves against the project root, the
+     * same base the media protocol falls back to; an unset one leaves the
+     * agent at the project root as before. On a remote run, `ctx.root` is
+     * the server's own project root, so the same request acts on the
+     * server's filesystem.
+     *
+     * A plain run has no tools and no session, but it is still resolved this
+     * far: the same directory is what a media block's relative path resolves
+     * against when its picture is attached to the request, so the file a run
+     * sends is the file the renderer showed (`imageUrl` / `spliceContext`).
+     */
+    const agentEnv = { ...process.env, ...(body.env ?? {}) };
+    const weaverPwd = agentEnv[WEAVER_PWD];
+    const cwd = weaverPwd
+      ? isAbsolute(weaverPwd)
+        ? weaverPwd
+        : resolve(ctx.root, weaverPwd)
+      : ctx.root;
 
     // A plain call: the run's `context` as material and then the prompt
     // itself as the run's `user` turn. A plain run carries no session, so
@@ -532,7 +563,13 @@ export async function runAgent(
             },
           ],
         },
-        weaveContext({ signal: controller.signal }, body.context),
+        weaveContext(
+          { signal: controller.signal },
+          body.context,
+          vision,
+          cwd,
+          anchorImages,
+        ),
       );
       try {
         for await (const event of events) {
@@ -696,24 +733,8 @@ export async function runAgent(
       }),
     );
 
-    /**
-     * The agent's working directory and environment. The block's own merged
-     * environment (every `environment` block above it, closer overriding
-     * farther) shades the host's own for this run: `WEAVER_PWD` becomes the
-     * directory the agent starts in, and the remaining variables reach its
-     * tools. A relative `WEAVER_PWD` resolves against the project root, the
-     * same base the media protocol falls back to; an unset one leaves the
-     * agent at the project root as before. On a remote run, `ctx.root` is
-     * the server's own project root, so the same request acts on the
-     * server's filesystem.
-     */
-    const agentEnv = { ...process.env, ...(body.env ?? {}) };
-    const weaverPwd = agentEnv[WEAVER_PWD];
-    const cwd = weaverPwd
-      ? isAbsolute(weaverPwd)
-        ? weaverPwd
-        : resolve(ctx.root, weaverPwd)
-      : ctx.root;
+    // The working directory is resolved earlier, ahead of the plain-run
+    // branch, so both kinds of run and the media they attach agree on it.
 
     // `@file:`/`@skill:` references the user attached to a message become
     // `developer` context of their own, read here (the renderer has no
@@ -758,6 +779,13 @@ export async function runAgent(
      * custom tool over a built-in one of the same name, so naming this
      * `read` makes the replacement automatic rather than a second tool to
      * choose between.
+     *
+     * A picture is the one file the read answers with something other than its
+     * text: the bytes of a png read as text are mojibake that costs a run's
+     * context and says nothing, so the picture itself goes back as an image part
+     * when the model can take one, and a line naming the file when it cannot.
+     * See `main/lib/context-wire.ts` for how a part that a provider will not
+     * take is kept off the wire.
      */
     const read = defineTool({
       name: "read",
@@ -770,6 +798,7 @@ export async function runAgent(
         "ssh:// requires the harness's host to already have ssh access to that host set up (key, agent, or ~/.ssh/config); it is not configured here.",
         "Default is line mode: 1-indexed `offset`/`limit`. Use `byteOffset`/`byteLength` (0-indexed) instead for one huge line: minified JS or a single long JSON blob. Pass one pair or the other, never both; neither applies to a directory.",
         "This is the tool for looking at a file: `bash`'s `cat`/`head`/`sed` dump the whole file into the transcript without the symbol index and windows above, so don't use `bash` for reading.",
+        "A picture (png, jpg, gif, webp) is not read as text: the file itself is attached when the model takes image input, and a line naming it comes back either way.",
       ].join("\n"),
       parameters: Type.Object({
         path: Type.String({
@@ -793,6 +822,33 @@ export async function runAgent(
         ),
       }),
       execute: async (_toolCallId, params) => {
+        // An image is answered with the image. `readImage` returns null for
+        // anything that is not a picture a provider takes, which is every
+        // other file — and for a read that fails outright, so a missing or
+        // unreadable path still fails below with the error that says why
+        // rather than a note about a picture nobody could open.
+        const image = await readImage(params.path, cwd).catch(() => null);
+        if (image) {
+          const attached = image.data !== null && (await takesImages());
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: imageReadNote(params.path, image, attached),
+              },
+              ...(attached && image.data
+                ? [
+                    {
+                      type: "image" as const,
+                      data: image.data,
+                      mimeType: image.mimeType,
+                    },
+                  ]
+                : []),
+            ],
+            details: {},
+          };
+        }
         let result;
         try {
           result = await readSource(params.path, cwd, {
@@ -952,7 +1008,7 @@ export async function runAgent(
       const next = extensionPayload
         ? await extensionPayload(payload, model)
         : payload;
-      return spliceContext(next ?? payload, context);
+      return spliceContext(next ?? payload, context, vision, cwd, anchorImages);
     };
 
     // Arguments arrive with the call and the result with its end, so they

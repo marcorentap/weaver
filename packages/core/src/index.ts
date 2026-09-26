@@ -27,7 +27,7 @@ import type {
   SnapshotContext,
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
-import type { ContextMessage } from "./messages";
+import type { ContextImage, ContextMessage } from "./messages";
 import {
   messagesAbove,
   messagesOfBlock,
@@ -61,6 +61,7 @@ export type {
   BlockId,
   BlockKind,
   CallbackSpec,
+  ContextImage,
   ContextMessage,
   EnvState,
   GroupState,

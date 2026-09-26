@@ -3,6 +3,7 @@ import type {
   BlockData,
   BlockGraph,
   BlockId,
+  ContextImage,
   ContextMessage,
   HookContext,
   Position,
@@ -748,6 +749,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // voice reads as the exchange it is rather than as a run-together string.
     let prompt: string;
     let context: ContextMessage[];
+    // Pictures the block being run holds. They travel with the run's own
+    // turn rather than in `context`, which is the material above it: an
+    // image block someone runs inference on is the thing being asked about,
+    // not background. A kind whose last turn is not the user's own (an
+    // unanswered question, or an image block, which has no turns at all)
+    // still contributes whatever it shows.
+    let promptImages: ContextImage[] = [];
     if (take) {
       context = messagesOfBlocks(snapshot.graph, take, kinds);
       if (context.length === 0) {
@@ -771,9 +779,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       // document, so what the model reads is the exchange the block holds
       // and not one message with a question and an answer run together.
       const above = messagesAbove(snapshot.graph, id, kinds);
-      const anchor = kinds[block.kind]?.turns
-        ? messagesOfBlock(snapshot.graph, id, kinds)
-        : [];
+      const own = messagesOfBlock(snapshot.graph, id, kinds);
+      const anchor = kinds[block.kind]?.turns ? own : [];
       const last = anchor[anchor.length - 1];
       // A block whose turns do not end on the user's own — a question nobody
       // has answered yet, which holds the question and nothing after it —
@@ -781,9 +788,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       // document, which at least reads as the thing being asked about.
       if (last && last.role === "user") {
         prompt = last.content;
+        promptImages = last.images ?? [];
         context = [...above, ...anchor.slice(0, -1)];
       } else {
         prompt = snapshotBlock(snapshot.graph, id, kinds);
+        promptImages = own.flatMap((turn) => turn.images ?? []);
         context = above;
       }
       if (!prompt.trim()) {
@@ -808,6 +817,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           model,
           context,
           prompt,
+          ...(promptImages.length > 0 ? { promptImages } : {}),
           tools,
           providerId,
           providerSettings,

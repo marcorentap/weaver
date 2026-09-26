@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 import type { Block, BlockData, BlockGraph, BlockId } from "./block";
-import type { ContextMessage } from "./messages";
+import type { ContextImage, ContextMessage } from "./messages";
 
 /**
  * Which side of a conversation a block's content belongs to when a run
@@ -133,6 +133,13 @@ export type BlockKind = {
   /** Flatten validated state into the string handed to the LLM. */
   snapshot: (data: BlockData, ctx: SnapshotContext) => string;
   /**
+   * The images one block of this kind shows rather than describes, or null
+   * for a kind that holds no picture. Ignored when `turns` is given, since
+   * then the kind builds its own messages and attaches its own images. See
+   * `defineKind.images`.
+   */
+  images: ((data: BlockData, ctx: SnapshotContext) => ContextImage[]) | null;
+  /**
    * The turns one block of this kind contributes to a serialized context, in
    * order, or null for the ordinary case of one turn built from `role` and
    * `snapshot`. See `defineKind.turns`.
@@ -204,6 +211,24 @@ export function defineKind<S>(def: {
   schema: ZodType<S>;
   snapshot: (state: S, ctx: SnapshotContext) => string;
   /**
+   * Images this kind's block holds, as URIs beside the text `snapshot`
+   * already produces. Omit for the ordinary kind, which says what it has to
+   * say in words.
+   *
+   * The two are not alternatives. A snapshot is the block as a document:
+   * every consumer reads it, a text-only model among them, so a kind with a
+   * picture still describes it. `images` is the block as something to look
+   * at, which only a vision model can take, and only the request builder can
+   * read — it is where the bytes are, and this package has no filesystem.
+   * Sending the description as well costs a line and keeps a run on a
+   * text-only model answering about the file instead of about nothing.
+   *
+   * Ignored when `turns` is given: a kind that builds its own turns puts the
+   * images on whichever of them shows them, the same way it decides the
+   * roles itself.
+   */
+  images?: (state: S, ctx: SnapshotContext) => readonly ContextImage[];
+  /**
    * The turns a block of this kind contributes to a run's context, for a
    * block that holds more than one speaker's worth of conversation in one
    * place. Omit for the ordinary case, which is every other kind: one turn,
@@ -264,6 +289,7 @@ export function defineKind<S>(def: {
   const hooks = def.hooks ?? {};
   const turns = def.turns;
   const resume = def.resume;
+  const images = def.images;
   return {
     kind: def.kind,
     role: def.role ?? "developer",
@@ -273,6 +299,9 @@ export function defineKind<S>(def: {
     // Parsing here means `def.snapshot`/`def.turns` only ever receive complete
     // state, and no cast is needed to recover the state type.
     snapshot: (data, ctx) => def.snapshot(def.schema.parse(data), ctx),
+    images: images
+      ? (data, ctx) => [...images(def.schema.parse(data), ctx)]
+      : null,
     turns: turns
       ? (data, ctx) => [...turns(def.schema.parse(data), ctx)]
       : null,

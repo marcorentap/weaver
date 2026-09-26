@@ -97,11 +97,24 @@ export const agentEvent = z.discriminatedUnion("type", [
 
 export type AgentEvent = z.infer<typeof agentEvent>;
 
+/** One image a turn carries beside its text: the URI the run's own process
+ *  reads (http(s)://, file://, or a scheme-less path under the run's merged
+ *  `WEAVER_PWD`) and the mime type the block recognized it by. */
+export const contextImage = z.object({
+  uri: z.string(),
+  mimeType: z.string(),
+});
+
 /** One turn of the graph context a run sends. See `ContextMessage` in
  *  `@repo/core` for how a block becomes one. */
 export const contextMessage = z.object({
   role: z.enum(["user", "assistant", "developer"]),
   content: z.string(),
+  /** Pictures the turn carries, for a run whose model takes them. The URI
+   *  travels, never the bytes: the renderer has no filesystem, and the main
+   *  process is the one that can read a file and build a data URL. Omitted
+   *  when the turn has none to show. */
+  images: z.array(contextImage).optional(),
 });
 
 /** Request body of the `agent:run:start` IPC call. */
@@ -120,6 +133,13 @@ export const agentRunRequest = z.object({
    *  as the run's own `user` turn, after everything in `context`, so the
    *  block being run is always the thing being answered. */
   prompt: z.string(),
+  /** Pictures the anchoring block itself holds — a run started on an image
+   *  block, with no text of its own but the description in `prompt`. They
+   *  belong to the ask rather than to the material above it, so they ride on
+   *  the run's own turn: the main process folds them into that turn's
+   *  content parts when the model takes image input. Omitted when the block
+   *  being run has none. */
+  promptImages: z.array(contextImage).optional(),
   /** Built-in tool names to enable for this run. Empty means every built-in
    *  tool (see `ALLOWED_TOOLS`). */
   tools: z.array(z.string()),

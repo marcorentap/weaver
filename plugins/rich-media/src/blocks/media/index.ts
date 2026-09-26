@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { defineKind } from "@repo/core";
+import { defineKind, type ContextImage } from "@repo/core";
 import { languageForPath } from "../../languages.ts";
 
 /**
@@ -10,13 +10,7 @@ import { languageForPath } from "../../languages.ts";
 export const MEDIA_KIND = "media";
 
 export type MediaType =
-  | "image"
-  | "video"
-  | "audio"
-  | "pdf"
-  | "text"
-  | "youtube"
-  | "unknown";
+  "image" | "video" | "audio" | "pdf" | "text" | "youtube" | "unknown";
 
 /** Schemes worth supporting: the web, and the machine the harness runs on. */
 const SCHEMES = new Set(["http:", "https:", "file:"]);
@@ -136,7 +130,7 @@ export function mediaName(uri: string): string {
   const segments = decodeURIComponent(raw).split("/");
   const last = segments[segments.length - 1];
   if (last) return last;
-  return url ? (url.host || uri) : uri;
+  return url ? url.host || uri : uri;
 }
 
 /**
@@ -164,13 +158,46 @@ export function mediaInfo(uri: string): { type: MediaType; mime: string } {
   return UNKNOWN;
 }
 
+/**
+ * The mime types a provider takes as a picture: the raster formats every
+ * OpenAI-compatible and Anthropic-shaped endpoint accepts as an `image_url`
+ * content part. Deliberately short. Attaching an image a provider rejects is
+ * not a smaller loss than not attaching it — it fails the whole request — so
+ * `avif` and `bmp`, which the app renders and some models could take, are
+ * left to whatever the file reads as instead of gambled on. (`svg` is not in
+ * the running for a different reason: it is markup, and a content part is
+ * for pixels. It reads as the text it is.)
+ */
+const ATTACHABLE_MIME = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+]);
+
+/**
+ * The picture a media source contributes to a run — the URI the run's own
+ * process reads, and the mime type it sends it as — or null when the source
+ * names no picture a provider takes.
+ *
+ * One answer for both callers that need it: a media block serializing
+ * itself, and the `read` tool handing back a file it was pointed at. So what
+ * can be attached is decided in one place, and a picture the app shows and a
+ * picture the model is given can never disagree about which files qualify.
+ */
+export function attachableImage(uri: string): ContextImage | null {
+  const { type, mime } = mediaInfo(uri);
+  return type === "image" && ATTACHABLE_MIME.has(mime)
+    ? { uri, mimeType: mime }
+    : null;
+}
+
 export const mediaState = z.object({
   uri: z
     .string()
     .refine(
       (uri) =>
-        parseMediaUri(uri) !== null ||
-        (uri.length > 0 && !uri.includes("://")),
+        parseMediaUri(uri) !== null || (uri.length > 0 && !uri.includes("://")),
       { message: MEDIA_SCHEME_HINT },
     ),
 });
@@ -182,5 +209,16 @@ export const mediaKind = defineKind({
   // `snapshotBlock` prefixes the label itself; this only adds what's
   // specific to a media block.
   snapshot: (state) => `${mediaInfo(state.uri).type} at ${state.uri}`,
+  // An image is the one media type a model can be handed the bytes of: a
+  // video, a PDF and an audio file have no content part an OpenAI-shaped
+  // request takes, and a text file is already readable as itself. The
+  // description above goes either way, so a run on a model that cannot take
+  // pictures still reads what the block says. The URI travels unresolved —
+  // it is the request builder, not this, that has the run's merged
+  // `WEAVER_PWD` to resolve a scheme-less path against.
+  images: (state) => {
+    const image = attachableImage(state.uri);
+    return image ? [image] : [];
+  },
   defaults: { uri: "file:///" },
 });

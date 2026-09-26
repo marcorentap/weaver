@@ -10,13 +10,34 @@ import type { KindRegistry, MessageRole } from "./kind";
 import { TEXT_KIND } from "./kinds/text";
 
 /**
+ * One image a turn carries alongside its text, named by URI rather than by
+ * bytes. A block holds the address of a picture, not the picture; reading it
+ * is a filesystem (or network) act, which belongs to whoever sends the
+ * request, not to the graph model. The mime type travels with it because the
+ * kind that recognized the file already knows it (`mediaInfo`), and a
+ * consumer building a data URL has no business guessing from the extension
+ * twice.
+ */
+export type ContextImage = { uri: string; mimeType: string };
+
+/**
  * One piece of context as a turn: the role its content takes in a
  * conversation, and the content itself. This is the unit a run sends a
  * model, in place of one flattened string — the shape a provider expects,
  * and the shape that keeps what a person wrote, what a run answered, and the
  * material around them distinct.
+ *
+ * A turn may also carry `images` — pictures the block showed rather than
+ * described. They are kept apart from `content` because they cannot be
+ * flattened into it: a vision model takes them as content parts of their
+ * own, and a model that takes text only must be handed the description the
+ * snapshot already provides rather than a URI it cannot open.
  */
-export type ContextMessage = { role: MessageRole; content: string };
+export type ContextMessage = {
+  role: MessageRole;
+  content: string;
+  images?: ContextImage[];
+};
 
 /**
  * The role a block takes in a serialized context, from its kind. Kinds that
@@ -70,13 +91,12 @@ export function messagesOfBlock(
   // its block sits — here and, through the option carry-down, nested inside
   // any block that does contribute.
   if (!kind.context) return [];
+  const ctx = snapshotContext(graph, id, registry, { context: true });
   if (kind.turns) {
-    return kind.turns(
-      block.data,
-      snapshotContext(graph, id, registry, { context: true }),
-    );
+    return kind.turns(block.data, ctx);
   }
   const role = roleOf(block, registry);
+  const images = kind.images?.(block.data, ctx) ?? [];
   return [
     {
       role,
@@ -84,6 +104,10 @@ export function messagesOfBlock(
         label: role === "developer",
         context: true,
       }),
+      // The snapshot is what the block says; the images are what the block
+      // shows. Both go: a text-only model still reads the description, and a
+      // vision model gets the picture beside it.
+      ...(images.length > 0 ? { images: [...images] } : {}),
     },
   ];
 }
@@ -111,7 +135,9 @@ export function messagesOfBlock(
  *   block, a group with nothing under it, a kind that opted out of context
  *   (`BlockKind.context`), and a question nobody has answered yet all
  *   contribute nothing, and a provider reading an empty message has been
- *   told nothing in the loudest possible way.
+ *   told nothing in the loudest possible way. A turn that is empty but
+ *   carries images is not empty: a picture to look at is a contribution of
+ *   its own, even with nothing written about it.
  *
  * This is the one place blocks become a request's messages, so a run over
  * the graph above a block and a run over an explicit list of blocks (a
@@ -125,10 +151,18 @@ export function messagesOfBlocks(
   const messages: ContextMessage[] = [];
   for (const id of ids) {
     for (const message of messagesOfBlock(graph, id, registry)) {
-      if (!message.content.trim()) continue;
+      if (!message.content.trim() && !message.images?.length) continue;
       const open = messages[messages.length - 1];
       if (open && open.role === message.role) {
-        open.content = `${open.content}\n\n${message.content}`;
+        // Images ride along with the text they were merged into: a run of
+        // material blocks becomes one message, and the pictures among them
+        // stay in the order their blocks had.
+        open.content = open.content
+          ? `${open.content}\n\n${message.content}`
+          : message.content;
+        if (message.images?.length) {
+          open.images = [...(open.images ?? []), ...message.images];
+        }
       } else {
         messages.push({ ...message });
       }

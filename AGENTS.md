@@ -16,7 +16,8 @@ apps/desktop/src/
     agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
     ipc/           one file per IPC group: agent, chat, links, media-protocol, plugins, remote, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
-                   read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts
+                   read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
+                   context-wire.ts (graph → provider payload), model-vision.ts (does the model take images)
     remote/        server.ts (HTTP + streaming agent runs), instance.ts, keys.ts
   preload/         the only typed bridge exposed to the renderer
   renderer/src/    React UI (no Node access)
@@ -82,7 +83,16 @@ Everything lives in `packages/core`.
   recursion. The anchoring block contributes its own turns the same way
   (`messagesOfBlock`), the last of them being what the run is prompted with;
   `main/lib/run-agent.ts` splices the rest into the request pi built, via the
-  provider's `onPayload` hook, ahead of pi's own first turn. Every run's
+  provider's `onPayload` hook, ahead of pi's own first turn. A kind may also
+  put pictures on a turn (`images`), which travel as URIs and are read and
+  attached as content parts by `main/lib/context-wire.ts` — only when the
+  model takes image input (`main/lib/model-vision.ts`: the endpoint's own
+  `/models` listing, falling back on pi's catalog), and never at the cost of
+  the text description the snapshot already wrote. The `read` tool answers a
+  picture the same way: an image file (see `attachableImage` in rich-media)
+  comes back as an image content part when the model takes one, and as a line
+  naming the file when it does not — never as the file's bytes read as text.
+  Every run's
   material goes through that same path — `messagesAbove` (the graph above a
   block), `messagesOfBlocks` (a summarization's targets), `messagesOfGraph`
   (the whole visible graph, for naming a session) — so a run over an explicit
@@ -96,7 +106,10 @@ Everything lives in `packages/core`.
   `role` (the conversational role its content takes in a run's context; omit
   for `developer`), `context` (false to keep the kind's blocks out of a run's
   context; omit to include them), `snapshot` (the block as a document, for
-  previews and summaries), `turns` (the block as conversation, for a kind
+  previews and summaries), `images` (pictures the block holds beside that
+  document, as URIs — the request builder reads them and attaches them as
+  content parts when the model takes image input; omit for a kind with no
+  picture), `turns` (the block as conversation, for a kind
   whose one block spans more than one speaker; omit for the ordinary single
   turn of `role` + `snapshot`), `resume` (whether and how a run stopped on
   one of its blocks starts again; omit for a kind no run can be paused on),
