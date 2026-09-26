@@ -1,10 +1,4 @@
-import type {
-  Block,
-  BlockData,
-  BlockGraph,
-  BlockId,
-  Position,
-} from "./block";
+import type { Block, BlockData, BlockGraph, BlockId, Position } from "./block";
 import {
   assertTree,
   assertValidData,
@@ -30,10 +24,13 @@ import type {
   CallbackSpec,
   HookContext,
   KindRegistry,
+  MessageRole,
   Schedule,
   SnapshotContext,
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
+import type { ContextMessage } from "./messages";
+import { messagesAbove } from "./messages";
 import type { GroupState, TextState } from "./kinds/text";
 import {
   GROUP_KIND,
@@ -61,10 +58,12 @@ export type {
   BlockId,
   BlockKind,
   CallbackSpec,
+  ContextMessage,
   EnvState,
   GroupState,
   HookContext,
   KindRegistry,
+  MessageRole,
   Position,
   Schedule,
   SnapshotContext,
@@ -90,6 +89,7 @@ export {
   kindRegistry,
   lastChildId,
   mergedEnvironment,
+  messagesAbove,
   moveBlock,
   parseEnv,
   positionOf,

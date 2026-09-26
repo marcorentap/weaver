@@ -4,6 +4,7 @@
  * into the graph's kind registry; individual kinds, schemas and helpers are
  * re-exported from their own subdirectories for renderers and the harness.
  */
+export * from "./assistant/index.ts";
 export * from "./media/index.ts";
 export * from "./tool/index.ts";
 export * from "./user/index.ts";

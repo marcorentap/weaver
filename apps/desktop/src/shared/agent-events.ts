@@ -81,15 +81,28 @@ export const agentEvent = z.discriminatedUnion("type", [
 
 export type AgentEvent = z.infer<typeof agentEvent>;
 
+/** One turn of the graph context a run sends. See `ContextMessage` in
+ *  `@repo/core` for how a block becomes one. */
+export const contextMessage = z.object({
+  role: z.enum(["user", "assistant", "developer"]),
+  content: z.string(),
+});
+
 /** Request body of the `agent:run:start` IPC call. */
 export const agentRunRequest = z.object({
   endpoint: z.string(),
   apiKey: z.string(),
   model: z.string(),
-  /** The graph above the agent block, already flattened by the renderer.
-   *  The main process has no view of the live graph, which lives in the
-   *  renderer. */
-  context: z.string(),
+  /** The graph above the agent block, already serialized by the renderer,
+   *  turn by turn. The main process has no view of the live graph, which
+   *  lives in the renderer. Each message carries the role its block's kind
+   *  plays: what a person wrote is a `user` turn, what an earlier run
+   *  answered is an `assistant` turn, and every other block — a tool call,
+   *  a file, an environment, plain text — is `developer` material. */
+  context: z.array(contextMessage),
+  /** The content of the block the run is anchored on. It goes on the wire
+   *  as the run's own `user` turn, after everything in `context`, so the
+   *  block being run is always the thing being answered. */
   prompt: z.string(),
   /** Built-in tool names to enable for this run. Empty means every built-in
    *  tool (see `ALLOWED_TOOLS`). */
@@ -129,9 +142,10 @@ export const agentRunRequest = z.object({
   env: z.record(z.string(), z.string()).optional(),
   /** Treat the run as a plain LLM call instead of an agent run: no session,
    *  no tools, no system prompt, no resource loading (everything the
-   *  `no…` flags and `tools` above normally control). The prompt goes
-   *  straight to the model as one user message. The summarization run sets
-   *  this, so a `summary` block never has the agent harness around it. */
+   *  `no…` flags and `tools` above normally control). `prompt` goes
+   *  straight to the model, after `context`, as the run's `user` turn. The
+   *  summarization run sets this, so a `summary` block never has the agent
+   *  harness around it. */
   plain: z.boolean().optional(),
 });
 

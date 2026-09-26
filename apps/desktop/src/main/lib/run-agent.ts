@@ -11,8 +11,9 @@ import {
 import {
   InMemoryCredentialStore,
   type OpenRouterRouting,
+  type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
-import { WEAVER_PWD, type KindRegistry } from "@repo/core";
+import { WEAVER_PWD, type ContextMessage, type KindRegistry } from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import { ASK_USER_TOOL } from "@plugins/user-input";
@@ -343,25 +344,60 @@ function providerTuning(
 }
 
 /**
- * The text a run sends the model, agent and plain call alike. The graph
- * above the block, when there is one, is wrapped in `<weaver_graph>` and
- * separated from the run's own prompt by a rule, so the model can tell
- * the surrounding conversation apart from what it is asked to do; a run
- * with no graph context (a plain call, whose instruction and content
- * already ship inside the prompt) goes through untouched.
+ * The request bodies a run's context is spliced into. The provider weaver
+ * mounts speaks `openai-completions`, whose payload is `{ messages, … }`;
+ * anything shaped differently is left alone rather than guessed at.
  */
-function assemblePrompt(body: AgentRunRequest): string {
-  return body.context
-    ? [
-        "<weaver_graph>",
-        body.context,
-        "</weaver_graph>",
-        "",
-        "---",
-        "",
-        body.prompt,
-      ].join("\n")
-    : body.prompt;
+const chatPayload = z
+  .object({ messages: z.array(z.record(z.string(), z.unknown())) })
+  .passthrough();
+
+/**
+ * The graph above the run's block, spliced into the request pi built.
+ *
+ * pi assembles each request from its session's own message list, and that
+ * list has no room for what weaver sends: the graph above the block, turn by
+ * turn, with every block that is neither a user nor an assistant turn in the
+ * `developer` role. `onPayload` is the one point at which the finished
+ * payload can still be rewritten, so the graph goes in there — after the
+ * system prompt and ahead of the session's own messages, the first of which
+ * is the anchoring block's content. The block being run therefore stays the
+ * model's last turn, and the turns pi builds after it (a tool call and its
+ * result) stay where they are, so a run's own work is never reshuffled.
+ */
+function spliceContext(payload: unknown, context: ContextMessage[]): unknown {
+  if (context.length === 0) return payload;
+  const parsed = chatPayload.safeParse(payload);
+  if (!parsed.success) return payload;
+  const [system, ...rest] = parsed.data.messages;
+  return {
+    ...parsed.data,
+    // A request with no system prompt at all has nothing to keep in front of
+    // the graph; the context is then simply where the conversation starts.
+    messages:
+      system === undefined
+        ? [...context, ...rest]
+        : [system, ...context, ...rest],
+  };
+}
+
+/**
+ * Stream options that splice `context` into whatever request they carry,
+ * composing with any payload hook the caller already had (pi hands one to
+ * extensions for `before_provider_request`) rather than replacing it.
+ */
+function weaveContext(
+  options: SimpleStreamOptions,
+  context: ContextMessage[],
+): SimpleStreamOptions {
+  const hook = options.onPayload;
+  return {
+    ...options,
+    onPayload: async (payload, model) => {
+      const next = hook ? await hook(payload, model) : payload;
+      return spliceContext(next ?? payload, context);
+    },
+  };
 }
 
 /**
@@ -441,16 +477,17 @@ export async function runAgent(
       return;
     }
 
-    // A plain call: the prompt goes straight to the model as a single user
-    // message. Nothing else happens here, by design — no session, no
-    // tools, no system prompt, no resource loading, no environment
-    // shading — so the model sees exactly what the run asked for, nothing
-    // the harness would add. A summarization run is plain unless its
-    // agentic toggle is on, keeping the agent machinery (plugins, skills,
-    // file tools) away from a read-only compress-and-reply task when
-    // that's what the user asked for. The same `done`/`error`/delta
-    // events come back, so the renderer's run plumbing is identical to
-    // an agent run's.
+    // A plain call: the graph above the block (none, for the title and
+    // summarization runs, whose instruction and content already ship inside
+    // the prompt) and then the prompt itself as the run's `user` turn.
+    // Nothing else happens here, by design — no session, no tools, no
+    // system prompt, no resource loading, no environment shading — so the
+    // model sees exactly what the run asked for, nothing the harness would
+    // add. A summarization run is plain unless its agentic toggle is on,
+    // keeping the agent machinery (plugins, skills, file tools) away from a
+    // read-only compress-and-reply task when that's what the user asked
+    // for. The same `done`/`error`/delta events come back, so the
+    // renderer's run plumbing is identical to an agent run's.
     if (body.plain) {
       const controller = new AbortController();
       ctx.onSession?.(() => controller.abort());
@@ -460,12 +497,12 @@ export async function runAgent(
           messages: [
             {
               role: "user",
-              content: assemblePrompt(body),
+              content: body.prompt,
               timestamp: Date.now(),
             },
           ],
         },
-        { signal: controller.signal },
+        weaveContext({ signal: controller.signal }, body.context),
       );
       try {
         for await (const event of events) {
@@ -830,6 +867,23 @@ export async function runAgent(
 
     ctx.onSession?.(() => void session.abort());
 
+    // The graph reaches the wire for an agent run the same way it does for a
+    // plain one, but through pi's own hook: the session issues each turn
+    // itself, with its own timeouts, retries and attribution, so the one
+    // place weaver can still speak is the payload on its way out. pi already
+    // uses this hook to let extensions inspect a request; composing with it
+    // keeps that working. Only the run's own requests pass through here —
+    // pi's automatic compaction and branch summaries build their own payload
+    // straight from the run's stream function, so a summary still sees the
+    // transcript it was handed rather than the graph it was replayed from.
+    const extensionPayload = session.agent.onPayload;
+    session.agent.onPayload = async (payload, model) => {
+      const next = extensionPayload
+        ? await extensionPayload(payload, model)
+        : payload;
+      return spliceContext(next ?? payload, body.context);
+    };
+
     // Arguments arrive with the call and the result with its end, so they
     // are paired by the SDK's `toolCallId`; each entry also carries the
     // wire id the `tool_start`/`tool_delta`/`tool` events share, a per-run
@@ -968,8 +1022,6 @@ export async function runAgent(
       }
     });
 
-    const prompt = assemblePrompt(body);
-
     // The agent's own tools spawn shells that inherit `process.env`, so the
     // block's variables reach them by shading `process.env` for the duration
     // of this run and restoring it afterwards — only the run's own settings
@@ -983,7 +1035,7 @@ export async function runAgent(
       process.env[key] = value;
     }
     try {
-      await session.prompt(prompt);
+      await session.prompt(body.prompt);
     } finally {
       for (const [key, previous] of previousEnv) {
         if (previous === undefined) delete process.env[key];

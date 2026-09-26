@@ -1,6 +1,16 @@
 import type { ZodType } from "zod";
 import type { Block, BlockData, BlockGraph, BlockId } from "./block";
 
+/**
+ * Which side of a conversation a block's content belongs to when a run
+ * serializes the graph above it. A turn-by-turn request can only be built
+ * if each block says what it is: a message the person wrote, a reply a run
+ * produced, or context. Everything that is neither of the first two is
+ * `developer` — the role for reference material the model reads but is not
+ * continuing, which is what every block kind in the app defaults to.
+ */
+export type MessageRole = "user" | "assistant" | "developer";
+
 export type SnapshotContext = {
   /** The block being snapshotted, for metadata such as its label. */
   block: Block;
@@ -91,6 +101,9 @@ export type CallbackSpec = {
  */
 export type BlockKind = {
   kind: string;
+  /** The role this kind's content takes in a serialized context. See
+   *  `MessageRole`. */
+  role: MessageRole;
   /**
    * The schema of this kind's state, kept alongside the erased `parse`. A
    * caller can describe the kind from it, or derive a JSON Schema to hand a
@@ -149,6 +162,10 @@ export type KindRegistry = Record<string, BlockKind>;
  */
 export function defineKind<S>(def: {
   kind: string;
+  /** The role this kind's content takes when a run serializes the graph it
+   *  sits in. Omit for a kind that is not a conversational turn of its own;
+   *  the default, `developer`, is for context rather than speech. */
+  role?: MessageRole;
   schema: ZodType<S>;
   snapshot: (state: S, ctx: SnapshotContext) => string;
   /**
@@ -174,6 +191,7 @@ export function defineKind<S>(def: {
   const hooks = def.hooks ?? {};
   return {
     kind: def.kind,
+    role: def.role ?? "developer",
     schema: def.schema as ZodType<unknown>,
     parse: (data) => def.schema.parse(data),
     // Parsing here means `def.snapshot` only ever receives complete state,
@@ -181,9 +199,10 @@ export function defineKind<S>(def: {
     snapshot: (data, ctx) => def.snapshot(def.schema.parse(data), ctx),
     hooks: Object.keys(hooks),
     callbacks: def.callbacks ?? [],
-    defaults: def.defaults !== undefined
-      ? (def.schema.parse(def.defaults) as BlockData)
-      : null,
+    defaults:
+      def.defaults !== undefined
+        ? (def.schema.parse(def.defaults) as BlockData)
+        : null,
     call: async (data, hook, ctx, arg) => {
       const fn = hooks[hook];
       if (!fn) {

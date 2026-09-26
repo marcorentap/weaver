@@ -52,7 +52,12 @@ import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
 import { pwdForBlock, pwdForPosition } from "@/lib/env";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
-import { TOOL_KIND, toolState, USER_KIND } from "@plugins/rich-media";
+import {
+  ASSISTANT_KIND,
+  TOOL_KIND,
+  toolState,
+  USER_KIND,
+} from "@plugins/rich-media";
 import { MEDIA_KIND, mediaState } from "@/blocks/media";
 import {
   MULTICHOICE_KIND,
@@ -183,7 +188,7 @@ function InsertGap({
 function originClass(block: Block): string {
   if (block.label === "error") return "text-destructive";
   if (block.kind === USER_KIND) return "text-blue-400";
-  if (block.kind === TOOL_KIND || block.label === "assistant") {
+  if (block.kind === ASSISTANT_KIND || block.kind === TOOL_KIND) {
     return "text-emerald-400";
   }
   if (block.label === "thinking") return "text-muted-foreground";
@@ -198,6 +203,7 @@ function copyableContent(
   switch (block.kind) {
     case TEXT_KIND:
     case USER_KIND:
+    case ASSISTANT_KIND:
       return { label: "Copy content", value: textState.parse(block.data).text };
     case MEDIA_KIND:
       return { label: "Copy URI", value: mediaState.parse(block.data).uri };
@@ -630,7 +636,8 @@ function ChatView({
    *  falls back to the store's own resolver for a session not listed yet (a
    *  fresh, never-saved session still sits in its seed, not the list). */
   const liveSessionName = session
-    ? sessions.find((s) => s.id === session.id)?.name ?? sessionNameOf(session.id)
+    ? (sessions.find((s) => s.id === session.id)?.name ??
+      sessionNameOf(session.id))
     : null;
   const [cursor, setCursor] = useState(0);
   /** The chat list root; page-up/page-down measures the rows inside it and
@@ -1156,7 +1163,9 @@ function ChatView({
       },
       {
         keys: ["ArrowUp", "k"],
-        help: [{ keys: "↑ / k / <n>k", label: "Previous block, <n> at a time" }],
+        help: [
+          { keys: "↑ / k / <n>k", label: "Previous block, <n> at a time" },
+        ],
         run: (count = 1) => move(-count),
       },
       {
@@ -1176,7 +1185,9 @@ function ChatView({
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: [{ keys: "← / h", label: "Close nested contexts, then step out" }],
+        help: [
+          { keys: "← / h", label: "Close nested contexts, then step out" },
+        ],
         run: collapse,
       },
       {
@@ -1587,7 +1598,9 @@ function ChatView({
         model: inferDefaultModel,
         thinkingLevel: inferThinkingLevel || undefined,
         providerId: provider?.id,
-        providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
+        providerSettings: provider
+          ? aiProviderSettings[provider.id]
+          : undefined,
       });
       if (!title) {
         setError("couldn't generate a title");
@@ -1603,13 +1616,12 @@ function ChatView({
 
   /** The memory menu's `r` action: queue the selected scope to the Hindsight
    *  memory bank, without an agent run. With no visual selection the whole
-   *  graph is retained, wrapped exactly as an inference run's
-   *  `<weaver_graph>` context reads; with a selection only the selected
-   *  blocks are retained. A selected container carries its descendants, so a
-   *  child selected together with its own parent is not written twice. The
-   *  server's side is fire-and-forget (the plugin's retain tool is async), so
-   *  the menu closes and the outcome shows as a short banner under the
-   *  header either way. */
+   *  graph is retained, flattened block by block; with a selection only the
+   *  selected blocks are retained. A selected container carries its
+   *  descendants, so a child selected together with its own parent is not
+   *  written twice. The server's side is fire-and-forget (the plugin's
+   *  retain tool is async), so the menu closes and the outcome shows as a
+   *  short banner under the header either way. */
   const retainMemory = async () => {
     if (retaining) return;
     setPopup(null);
@@ -1618,7 +1630,9 @@ function ChatView({
       window.clearTimeout(memoryTimerRef.current);
     }
     const selected =
-      visualAnchor === null ? null : selectedRows.map((entry) => entry.block.id);
+      visualAnchor === null
+        ? null
+        : selectedRows.map((entry) => entry.block.id);
     // Drop any selected block whose ancestor is also selected: its snapshot
     // already carries everything nested under it, so keeping both would
     // double the content. The topmost selected blocks are the whole scope.
@@ -1652,9 +1666,11 @@ function ChatView({
       });
       return;
     }
-    // Shape it the way the agent reads a graph — the `<weaver_graph>` wrapper —
-    // so a recalled memory is recognizably the document it came from.
-    const payload = ["<weaver_graph>", serialized, "</weaver_graph>"].join("\n");
+    // Envelope the flattened document so a recalled memory is recognizably
+    // the graph it came from rather than an anonymous slab of text.
+    const payload = ["<weaver_graph>", serialized, "</weaver_graph>"].join(
+      "\n",
+    );
     setRetaining(true);
     try {
       const result = await window.api.hindsight.retain(payload);
@@ -1945,10 +1961,9 @@ function ChatView({
                   // Mirrors the single-block "Hide block"/"Show block"
                   // toggle: when every selected block is already hidden,
                   // offer to reveal them.
-                  label:
-                    selectedRows.every((entry) => entry.block.hidden)
-                      ? `Show ${selectedRows.length} blocks`
-                      : `Hide ${selectedRows.length} blocks`,
+                  label: selectedRows.every((entry) => entry.block.hidden)
+                    ? `Show ${selectedRows.length} blocks`
+                    : `Hide ${selectedRows.length} blocks`,
                   key: "h",
                   detail: selectedRows.every((entry) => entry.block.hidden)
                     ? "restored to agent context"
@@ -2238,7 +2253,12 @@ function ChatView({
       <ShellHeader>
         <header className="flex items-center gap-3 border-b px-3 py-1">
           <span className="font-semibold">Chat</span>
-          <span className={cn("text-muted-foreground", generatingTitle && "animate-pulse")}>
+          <span
+            className={cn(
+              "text-muted-foreground",
+              generatingTitle && "animate-pulse",
+            )}
+          >
             {liveSessionName ?? "No session"}
           </span>
         </header>
@@ -2450,9 +2470,7 @@ function ChatView({
           title="Select answer"
           meta={row.block.label}
           state={multichoiceState.parse(row.block.data)}
-          onUpdate={(data) =>
-            engine.updateBlockData(row.block.id, data)
-          }
+          onUpdate={(data) => engine.updateBlockData(row.block.id, data)}
           onClose={() => setPopup(null)}
         />
       ) : null}

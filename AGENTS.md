@@ -68,11 +68,18 @@ Everything lives in `packages/core`.
   label as prefix), `snapshotAbove` (everything preceding a block — a block's
   view of "the graph so far"), `snapshotGraph` (all top-level). Unknown kinds
   throw rather than guess.
+- A run sends that view turn by turn, not as one blob: `messagesAbove` returns
+  the blocks preceding a block as `{ role, content }`, the role taken from
+  each block's kind (`user` and `assistant` kinds are those turns; everything
+  else is `developer`). `main/lib/run-agent.ts` splices the list into the
+  request pi built, via the provider's `onPayload` hook, with the anchoring
+  block's own content as the final `user` turn.
 - A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
-  `snapshot`, `hooks` (named async state→state functions), `callbacks`
-  (declarative references to another block's hook), `schedule` (self-driving
-  timer request), `defaults`. Everything parses through the schema, so no
-  consumer ever sees partially-specified state.
+  `role` (the conversational role its content takes in a run's context; omit
+  for `developer`), `snapshot`, `hooks` (named async state→state functions),
+  `callbacks` (declarative references to another block's hook), `schedule`
+  (self-driving timer request), `defaults`. Everything parses through the
+  schema, so no consumer ever sees partially-specified state.
 - Hooks get a `HookContext`: `call` another block's hook, read `graph`,
   `registry`, and mutate via `addBlock`/`clearChildren` only.
 

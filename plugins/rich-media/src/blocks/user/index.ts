@@ -15,6 +15,7 @@ export type UserState = z.infer<typeof userState>;
 
 export const userKind = defineKind({
   kind: USER_KIND,
+  role: "user",
   schema: userState,
   snapshot: (state) => state.text,
   defaults: { text: "" },

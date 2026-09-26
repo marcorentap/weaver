@@ -10,7 +10,7 @@ export type BlockData = Record<string, unknown>;
  *
  * The graph is a binary tree used as a linked list of linked lists: `next`
  * is the following block at this level, `children` is the first block nested
-* inside this one. Both orderings are explicit, not derived from timestamps,
+ * inside this one. Both orderings are explicit, not derived from timestamps,
  * so nothing can disagree about what comes after what. Nesting is
  * independent of `kind`, so every kind may nest.
  */
@@ -88,7 +88,9 @@ export function childIds(graph: BlockGraph, id: BlockId): BlockId[] {
 /** Last block nested inside `id`, or null when nothing is. */
 export function lastChildId(graph: BlockGraph, id: BlockId): BlockId | null {
   const children = childIds(graph, id);
-  return children.length > 0 ? (children[children.length - 1] as BlockId) : null;
+  return children.length > 0
+    ? (children[children.length - 1] as BlockId)
+    : null;
 }
 
 /**
@@ -264,10 +266,11 @@ export function assertTree(graph: BlockGraph): void {
   const seen = new Set<BlockId>();
 
   const walk = (first: BlockId | null, parent: BlockId | null) => {
-    for (let at = first; at !== null; ) {
+    for (let at = first; at !== null;) {
       const block = graph.blocks[at];
       if (!block) {
-        const from = parent === null ? "the top-level chain" : `block ${parent}`;
+        const from =
+          parent === null ? "the top-level chain" : `block ${parent}`;
         throw new Error(`${from} links to unknown block: ${at}`);
       }
       if (seen.has(at)) {
@@ -300,11 +303,17 @@ export function assertTree(graph: BlockGraph): void {
  *
  * A hidden block snapshots to "" without recursing, so its subtree never
  * reaches the agent either: hiding a block hides what is nested under it.
+ *
+ * `options.label` off drops the prefix and returns the bare body, for a
+ * caller that has already said who wrote the block — a turn-by-turn
+ * serialization puts a `user`/`assistant` block in a message of that role,
+ * where `assistant: ` in front of the text would only repeat it.
  */
 export function snapshotBlock(
   graph: BlockGraph,
   id: BlockId,
   registry: KindRegistry,
+  options?: { label?: boolean },
 ): string {
   const block = getBlock(graph, id);
   if (block.hidden) return "";
@@ -317,7 +326,7 @@ export function snapshotBlock(
     nested: (childId) => snapshotBlock(graph, childId, registry),
     children: childIds(graph, id),
   });
-  if (!body || !block.label) return body;
+  if (!body || !block.label || options?.label === false) return body;
   return `${block.label}: ${body}`;
 }
 
@@ -343,10 +352,7 @@ export function snapshotGraph(
  * ordering `mergedEnvironment` folds environment blocks in, so context and
  * environment can never disagree about what comes before a block.
  */
-export function precedingBlockIds(
-  graph: BlockGraph,
-  id: BlockId,
-): BlockId[] {
+export function precedingBlockIds(graph: BlockGraph, id: BlockId): BlockId[] {
   const chain: BlockId[] = [];
   for (
     let parent = findParent(graph, id);

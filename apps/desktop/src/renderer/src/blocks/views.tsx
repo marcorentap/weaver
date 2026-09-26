@@ -26,6 +26,8 @@ import {
   resolveMediaUri,
 } from "./media";
 import {
+  ASSISTANT_KIND,
+  assistantState,
   TOOL_KIND,
   toolLanguage,
   toolState,
@@ -457,6 +459,33 @@ export const blockViews: Record<string, BlockView> = {
       />
     ),
     raw: (block) => textBlobUrl(textState.parse(block.data).text),
+  },
+
+  // A run's reply. Its state is the same `{ text }` a text block holds and it
+  // renders the same way, but it is its own kind because a later run reads it
+  // as the model's own earlier turn rather than as document text.
+  [ASSISTANT_KIND]: {
+    Row: ({ block }) => (
+      <MarkdownText
+        text={assistantState.parse(block.data).text}
+        className="flex-1"
+      />
+    ),
+    fields: (block) => [
+      {
+        name: "text",
+        label: "text",
+        value: assistantState.parse(block.data).text,
+        multiline: true,
+      },
+    ],
+    Preview: ({ block }) => (
+      <MarkdownText
+        text={assistantState.parse(block.data).text}
+        className="h-[70vh] w-full overflow-auto overscroll-contain"
+      />
+    ),
+    raw: (block) => textBlobUrl(assistantState.parse(block.data).text),
   },
 
   // An environment block is `.env` config, not prose: it renders as a code

@@ -3,6 +3,7 @@ import type {
   BlockData,
   BlockGraph,
   BlockId,
+  ContextMessage,
   HookContext,
   Position,
 } from "@repo/core";
@@ -12,9 +13,9 @@ import {
   insertBlock,
   lastChildId,
   mergedEnvironment,
+  messagesAbove,
   moveBlock as moveBlockCore,
   removeBlock,
-  snapshotAbove,
   snapshotBlock,
   snapshotGraph,
   TEXT_KIND,
@@ -23,15 +24,15 @@ import {
 // would drag the whole persistence layer into the renderer bundle.
 import type { BlockInput } from "@repo/store";
 import { kinds } from "@shared/blocks/kinds.js";
-import { TOOL_KIND } from "@plugins/rich-media";
+import { ASSISTANT_KIND, TOOL_KIND } from "@plugins/rich-media";
 import { streamInference } from "@/lib/inference";
 import type { ThinkingLevel } from "@shared/agent-events.js";
 
 /**
  * The instruction a summarization run sends the model, with the target
- * block's own content appended below it. The run is isolated: no
- * `<weaver_graph>` context goes along, so the model only ever sees the
- * content the user pointed at, not the conversation around it. Kept here,
+ * block's own content appended below it. The run is isolated: none of the
+ * graph context goes along, so the model only ever sees the content the
+ * user pointed at, not the conversation around it. Kept here,
  * not in the block, because the action is the summary itself — the anchor
  * is the thing to compress, not a reason to answer.
  */
@@ -135,7 +136,7 @@ export type LiveGraph = {
    * The same engine as `runInference`, but the model compresses `take` —
    * the block under the cursor, or the whole visual selection — into a
    * short summary instead of replying to the conversation above it. The
-   * target's content is the whole prompt: no `<weaver_graph>` context goes
+   * target's content is the whole prompt: none of the graph context goes
    * along, so the summary is of the block in isolation, short and accurate
    * for a reader scanning many blocks to keep up. `anchor` is where the
    * summary lands and which block the run locks; single-block runs pass the
@@ -449,11 +450,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   /** The shared engine behind both runs: stream one reply and append its
    *  result blocks. `id` is the anchor — where the reply lands and which
    *  block the run locks. An inference run prompts with the anchor's own
-   *  content and sends everything above it as `<weaver_graph>` context; a
+   *  content and sends everything above it as turn-by-turn context; a
    *  summarization run passes `take` (the block, or the selected range, to
    *  compress) and sends no graph context at all, so the summary is of the
-   *  target alone. `answerLabel` names the text blocks the reply lands in:
-   *  "assistant" for inference, "summary" for a summarization. */
+   *  target alone. `answerKind` is the kind the reply's text lands in, with
+   *  `answerLabel` as its label: an `assistant` block for inference (its own
+   *  kind, so a later run reads the reply as the model's own earlier turn),
+   *  a `text` block labeled "summary" for a summarization. */
   async function runAgentText(
     id: BlockId,
     {
@@ -472,11 +475,15 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       noContextFiles,
       plain,
       take,
+      answerKind,
       answerLabel,
     }: RunConnection & {
       /** The blocks whose content a summarization run compresses; absent
        *  for an inference run, which uses `id`'s own content instead. */
       take?: BlockId[];
+      /** The kind the reply's text lands in. */
+      answerKind: string;
+      /** The reply block's label. */
       answerLabel: string;
     },
   ): Promise<void> {
@@ -516,15 +523,16 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       setAppendTail(id, newId);
       return newId;
     };
-    // A run's deltas land in two text blocks: the model's reasoning labeled
-    // "thinking" and its answer labeled "assistant" (an inference run) or
-    // "summary" (a summarization run). Both are plain text
-    // kind — text is text whether it is a chain of thought or a reply — but
-    // they are separate blocks, because the reply is the answer the user
-    // asked for and the reasoning is the work that produced it. Each is null
-    // between messages, so the first delta of a new one starts a fresh block
-    // instead of gluing onto whatever came before it, such as a tool result,
-    // a displayed block, or an earlier reply in the same run. Reasoning also
+    // A run's deltas land in two blocks: the model's reasoning labeled
+    // "thinking" and its answer labeled per `answerLabel`, in `answerKind`
+    // (an assistant block for inference, a text block for a summarization).
+    // Both reasoning and reply are plain text — text is text whether it is a
+    // chain of thought or an answer — but they are separate blocks, because
+    // the reply is the answer the user asked for and the reasoning is the
+    // work that produced it. Each is null between messages, so the first
+    // delta of a new one starts a fresh block instead of gluing onto whatever
+    // came before it, such as a tool result, a displayed block, or an earlier
+    // reply in the same run. Reasoning also
     // starts hidden (`enter` → `h` shows it): it stays out of the rendered
     // list and out of the agent's context until the user unfolds it, so the
     // reply reads as the answer without the chain of thought behind it.
@@ -591,7 +599,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     };
     const updateReply = () => {
       if (replyId === null) {
-        replyId = append(TEXT_KIND, { text: replyText }, answerLabel);
+        replyId = append(answerKind, { text: replyText }, answerLabel);
       } else {
         patchText(replyId, replyText);
       }
@@ -619,13 +627,17 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       );
       return;
     }
-    // What the agent reads. An inference run is the block's own content
-    // with everything above it as `<weaver_graph>` context; a summarization
-    // run is the reverse — the fixed instruction followed by only the
-    // target's content, and no graph context at all, so the model compresses
-    // the block in isolation instead of re-deriving the conversation around it.
+    // What the agent reads. An inference run is the block's own content as
+    // the run's last turn, with everything above it sent ahead of it turn by
+    // turn: what a person wrote as user turns, what earlier runs answered as
+    // assistant turns, and every other block — tool calls, files,
+    // environment, plain text — as developer material for the model to work
+    // from. A summarization run is the reverse — the fixed instruction
+    // followed by only the target's content, and no graph context at all, so
+    // the model compresses the block in isolation instead of re-deriving the
+    // conversation around it.
     let prompt: string;
-    let context: string;
+    let context: ContextMessage[];
     if (take) {
       const content = take
         .map((tid) => snapshotBlock(snapshot.graph, tid, kinds))
@@ -639,10 +651,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         );
         return;
       }
-      // Same wrapper shape the main process gives an inference run's graph
-      // (`<weaver_graph>` … `</weaver_graph>`): the fixed instruction in
-      // its own tags, then the target's content in its own, so the model
-      // can tell the job apart from the material.
+      // The fixed instruction in its own tags, then the target's content in
+      // its own, so the model can tell the job apart from the material.
       prompt = [
         "<instruction>",
         SUMMARIZE_PROMPT,
@@ -652,14 +662,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         content,
         "</content>",
       ].join("\n");
-      context = "";
+      context = [];
     } else {
       prompt = snapshotBlock(snapshot.graph, id, kinds);
       if (!prompt.trim()) {
         appendPreflightError("block is empty. Nothing to send");
         return;
       }
-      context = snapshotAbove(snapshot.graph, id, kinds);
+      context = messagesAbove(snapshot.graph, id, kinds);
     }
     // The environment the block sees, walked up the graph the same way the
     // agent's own context is. The main process turns `WEAVER_PWD` into the
@@ -714,7 +724,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
             // append the message whole, exactly as before deltas existed.
             if (replyId === null) {
               replyText = event.text;
-              append(TEXT_KIND, { text: replyText }, answerLabel);
+              append(answerKind, { text: replyText }, answerLabel);
             }
             resetStreaming();
           } else if (event.type === "tool_start") {
@@ -796,7 +806,11 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     id: BlockId,
     connection: RunConnection,
   ): Promise<void> {
-    return runAgentText(id, { ...connection, answerLabel: "assistant" });
+    return runAgentText(id, {
+      ...connection,
+      answerKind: ASSISTANT_KIND,
+      answerLabel: "assistant",
+    });
   }
 
   /** Summarize `take` — one block, or the whole visual selection — in
@@ -813,14 +827,15 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     return runAgentText(anchor, {
       ...connection,
       take,
+      answerKind: TEXT_KIND,
       answerLabel: "summary",
     });
   }
 
   /** Generate a short title for the whole session from its graph context.
    *  `snapshotGraph` flattens every visible block into one `<content>`
-   *  (the same view an inference run's `<weaver_graph>` context provides, so
-   *  the title reads the document the model otherwise reasons over), and a
+   *  (the same document an inference run reads as context, so the title
+   *  reads what the model otherwise reasons over), and a
    *  plain read-only LLM call names the session from it — no tools, no
    *  graph writes, no reply blocks appended. The graph itself is untouched,
    *  so nothing streams in and nothing needs locking or undo. Returns the
@@ -840,7 +855,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         ...connection,
         tools: connection.tools ?? [],
         thinkingLevel: connection.thinkingLevel as ThinkingLevel | undefined,
-        context: "",
+        context: [],
         prompt: [
           "<instruction>",
           TITLE_PROMPT,
