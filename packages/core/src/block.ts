@@ -30,8 +30,8 @@ export type Block<D extends BlockData = BlockData> = {
   /**
    * Hidden from the rendered list and from the agent's context. A hidden
    * block stays in the graph — it and its subtree are excluded from every
-   * snapshot (`snapshotBlock`/`snapshotAbove`/`snapshotGraph`) and from
-   * the merged environment, but nothing is deleted — so it can be shown
+   * snapshot (`snapshotBlock`) and from the merged environment, but
+   * nothing is deleted — so it can be shown
    * again later. Absent is the same as `false`; newly minted blocks are
    * never hidden.
    */
@@ -316,8 +316,9 @@ export function assertTree(graph: BlockGraph): void {
  * any other purpose — a block the user asked to summarize, a preview — is
  * taken without it and shows the block as it is.
  *
- * This is the block as a document, which is what a preview, a summary, and a
- * title want. Iterating the graph above a run is `messagesAbove`'s job, and
+ * This is the block as a document, which is what a preview wants, and the
+ * fallback a run prompts with when the block it is anchored on holds nothing
+ * to answer. Iterating the graph as context is `messagesOfBlocks`' job, and
  * it goes through each kind's `turns` where one is defined, so a block that
  * holds a whole exchange contributes the turns it actually holds rather than
  * one message with two voices in it.
@@ -364,18 +365,6 @@ export function snapshotContext(
   };
 }
 
-/** Snapshot the whole graph: every top-level block, in order, hidden ones
- *  left out entirely rather than snapshot as empty lines. */
-export function snapshotGraph(
-  graph: BlockGraph,
-  registry: KindRegistry,
-): string {
-  return topLevelBlockIds(graph)
-    .filter((id) => !getBlock(graph, id).hidden)
-    .map((id) => snapshotBlock(graph, id, registry))
-    .join("\n");
-}
-
 /**
  * Everything that appears before `id`, in order: the ancestor chain from
  * the root down to `id`'s direct parent, and at every level, starting at
@@ -408,24 +397,6 @@ export function precedingBlockIds(graph: BlockGraph, id: BlockId): BlockId[] {
     }
   }
   return ids;
-}
-
-/**
- * Everything that appears before `id`, walking up from it: the ids of
- * `precedingBlockIds`, each snapshotted in full and joined top-down (farthest
- * first). This is a block's view of "the graph so far", not the whole graph.
- */
-export function snapshotAbove(
-  graph: BlockGraph,
-  id: BlockId,
-  registry: KindRegistry,
-): string {
-  // Hidden blocks are dropped before mapping, so they contribute nothing,
-  // not even the blank line an empty snapshot would join in as.
-  return precedingBlockIds(graph, id)
-    .filter((sibling) => !graph.blocks[sibling]?.hidden)
-    .map((sibling) => snapshotBlock(graph, sibling, registry))
-    .join("\n");
 }
 
 /** Validate every block's data against its kind schema. */

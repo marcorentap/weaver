@@ -48,8 +48,8 @@ export type HookContext = {
    */
   graph: BlockGraph;
   /** Every kind's definition, keyed by `BlockKind.kind`, so a hook can
-   *  snapshot arbitrary blocks via `snapshotBlock`/`snapshotGraph` without
-   *  keeping its own reference to the app's registry. */
+   *  snapshot arbitrary blocks via `snapshotBlock` without keeping its own
+   *  reference to the app's registry. */
   registry: KindRegistry;
   /**
    * Appends a new block as a child of `parentId` and returns the new id.

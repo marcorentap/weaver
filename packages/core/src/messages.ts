@@ -4,6 +4,7 @@ import {
   precedingBlockIds,
   snapshotBlock,
   snapshotContext,
+  topLevelBlockIds,
 } from "./block";
 import type { KindRegistry, MessageRole } from "./kind";
 import { TEXT_KIND } from "./kinds/text";
@@ -88,16 +89,15 @@ export function messagesOfBlock(
 }
 
 /**
- * Everything that appears before `id`, as turn-by-turn messages rather than
- * one flattened blob. The walk is `precedingBlockIds`' — the same one
- * `snapshotAbove` and `mergedEnvironment` make, so what a block sees as
- * context cannot disagree with what it sees as environment — but each block
- * arrives with the role its kind plays instead of as another line of text,
- * which lets a model read the document the way it reads a conversation: a
- * `user` message is something the person said, an `assistant` message is
- * something a run answered, and a `developer` message is material to work
- * from, not a turn to continue. A block that holds both sides of an exchange
- * contributes both turns, in order (see `messagesOfBlock`).
+ * A list of blocks, in the order given, as turn-by-turn messages rather than
+ * one flattened blob — a run's material with the roles the blocks already
+ * hold, whatever the caller's scope. Each block arrives with the role its
+ * kind plays instead of as another line of text, which lets a model read the
+ * document the way it reads a conversation: a `user` message is something the
+ * person said, an `assistant` message is something a run answered, and a
+ * `developer` message is material to work from, not a turn to continue. A
+ * block that holds both sides of an exchange contributes both turns, in
+ * order (see `messagesOfBlock`).
  *
  * Two adjustments make that a request a provider will accept:
  *
@@ -112,15 +112,19 @@ export function messagesOfBlock(
  *   (`BlockKind.context`), and a question nobody has answered yet all
  *   contribute nothing, and a provider reading an empty message has been
  *   told nothing in the loudest possible way.
+ *
+ * This is the one place blocks become a request's messages, so a run over
+ * the graph above a block and a run over an explicit list of blocks (a
+ * summarization's targets, say) cannot read their material differently.
  */
-export function messagesAbove(
+export function messagesOfBlocks(
   graph: BlockGraph,
-  id: BlockId,
+  ids: BlockId[],
   registry: KindRegistry,
 ): ContextMessage[] {
   const messages: ContextMessage[] = [];
-  for (const sibling of precedingBlockIds(graph, id)) {
-    for (const message of messagesOfBlock(graph, sibling, registry)) {
+  for (const id of ids) {
+    for (const message of messagesOfBlock(graph, id, registry)) {
       if (!message.content.trim()) continue;
       const open = messages[messages.length - 1];
       if (open && open.role === message.role) {
@@ -131,4 +135,35 @@ export function messagesAbove(
     }
   }
   return messages;
+}
+
+/**
+ * Everything that appears before `id`, as turn-by-turn messages rather than
+ * one flattened blob. The walk is `precedingBlockIds`' — the same one
+ * `mergedEnvironment` makes, so what a block sees as context cannot disagree
+ * with what it sees as environment — and the turns
+ * are the same `messagesOfBlocks` builds for any list of blocks.
+ */
+export function messagesAbove(
+  graph: BlockGraph,
+  id: BlockId,
+  registry: KindRegistry,
+): ContextMessage[] {
+  return messagesOfBlocks(graph, precedingBlockIds(graph, id), registry);
+}
+
+/**
+ * The whole visible graph, in order, as turn-by-turn messages: every
+ * top-level block, hidden ones contributing nothing (with `messagesOfBlock`'s
+ * own exclusions applying below them). This is the session as a document,
+ * read as a conversation rather than as one flattened string, for a caller
+ * whose material is the session itself: a run that names the session, say,
+ * which should read what a run over any block reads, not a lossier
+ * re-rendering of it.
+ */
+export function messagesOfGraph(
+  graph: BlockGraph,
+  registry: KindRegistry,
+): ContextMessage[] {
+  return messagesOfBlocks(graph, topLevelBlockIds(graph), registry);
 }

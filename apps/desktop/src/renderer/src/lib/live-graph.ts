@@ -15,10 +15,11 @@ import {
   mergedEnvironment,
   messagesAbove,
   messagesOfBlock,
+  messagesOfBlocks,
+  messagesOfGraph,
   moveBlock as moveBlockCore,
   removeBlock,
   snapshotBlock,
-  snapshotGraph,
   TEXT_KIND,
 } from "@repo/core";
 // Type-only: `@repo/store` reaches for node:sqlite, so a value import here
@@ -30,22 +31,27 @@ import { streamInference } from "@/lib/inference";
 import type { ThinkingLevel } from "@shared/agent-events.js";
 
 /**
- * The instruction a summarization run sends the model, with the target
- * block's own content appended below it. The run is isolated: none of the
- * graph context goes along, so the model only ever sees the content the
- * user pointed at, not the conversation around it. Kept here,
- * not in the block, because the action is the summary itself — the anchor
- * is the thing to compress, not a reason to answer.
+ * The instruction the session-title run sends the model, with the visible
+ * graph above it as the run's context. Read-only: the title is returned to
+ * the caller, nothing is written or appended.
  */
 const TITLE_PROMPT = [
-  "The content below is a graph of blocks — this session's document.",
+  "The content above is a graph of blocks — this session's document.",
   "Name the session: a short label, a few words, that tells what it is about.",
   "Read it from the content, not a generic phrase.",
   "Reply with only the title, no preamble or quotes.",
 ].join("\n");
 
+/**
+ * The instruction a summarization run sends the model. The run is isolated:
+ * only the target's own turns go along as the run's context — never the graph
+ * around it — so the model reads the content the user pointed at and nothing
+ * else. Kept here, not in a block, because the action is the summary itself —
+ * the target is the thing to compress, not a reason to answer. The material
+ * precedes the instruction in the request, so the instruction points above.
+ */
 const SUMMARIZE_PROMPT = [
-  "Summarize the text below.",
+  "Summarize the text above.",
   "Write in plain style: short, matter-of-fact sentences, no filler, no cliches, no formulaic transition phrases, no decorative adjectives.",
   "Make it self-contained: inline the names, numbers, dates, results, and decisions themselves. A summary that merely points at information, like a C pointer, sends the reader fetching; when the text only references something (a commit, a file, a link), say what it says or does so the summary reads true on its own.",
   "If the text only makes sense with context, open with a short background section saying what it is part of, what it changes, or why it exists.",
@@ -121,8 +127,9 @@ export type LiveGraph = {
   runHook: (id: BlockId, hook: string, arg?: unknown) => Promise<void>;
   /**
    * The global "run inference" action. Any block, not just one of a
-   * particular kind, can anchor a run. Context is everything above `id`
-   * (`snapshotAbove`); the prompt is `id`'s own content (`snapshotBlock`).
+   * particular kind, can anchor a run. Context is everything above `id`,
+   * turn by turn (`messagesAbove`); the prompt is `id`'s own content, or its
+   * last user turn when the block holds a whole exchange (`messagesOfBlock`).
    * A block someone just typed becomes the last user turn. Results land
    * as siblings appended right after `id`, chained one after the next in
    * the order they streamed in, never nested under it. A re-run adds
@@ -137,7 +144,10 @@ export type LiveGraph = {
    * The same engine as `runInference`, but the model compresses `take` —
    * the block under the cursor, or the whole visual selection — into a
    * short summary instead of replying to the conversation above it. The
-   * target's content is the whole prompt: none of the graph context goes
+   * target's blocks are the run's whole context, sent as the turns they
+   * already are (a person's message as a user turn, a run's reply as an
+   * assistant one, the rest as developer material) with the instruction as
+   * the prompt after them; none of the graph context goes
    * along, so the summary is of the block in isolation, short and accurate
    * for a reader scanning many blocks to keep up. `anchor` is where the
    * summary lands and which block the run locks; single-block runs pass the
@@ -453,8 +463,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
    *  block the run locks. An inference run prompts with the anchor's own
    *  content and sends everything above it as turn-by-turn context; a
    *  summarization run passes `take` (the block, or the selected range, to
-   *  compress) and sends no graph context at all, so the summary is of the
-   *  target alone. `answerKind` is the kind the reply's text lands in, with
+   *  compress) and sends those blocks' turns as the whole context, with the
+   *  instruction after them, so the summary is of the target alone.
+   *  `answerKind` is the kind the reply's text lands in, with
    *  `answerLabel` as its label: an `assistant` block for inference (its own
    *  kind, so a later run reads the reply as the model's own earlier turn),
    *  a `text` block labeled "summary" for a summarization. */
@@ -479,8 +490,9 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       answerKind,
       answerLabel,
     }: RunConnection & {
-      /** The blocks whose content a summarization run compresses; absent
-       *  for an inference run, which uses `id`'s own content instead. */
+      /** The blocks whose content a summarization run compresses, sent as
+       *  the run's context in place of the graph above; absent for an
+       *  inference run, which uses `id`'s own content instead. */
       take?: BlockId[];
       /** The kind the reply's text lands in. */
       answerKind: string;
@@ -633,18 +645,18 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // turn: what a person wrote as user turns, what earlier runs answered as
     // assistant turns, and every other block — tool calls, files,
     // environment, plain text — as developer material for the model to work
-    // from. A summarization run is the reverse — the fixed instruction
-    // followed by only the target's content, and no graph context at all, so
-    // the model compresses the block in isolation instead of re-deriving the
-    // conversation around it.
+    // from. A summarization run is the same shape, but its context is the
+    // target block or blocks rather than the graph above: the target's turns
+    // go along as the run's context, in `take` order, and the fixed
+    // instruction follows as the run's prompt. No graph context goes along,
+    // so the model compresses the block in isolation instead of re-deriving
+    // the conversation around it, and a target that holds more than one
+    // voice reads as the exchange it is rather than as a run-together string.
     let prompt: string;
     let context: ContextMessage[];
     if (take) {
-      const content = take
-        .map((tid) => snapshotBlock(snapshot.graph, tid, kinds))
-        .filter((part) => part.trim().length > 0)
-        .join("\n\n");
-      if (!content) {
+      context = messagesOfBlocks(snapshot.graph, take, kinds);
+      if (context.length === 0) {
         appendPreflightError(
           take.length > 1
             ? "nothing to summarize — the selected blocks are empty"
@@ -652,18 +664,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         );
         return;
       }
-      // The fixed instruction in its own tags, then the target's content in
-      // its own, so the model can tell the job apart from the material.
-      prompt = [
-        "<instruction>",
-        SUMMARIZE_PROMPT,
-        "</instruction>",
-        "",
-        "<content>",
-        content,
-        "</content>",
-      ].join("\n");
-      context = [];
+      prompt = SUMMARIZE_PROMPT;
     } else {
       // Everything above the block, then the block's own turns. The last of
       // them is what the run is prompted with, because a request has to end
@@ -858,9 +859,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   }
 
   /** Generate a short title for the whole session from its graph context.
-   *  `snapshotGraph` flattens every visible block into one `<content>`
-   *  (the same document an inference run reads as context, so the title
-   *  reads what the model otherwise reasons over), and a
+   *  The visible graph — `messagesOfGraph`'s scope, the same material an
+   *  inference run reads as context, read as turns rather than flattened
+   *  into one string so a person's message, a run's reply and the material
+   *  between them keep their roles — is the run's context, and a
    *  plain read-only LLM call names the session from it — no tools, no
    *  graph writes, no reply blocks appended. The graph itself is untouched,
    *  so nothing streams in and nothing needs locking or undo. Returns the
@@ -871,8 +873,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
   async function generateTitle(
     connection: RunConnection,
   ): Promise<string | null> {
-    const content = snapshotGraph(snapshot.graph, kinds);
-    if (!content.trim()) return null;
+    const context = messagesOfGraph(snapshot.graph, kinds);
+    if (context.length === 0) return null;
     let title = "";
     let failed = false;
     const { done } = streamInference(
@@ -880,16 +882,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         ...connection,
         tools: connection.tools ?? [],
         thinkingLevel: connection.thinkingLevel as ThinkingLevel | undefined,
-        context: [],
-        prompt: [
-          "<instruction>",
-          TITLE_PROMPT,
-          "</instruction>",
-          "",
-          "<content>",
-          content,
-          "</content>",
-        ].join("\n"),
+        context,
+        prompt: TITLE_PROMPT,
         plain: true,
       },
       (event) => {

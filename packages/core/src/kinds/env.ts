@@ -38,11 +38,7 @@ export function parseEnv(text: string): Record<string, string> {
       : rawKey;
     if (key.length === 0) continue;
     let value = line.slice(eq + 1).trim();
-    if (
-      value.length >= 2 &&
-      value.startsWith('"') &&
-      value.endsWith('"')
-    ) {
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
       value = value.slice(1, -1);
     }
     vars[key] = value;
@@ -73,7 +69,7 @@ export const environmentKind = defineKind({
 
 /**
  * The merged environment that applies to `id`: every `environment` block
- * it can see, walked exactly the way `snapshotAbove` walks the graph (the
+ * it can see, walked exactly the way `precedingBlockIds` walks the graph (the
  * ancestor chain from the root down to `id`'s own level, taking all
  * preceding siblings at each stop), merged top-down so a closer block
  * overwrites a farther one. This is a block's view of "the environment so

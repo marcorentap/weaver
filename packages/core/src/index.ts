@@ -13,9 +13,7 @@ import {
   positionOf,
   removeBlock,
   rootOf,
-  snapshotAbove,
   snapshotBlock,
-  snapshotGraph,
   subtreeIds,
   topLevelBlockIds,
 } from "./block";
@@ -30,7 +28,12 @@ import type {
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
 import type { ContextMessage } from "./messages";
-import { messagesAbove, messagesOfBlock } from "./messages";
+import {
+  messagesAbove,
+  messagesOfBlock,
+  messagesOfBlocks,
+  messagesOfGraph,
+} from "./messages";
 import type { GroupState, TextState } from "./kinds/text";
 import {
   GROUP_KIND,
@@ -91,14 +94,14 @@ export {
   mergedEnvironment,
   messagesAbove,
   messagesOfBlock,
+  messagesOfBlocks,
+  messagesOfGraph,
   moveBlock,
   parseEnv,
   positionOf,
   removeBlock,
   rootOf,
-  snapshotAbove,
   snapshotBlock,
-  snapshotGraph,
   subtreeIds,
   TEXT_KIND,
   textKind,

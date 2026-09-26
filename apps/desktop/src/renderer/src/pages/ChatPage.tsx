@@ -15,8 +15,8 @@ import {
   findParent,
   GROUP_KIND,
   lastChildId,
-  snapshotBlock,
-  snapshotGraph,
+  messagesOfBlocks,
+  messagesOfGraph,
   TEXT_KIND,
   textState,
   topLevelBlockIds,
@@ -1616,8 +1616,8 @@ function ChatView({
 
   /** The memory menu's `r` action: queue the selected scope to the Hindsight
    *  memory bank, without an agent run. With no visual selection the whole
-   *  graph is retained, flattened block by block; with a selection only the
-   *  selected blocks are retained. A selected container carries its
+   *  graph is retained, read as the turns it holds; with a selection only the
+   *  selected blocks are. A selected container carries its
    *  descendants, so a child selected together with its own parent is not
    *  written twice. The server's side is fire-and-forget (the plugin's
    *  retain tool is async), so the menu closes and the outcome shows as a
@@ -1649,14 +1649,16 @@ function ChatView({
             }
             return true;
           });
-    const serialized =
+    // The scope is read as the turns it already holds rather than flattened:
+    // a person's message keeps its role, a run's reply keeps its, and the
+    // material around them keeps the label each block's snapshot puts in
+    // front of it. A memory bank that later reads "the user asked for X" is
+    // reading this, so who said what has to survive the trip.
+    const messages =
       scope === null
-        ? snapshotGraph(graph, kinds)
-        : scope
-            .map((id) => snapshotBlock(graph, id, kinds))
-            .filter((text) => text.length > 0)
-            .join("\n\n");
-    if (!serialized.trim()) {
+        ? messagesOfGraph(graph, kinds)
+        : messagesOfBlocks(graph, scope, kinds);
+    if (messages.length === 0) {
       setMemoryFeedback({
         tone: "error",
         text:
@@ -1666,8 +1668,19 @@ function ChatView({
       });
       return;
     }
-    // Envelope the flattened document so a recalled memory is recognizably
-    // the graph it came from rather than an anonymous slab of text.
+    // The bank takes text, not a conversation, so each turn is written out
+    // under the role that spoke it — except `developer` material, whose
+    // snapshot already carries the label it came from and would only read as
+    // a second, redundant one.
+    const serialized = messages
+      .map((message) =>
+        message.role === "developer"
+          ? message.content
+          : `${message.role}: ${message.content}`,
+      )
+      .join("\n\n");
+    // Envelope the document so a recalled memory is recognizably the graph it
+    // came from rather than an anonymous slab of text.
     const payload = ["<weaver_graph>", serialized, "</weaver_graph>"].join(
       "\n",
     );

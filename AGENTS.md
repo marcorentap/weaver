@@ -64,10 +64,13 @@ Everything lives in `packages/core`.
   `assertTree`, …) are pure `graph → graph` functions. Use them; never rewrite
   links by hand. `assertTree` is the invariant: one root, no loops, nothing
   unreachable.
-- Snapshots are how a block becomes LLM text: `snapshotBlock` (one block, its
-  label as prefix), `snapshotAbove` (everything preceding a block — a block's
-  view of "the graph so far"), `snapshotGraph` (all top-level). Unknown kinds
-  throw rather than guess.
+- Snapshots are how a block becomes text: `snapshotBlock` (one block, its
+  label as prefix). Unknown kinds throw rather than guess. A snapshot is the
+  block as a document — a preview, or the fallback prompt of a block with
+  nothing of its own to answer — where what a run sends as context is the
+  message view below. Walking the graph above a block is `precedingBlockIds`
+  (`mergedEnvironment` folds environment blocks by the same walk, so context
+  and environment cannot disagree about what comes before a block).
 - A run sends that view turn by turn, not as one blob: `messagesAbove` returns
   the blocks preceding a block as `{ role, content }`, the role taken from
   each block's kind (`user` and `assistant` kinds are those turns; everything
@@ -79,7 +82,12 @@ Everything lives in `packages/core`.
   recursion. The anchoring block contributes its own turns the same way
   (`messagesOfBlock`), the last of them being what the run is prompted with;
   `main/lib/run-agent.ts` splices the rest into the request pi built, via the
-  provider's `onPayload` hook, ahead of pi's own first turn. `@file:` and
+  provider's `onPayload` hook, ahead of pi's own first turn. Every run's
+  material goes through that same path — `messagesAbove` (the graph above a
+  block), `messagesOfBlocks` (a summarization's targets), `messagesOfGraph`
+  (the whole visible graph, for naming a session) — so a run over an explicit
+  set of blocks reads its material with the roles the blocks already hold,
+  never as a flattened string. `@file:` and
   `@skill:` references a user message attaches are read there too — the
   renderer has no filesystem — and appended as their own `developer` messages
   just before that first turn (`main/lib/references.ts`): a skill in full, a
