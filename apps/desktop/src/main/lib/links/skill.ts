@@ -27,11 +27,12 @@ function skillsFor(root: string): SkillSummary[] {
     return cache.skills;
   }
   // The same directories a run loads from, named explicitly: `~/.agents/
-  // skills` and `<root>/.agents/skills`. pi's own discovery is not used —
-  // with `includeDefaults: true` it would also scan pi's project-local
-  // `.pi/skills`, which weaver never reads. A malformed SKILL.md yields
-  // diagnostics, not a thrown error, so a bad file is simply absent from
-  // the list.
+  // skills`, `<root>/.agents/skills` and `<root>/.weaver/skills`, most
+  // specific first so a project's override is the skill that resolves. pi's
+  // own discovery is not used — with `includeDefaults: true` it would also
+  // scan pi's project-local `.pi/skills`, which weaver never reads. A
+  // malformed SKILL.md yields diagnostics, not a thrown error, so a bad file
+  // is simply absent from the list.
   const { skills } = loadSkills({
     cwd: root,
     agentDir: AGENT_DIR,

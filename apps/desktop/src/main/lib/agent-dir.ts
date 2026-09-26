@@ -38,9 +38,25 @@ process.env.PI_CODING_AGENT_DIR ??= AGENT_DIR;
  */
 export const AGENTS_DIR_NAME = ".agents";
 
+/**
+ * The directory name a project keeps its *weaver-specific* agent resources
+ * in. It takes the same shape as `.agents` — `skills/`, `prompts/`,
+ * `themes/`, `extensions/`, `APPEND_SYSTEM.md` — and sits above it: a
+ * project that wants to redefine one of the skills it inherits from
+ * `.agents` or `~/.agents` does so here, without editing a directory it may
+ * not own, and without the redefinition being shadowed by the copy it
+ * replaces. Everything else in `.agents` still loads.
+ */
+export const WEAVER_DIR_NAME = ".weaver";
+
 /** `<cwd>/.agents`: the project half of the convention. */
 export function projectAgentsDir(cwd: string): string {
   return join(cwd, AGENTS_DIR_NAME);
+}
+
+/** `<cwd>/.weaver`: the project's override of `<cwd>/.agents`. */
+export function projectWeaverDir(cwd: string): string {
+  return join(cwd, WEAVER_DIR_NAME);
 }
 
 /** The resource kinds pi can discover, and the four weaver supplies itself.
@@ -56,11 +72,22 @@ export const AGENT_RESOURCE_TYPES = [
 export type AgentResourceType = (typeof AGENT_RESOURCE_TYPES)[number];
 
 /**
- * Every directory a resource kind comes from, user before project so the
- * project's more specific entries are read last and win collisions. Shared
- * by a run's resource loader and the `@skill:` link provider, so the menu
- * lists exactly the skills a run would load.
+ * Every directory a resource kind comes from, most specific first.
+ *
+ * The order is the precedence, because pi keeps the *first* entry it loads
+ * under a given name: skills, prompt templates and themes are each keyed by
+ * name, and a later directory's copy of a name already seen is dropped as a
+ * collision. So a project's `.weaver/<kind>` overrides its `.agents/<kind>`,
+ * which overrides the user's `~/.agents/<kind>`, and an entry only a less
+ * specific directory has still loads.
+ *
+ * Shared by a run's resource loader and the `@skill:` link provider, so the
+ * menu lists exactly the skills a run would load.
  */
 export function resourceDirs(type: AgentResourceType, cwd: string): string[] {
-  return [join(AGENT_DIR, type), join(projectAgentsDir(cwd), type)];
+  return [
+    join(projectWeaverDir(cwd), type),
+    join(projectAgentsDir(cwd), type),
+    join(AGENT_DIR, type),
+  ];
 }

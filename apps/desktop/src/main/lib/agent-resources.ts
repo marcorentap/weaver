@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import {
   DefaultResourceLoader,
   SettingsManager,
@@ -7,14 +7,16 @@ import {
 import {
   AGENT_DIR,
   projectAgentsDir,
+  projectWeaverDir,
   resourceDirs,
   type AgentResourceType,
 } from "./agent-dir.js";
 
 /**
  * Which of pi's four discoverable resource kinds a run wants. An enabled
- * kind is supplied from `~/.agents/<kind>` and `<cwd>/.agents/<kind>`; a
- * disabled one contributes nothing at all.
+ * kind is supplied from the three agent directories — `~/.agents/<kind>`,
+ * `<cwd>/.agents/<kind>` and `<cwd>/.weaver/<kind>`; a disabled one
+ * contributes nothing at all.
  */
 export type AgentResources = Record<AgentResourceType, boolean>;
 
@@ -37,7 +39,13 @@ export function createAgentSettings(cwd: string): SettingsManager {
 
 /**
  * Append-prompt files weaver honors: `~/.agents/APPEND_SYSTEM.md`, then the
- * project's `<cwd>/.agents/APPEND_SYSTEM.md`. Existing files only.
+ * project's append prompt — `<cwd>/.weaver/APPEND_SYSTEM.md` when the project
+ * has one, `<cwd>/.agents/APPEND_SYSTEM.md` otherwise. Existing files only.
+ *
+ * The two project directories are one tier, not two sources: an append prompt
+ * is a single document, so a project keeping its own under `.weaver` is
+ * replacing the one it inherited rather than appending a second. The user's
+ * file is a different tier and still applies.
  *
  * Handing the list over — even when it is empty — is what stops pi from
  * discovering `<cwd>/.pi/APPEND_SYSTEM.md` for itself. An entry that does not
@@ -45,10 +53,12 @@ export function createAgentSettings(cwd: string): SettingsManager {
  * text, so it must be filtered here.
  */
 function appendSystemPromptSources(cwd: string): string[] {
-  return [
-    join(AGENT_DIR, "APPEND_SYSTEM.md"),
-    join(projectAgentsDir(cwd), "APPEND_SYSTEM.md"),
-  ].filter((path) => existsSync(path));
+  const project = [projectWeaverDir(cwd), projectAgentsDir(cwd)]
+    .map((dir) => join(dir, "APPEND_SYSTEM.md"))
+    .find((path) => existsSync(path));
+  return [join(AGENT_DIR, "APPEND_SYSTEM.md"), project].filter(
+    (path): path is string => path !== undefined && existsSync(path),
+  );
 }
 
 /**
@@ -123,6 +133,32 @@ function declaredExtensionEntries(dir: string): string[] | null {
 }
 
 /**
+ * Every extension file a run loads, most specific directory first.
+ *
+ * Skills, prompt templates and themes are keyed by name, and pi keeps the
+ * first entry it loads under a name it has already seen, so a less specific
+ * directory's copy loses on its own. An extension has no such key: pi
+ * registers every file it is handed, so the same extension present in two
+ * directories would load twice and register its tools twice. The key used
+ * here is therefore the entry's path inside its own `extensions/` directory —
+ * `<cwd>/.weaver/extensions/foo.ts` replaces `<cwd>/.agents/extensions/foo.ts`,
+ * and a differently named extension, or one only the user has, still loads.
+ */
+function extensionPaths(cwd: string): string[] {
+  const claimed = new Set<string>();
+  const paths: string[] = [];
+  for (const dir of resourceDirs("extensions", cwd)) {
+    for (const file of extensionEntries(dir)) {
+      const key = relative(dir, file);
+      if (claimed.has(key)) continue;
+      claimed.add(key);
+      paths.push(file);
+    }
+  }
+  return paths;
+}
+
+/**
  * The resource loader a run uses. Everything about discovery is stated here
  * rather than left to pi:
  *
@@ -130,9 +166,9 @@ function declaredExtensionEntries(dir: string): string[] | null {
  * given *and* a project-local `.pi/`, whose name is compiled into the
  * package and cannot be changed from the outside. So all four built-in
  * discovery passes are switched off and each wanted directory is passed as
- * an explicit path instead. That leaves exactly two sources, both ours:
- * `~/.agents/<kind>` and `<cwd>/.agents/<kind>`, and no path by which
- * `<cwd>/.pi` could be read.
+ * an explicit path instead. That leaves exactly three sources, all ours:
+ * `~/.agents/<kind>`, `<cwd>/.agents/<kind>` and `<cwd>/.weaver/<kind>`,
+ * and no path by which `<cwd>/.pi` could be read.
  *
  * The cost is pi's package manager: resources installed from an npm/git
  * source declared in a settings file are no longer resolved. Weaver has no
@@ -167,10 +203,6 @@ export function createAgentResourceLoader(options: {
     resources[type]
       ? resourceDirs(type, cwd).filter((dir) => existsSync(dir))
       : [];
-  const extensionPaths = (): string[] =>
-    resources.extensions
-      ? resourceDirs("extensions", cwd).flatMap(extensionEntries)
-      : [];
 
   return new DefaultResourceLoader({
     cwd,
@@ -181,7 +213,7 @@ export function createAgentResourceLoader(options: {
     noPromptTemplates: true,
     noThemes: true,
     noContextFiles,
-    additionalExtensionPaths: extensionPaths(),
+    additionalExtensionPaths: resources.extensions ? extensionPaths(cwd) : [],
     additionalSkillPaths: dirs("skills"),
     additionalPromptTemplatePaths: dirs("prompts"),
     additionalThemePaths: dirs("themes"),

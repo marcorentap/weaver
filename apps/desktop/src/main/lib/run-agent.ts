@@ -49,8 +49,8 @@ import {
  * these per run / app-wide.
  *
  * Each of the first four is a *weaver* resource kind, discovered from
- * `~/.agents` and `<cwd>/.agents` — never from pi's own directories. See
- * `createAgentResourceLoader`.
+ * `~/.agents`, `<cwd>/.agents` and `<cwd>/.weaver` — never from pi's own
+ * directories. See `createAgentResourceLoader`.
  */
 const DISCOVERY_DEFAULTS = {
   noExtensions: false,

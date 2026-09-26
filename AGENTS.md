@@ -135,8 +135,10 @@ _server's_ filesystem. It mounts a `weaver` provider on pi's `ModelRuntime`
 summarization) or creates a full pi session with our custom tools
 (read/write/edit/display_media) plus plugin tools and plugin-provided kinds.
 
-- Resources (skills, extensions, context files) are discovered from `~/.agents`
-  and `<cwd>/.agents`, never from pi's own directories. `AGENT_DIR` is honored.
+- Resources (skills, extensions, context files) are discovered from `~/.agents`,
+  `<cwd>/.agents` and `<cwd>/.weaver`, never from pi's own directories. The
+  three are one precedence chain — `.weaver` over `.agents` over
+  `~/.agents` — with `AGENT_DIR` honored.
 - The system prompt is `main/agent/system-prompt.md`, injected via
   `WEAVER_SYSTEM_PROMPT`, replacing pi's default.
 - Events are zod-validated in `shared/agent-events.ts` and streamed to the
