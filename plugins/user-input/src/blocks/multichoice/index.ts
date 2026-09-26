@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ContextMessage } from "@repo/core";
 import { defineKind } from "@repo/core";
 
 /**
@@ -35,14 +36,13 @@ export const multichoiceState = z.object({
 export type MultichoiceState = z.infer<typeof multichoiceState>;
 
 /**
- * How a multichoice block reads as context: the question alone, then the
- * user's answer as a bullet list under a `user:` marker — the picked
- * options, the Other text when Other was picked, and the note. Unanswered
- * it is just the question, exactly what an agent should see before the user
- * answered; the reader never has to count checkboxes.
+ * The user's answer to the question, as the bullets it reads as: the picked
+ * options in `options` order, the Other text when Other was picked, and the
+ * note. Empty while the question is unanswered — the state holds a question
+ * whether or not anyone has answered it, which is what makes an unanswered
+ * one tellable apart from an answered one.
  */
-export function multichoiceSnapshot(state: MultichoiceState): string {
-  const prompt = state.prompt.trim();
+export function multichoiceAnswer(state: MultichoiceState): string {
   const bullets: string[] = [];
   for (const option of state.options) {
     if (state.selected.includes(option)) bullets.push(option);
@@ -53,16 +53,53 @@ export function multichoiceSnapshot(state: MultichoiceState): string {
     );
   }
   if (state.note.trim()) bullets.push(`Note: ${state.note.trim()}`);
+  return bullets.map((bullet) => `- ${bullet}`).join("\n");
+}
+
+/**
+ * How a multichoice block reads as a document: the question alone, then the
+ * user's answer as a bullet list under a `user:` marker. Unanswered it is
+ * just the question, exactly what the block holds before the user answered.
+ *
+ * The marker belongs here because nothing outside the text can say who is
+ * speaking. In a conversation, something can: see `turns` below, where the
+ * same block arrives as an assistant turn and a user turn instead.
+ */
+export function multichoiceSnapshot(state: MultichoiceState): string {
+  const prompt = state.prompt.trim();
+  const answer = multichoiceAnswer(state);
   const lines = prompt ? [prompt] : [];
-  if (bullets.length > 0) {
-    lines.push("user:", ...bullets.map((bullet) => `- ${bullet}`));
-  }
+  if (answer) lines.push("user:", answer);
   return lines.join("\n");
+}
+
+/**
+ * How a multichoice block reads as a conversation — the one block kind that
+ * holds both sides of an exchange, and so the one that needs two turns where
+ * every other kind needs one.
+ *
+ * The question is the assistant's, because a run is what asked it; the answer
+ * is the person's, because picking the choices is what they did. Unanswered,
+ * only the question is there, which is what the model that asked it should
+ * find on re-reading: a question with nothing after it has not been answered.
+ *
+ * The `user:` marker `multichoiceSnapshot` writes has no place in these
+ * turns. There the role says who is speaking, and an answer quoting itself
+ * back would read as a person narrating their own reply.
+ */
+function multichoiceTurns(state: MultichoiceState): ContextMessage[] {
+  const turns: ContextMessage[] = [];
+  const prompt = state.prompt.trim();
+  if (prompt) turns.push({ role: "assistant", content: prompt });
+  const answer = multichoiceAnswer(state);
+  if (answer) turns.push({ role: "user", content: answer });
+  return turns;
 }
 
 export const multichoiceKind = defineKind({
   kind: MULTICHOICE_KIND,
   schema: multichoiceState,
   snapshot: multichoiceSnapshot,
+  turns: multichoiceTurns,
   defaults: { prompt: "", options: [], selected: [], other: "", note: "" },
 });

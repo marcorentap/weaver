@@ -1,5 +1,6 @@
 import type { ZodType } from "zod";
 import type { Block, BlockData, BlockGraph, BlockId } from "./block";
+import type { ContextMessage } from "./messages";
 
 /**
  * Which side of a conversation a block's content belongs to when a run
@@ -102,7 +103,9 @@ export type CallbackSpec = {
 export type BlockKind = {
   kind: string;
   /** The role this kind's content takes in a serialized context. See
-   *  `MessageRole`. */
+   *  `MessageRole`. This is the role of the one turn most kinds contribute;
+   *  a kind that answers with more than one turn says so in `turns`, and
+   *  then nothing reads this. */
   role: MessageRole;
   /**
    * Whether blocks of this kind are part of a run's context at all. A kind
@@ -129,6 +132,12 @@ export type BlockKind = {
   parse: (data: BlockData) => unknown;
   /** Flatten validated state into the string handed to the LLM. */
   snapshot: (data: BlockData, ctx: SnapshotContext) => string;
+  /**
+   * The turns one block of this kind contributes to a serialized context, in
+   * order, or null for the ordinary case of one turn built from `role` and
+   * `snapshot`. See `defineKind.turns`.
+   */
+  turns: ((data: BlockData, ctx: SnapshotContext) => ContextMessage[]) | null;
   /** Names of hooks this kind exposes, callable by id from other blocks,
    *  e.g. a timer's target, or by the harness itself, e.g. a scheduler's
    *  tick. */
@@ -178,7 +187,8 @@ export function defineKind<S>(def: {
   kind: string;
   /** The role this kind's content takes when a run serializes the graph it
    *  sits in. Omit for a kind that is not a conversational turn of its own;
-   *  the default, `developer`, is for context rather than speech. */
+   *  the default, `developer`, is for context rather than speech. Ignored
+   *  when `turns` is given. */
   role?: MessageRole;
   /** Whether blocks of this kind reach the model as context. Omit to be
    *  part of it, which is what a kind that says something wants. See
@@ -186,6 +196,22 @@ export function defineKind<S>(def: {
   context?: boolean;
   schema: ZodType<S>;
   snapshot: (state: S, ctx: SnapshotContext) => string;
+  /**
+   * The turns a block of this kind contributes to a run's context, for a
+   * block that holds more than one speaker's worth of conversation in one
+   * place. Omit for the ordinary case, which is every other kind: one turn,
+   * the block's snapshot under `role`.
+   *
+   * This is deliberately separate from `snapshot`, because the two answer
+   * different questions. A snapshot is what the block reads as on its own —
+   * a document, for a preview or a summary, where nothing outside the text
+   * can say who is speaking. Turns are what the block reads as in a
+   * conversation, where the role says it and a marker inside the text would
+   * only repeat it. A kind whose block is one voice needs no `turns`; one
+   * whose block is a question and its answer gives both here, in the order
+   * they happened.
+   */
+  turns?: (state: S, ctx: SnapshotContext) => readonly ContextMessage[];
   /**
    * Named functions this kind exposes. Each receives the block's current
    * state, already parsed, and returns its next state. Sync for pure
@@ -207,15 +233,19 @@ export function defineKind<S>(def: {
   defaults?: S;
 }): BlockKind {
   const hooks = def.hooks ?? {};
+  const turns = def.turns;
   return {
     kind: def.kind,
     role: def.role ?? "developer",
     context: def.context ?? true,
     schema: def.schema as ZodType<unknown>,
     parse: (data) => def.schema.parse(data),
-    // Parsing here means `def.snapshot` only ever receives complete state,
-    // and no cast is needed to recover the state type.
+    // Parsing here means `def.snapshot`/`def.turns` only ever receive complete
+    // state, and no cast is needed to recover the state type.
     snapshot: (data, ctx) => def.snapshot(def.schema.parse(data), ctx),
+    turns: turns
+      ? (data, ctx) => [...turns(def.schema.parse(data), ctx)]
+      : null,
     hooks: Object.keys(hooks),
     callbacks: def.callbacks ?? [],
     defaults:

@@ -71,19 +71,24 @@ Everything lives in `packages/core`.
 - A run sends that view turn by turn, not as one blob: `messagesAbove` returns
   the blocks preceding a block as `{ role, content }`, the role taken from
   each block's kind (`user` and `assistant` kinds are those turns; everything
-  else is `developer`). A kind may also opt out of a run's context entirely
-  (`context: false`; `environment` does, since its variables already reached
-  the run), which drops its blocks wherever they sit — the option carries
-  down `snapshotBlock`'s recursion. `main/lib/run-agent.ts` splices the list
-  into the request pi built, via the provider's `onPayload` hook, with the
-  anchoring block's own content as the final `user` turn.
+  else is `developer`), or from a kind's own `turns` when one block holds both
+  sides of an exchange (`multichoice`: the question as assistant, the answer as
+  user). A kind may also opt out of a run's context entirely (`context: false`;
+  `environment` does, since its variables already reached the run), which drops
+  its blocks wherever they sit — the option carries down `snapshotBlock`'s
+  recursion. `main/lib/run-agent.ts` splices the list into the request pi built,
+  via the provider's `onPayload` hook, with the anchoring block's own content as
+  the final `user` turn.
 - A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
   `role` (the conversational role its content takes in a run's context; omit
   for `developer`), `context` (false to keep the kind's blocks out of a run's
-  context; omit to include them), `snapshot`, `hooks` (named async state→state
-  functions), `callbacks` (declarative references to another block's hook),
-  `schedule` (self-driving timer request), `defaults`. Everything parses
-  through the schema, so no consumer ever sees partially-specified state.
+  context; omit to include them), `snapshot` (the block as a document, for
+  previews and summaries), `turns` (the block as conversation, for a kind
+  whose one block spans more than one speaker; omit for the ordinary single
+  turn of `role` + `snapshot`), `hooks` (named async state→state functions),
+  `callbacks` (declarative references to another block's hook), `schedule`
+  (self-driving timer request), `defaults`. Everything parses through the
+  schema, so no consumer ever sees partially-specified state.
 - Hooks get a `HookContext`: `call` another block's hook, read `graph`,
   `registry`, and mutate via `addBlock`/`clearChildren` only.
 

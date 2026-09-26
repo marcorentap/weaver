@@ -1,4 +1,4 @@
-import type { KindRegistry } from "./kind";
+import type { KindRegistry, SnapshotContext } from "./kind";
 
 export type BlockId = string;
 
@@ -315,6 +315,12 @@ export function assertTree(graph: BlockGraph): void {
  * snapshotted, since the options carry down the recursion. A snapshot for
  * any other purpose — a block the user asked to summarize, a preview — is
  * taken without it and shows the block as it is.
+ *
+ * This is the block as a document, which is what a preview, a summary, and a
+ * title want. Iterating the graph above a run is `messagesAbove`'s job, and
+ * it goes through each kind's `turns` where one is defined, so a block that
+ * holds a whole exchange contributes the turns it actually holds rather than
+ * one message with two voices in it.
  */
 export function snapshotBlock(
   graph: BlockGraph,
@@ -329,16 +335,33 @@ export function snapshotBlock(
     throw new Error(`no kind registered for block kind: ${block.kind}`);
   }
   if (options?.context && !kind.context) return "";
-  const body = kind.snapshot(block.data, {
-    block,
-    // The mode carries into the subtree: the snapshot being taken is of the
-    // block above, and everything nested under it is part of that same
-    // snapshot rather than a new one.
-    nested: (childId) => snapshotBlock(graph, childId, registry, options),
-    children: childIds(graph, id),
-  });
+  const body = kind.snapshot(
+    block.data,
+    snapshotContext(graph, id, registry, options),
+  );
   if (!body || !block.label || options?.label === false) return body;
   return `${block.label}: ${body}`;
+}
+
+/**
+ * What a kind's `snapshot`/`turns` is handed for one block: the block, its
+ * children in order, and a way to reach a nested block. `options` are the
+ * snapshot's own, so a nested block is snapshotted the same way the block it
+ * sits in was — the mode carries into the subtree, because the snapshot
+ * being taken is of the block above and everything nested under it is part
+ * of that same snapshot rather than a new one.
+ */
+export function snapshotContext(
+  graph: BlockGraph,
+  id: BlockId,
+  registry: KindRegistry,
+  options?: { label?: boolean; context?: boolean },
+): SnapshotContext {
+  return {
+    block: getBlock(graph, id),
+    nested: (childId) => snapshotBlock(graph, childId, registry, options),
+    children: childIds(graph, id),
+  };
 }
 
 /** Snapshot the whole graph: every top-level block, in order, hidden ones
