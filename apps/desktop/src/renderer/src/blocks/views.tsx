@@ -174,22 +174,73 @@ function MultichoiceRow({ state }: { state: MultichoiceState }) {
   );
 }
 
+/**
+ * One section of a multi-part preview, for a block whose state holds more
+ * than one piece of content — a tool call's arguments and its output, a
+ * question and its checklist. The rule above a section is the same border
+ * the popup frame draws under its own header, so the parts read as sections
+ * of one card rather than as unrelated boxes. Only the preview around them
+ * caps a height and scrolls: a section sizes to its content, so a short one
+ * stays short instead of holding half the popup open for nothing.
+ */
+function PreviewSection({
+  label,
+  children,
+}: {
+  /** The field's own name, the same one the actions menu edits. A section
+   *  with nothing to name is separated by the rule alone. */
+  label?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1 border-t px-3 py-2 first:border-t-0">
+      {label ? (
+        <span className="shrink-0 text-xs font-medium text-foreground">
+          {label}
+        </span>
+      ) : null}
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The frame a multi-part preview stacks its sections in. The popup body pads
+ * and centres its child, which a single-element preview wants and a stack of
+ * full-width sections does not: the negative margins take that pad back, so
+ * every rule spans the card edge to edge the way the frame's own header rule
+ * does. The cap belongs to the whole stack rather than to each section, so
+ * one long output scrolls instead of squeezing the parts around it.
+ */
+function PreviewSections({ children }: { children: ReactNode }) {
+  return (
+    <div className="-mx-3 -my-3 flex max-h-[70vh] w-full flex-col overflow-auto overscroll-contain">
+      {children}
+    </div>
+  );
+}
+
 /** Full-size presentation: the question and the same checklist the row
- *  shows, with room to breathe. Reading what was asked and what was picked
- *  is all a question block has to offer, so preview is that plus `p`. */
+ *  shows, with room to breathe, each as its own section. Reading what was
+ *  asked and what was picked is all a question block has to offer, so
+ *  preview is that plus `p`. */
 function MultichoicePreview({ state }: { state: MultichoiceState }) {
   return (
-    <div className="h-[70vh] w-full overflow-auto overscroll-contain">
-      <span
-        className={cn(
-          "mb-2 block whitespace-pre-wrap",
-          state.prompt.trim() ? "" : "text-muted-foreground",
-        )}
-      >
-        {state.prompt.trim() || "(no question yet)"}
-      </span>
-      <MultichoiceOptions state={state} className="gap-1" />
-    </div>
+    <PreviewSections>
+      <PreviewSection>
+        <span
+          className={cn(
+            "whitespace-pre-wrap",
+            state.prompt.trim() ? "" : "text-muted-foreground",
+          )}
+        >
+          {state.prompt.trim() || "(no question yet)"}
+        </span>
+      </PreviewSection>
+      <PreviewSection>
+        <MultichoiceOptions state={state} className="gap-1" />
+      </PreviewSection>
+    </PreviewSections>
   );
 }
 
@@ -235,71 +286,41 @@ function textBlobUrl(text: string): string {
   return URL.createObjectURL(new Blob([text], { type: "text/plain" }));
 }
 
-/**
- * Hindsight tools' whole point is a long natural-language string — the fact
- * to retain, the question to recall or reflect on, the filter to list. That
- * text is the "input" a preview should read, so pull it out of the JSON args
- * and render it as rich markdown. Any other tool keeps the plain args line.
- */
-const HINDSIGHT_INPUT_FIELDS: Record<string, string> = {
-  hindsight_retain: "content",
-  hindsight_recall: "query",
-  hindsight_reflect: "query",
-  hindsight_list: "q",
-};
-
-/**
- * The natural-language input of a hindsight call, or null when the block is
- * not a hindsight tool or its args carry no text. The args are JSON, so the
- * human-shaped query lives inside one field rather than in `state.args` as a
- * whole.
- */
-function hindsightInput(state: ToolState): string | null {
-  const field = HINDSIGHT_INPUT_FIELDS[state.name];
-  if (!field || !state.args) return null;
-  let args: unknown;
-  try {
-    args = JSON.parse(state.args);
-  } catch {
-    return null;
-  }
-  const value = (args as Record<string, unknown>)?.[field];
-  return typeof value === "string" && value.trim() !== "" ? value : null;
-}
-
-/** Full-size presentation: header line, then the same output a row shows,
- * scrolling on its own instead of clipping. Hindsight calls render their
- * input up front as rich markdown, so the preview reads like the prose the
- * agent actually wrote rather than a one-line slice of its JSON args. */
+/** Full-size presentation: the call's arguments as raw JSON, then whatever
+ *  it printed, one section each. Both are shown whole — nothing here is
+ *  truncated, only scrolled past — because inspecting a call means reading
+ *  the arguments that produced the output, not a one-line slice of them. */
 function ToolPreview({ state }: { state: ToolState }) {
-  const input = hindsightInput(state);
   return (
-    <div className="flex h-[70vh] w-full flex-col gap-2">
-      <div className="flex min-w-0 shrink-0 items-baseline gap-2">
-        <span className="shrink-0 font-medium">{state.name}</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {state.args}
-        </span>
-      </div>
-      {input !== null ? (
-        <MarkdownText
-          text={input}
-          className="min-h-0 flex-1 overflow-auto overscroll-contain"
-        />
-      ) : null}
-      {state.output === "" ? (
-        <p className="text-muted-foreground">No output.</p>
-      ) : (
-        <CodeBlock
-          code={state.output}
-          language={toolLanguage(state)}
-          className={cn(
-            "min-h-0 flex-1 overflow-auto overscroll-contain",
-            state.ok ? "text-muted-foreground" : "text-destructive",
-          )}
-        />
-      )}
-    </div>
+    <PreviewSections>
+      <PreviewSection label="args">
+        {state.args === "" ? (
+          <span className="text-muted-foreground">No arguments.</span>
+        ) : (
+          // Wrapped whatever the wrap setting says: arguments are one long
+          // JSON line as often as not, and a section that makes you scroll
+          // sideways to read its only line is not the section shown in full.
+          <CodeBlock
+            code={state.args}
+            language="json"
+            className="whitespace-pre-wrap break-words text-muted-foreground"
+          />
+        )}
+      </PreviewSection>
+      <PreviewSection label="output">
+        {state.output === "" ? (
+          <span className="text-muted-foreground">No output.</span>
+        ) : (
+          <CodeBlock
+            code={state.output}
+            language={toolLanguage(state)}
+            className={cn(
+              state.ok ? "text-muted-foreground" : "text-destructive",
+            )}
+          />
+        )}
+      </PreviewSection>
+    </PreviewSections>
   );
 }
 
