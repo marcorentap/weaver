@@ -206,15 +206,17 @@ export function removeLeaf(node: PaneNode, paneId: PaneId): PaneNode | null {
 /**
  * `ctrl+w` + `alt+h/j/k/l` resize: push the divider in the nearest split
  * along `dir`'s axis (`row` for h/l, `column` for j/k) `deltaPx` pixels in
- * that key's direction, against the area's `sizePx` extent. Whether the
+ * that key's direction, against the split's own `sizePx` extent. Whether the
  * active pane grows or shrinks is decided by where it sits, not by which
  * key was pressed: with a neighbour in the pressed direction the pane grows
  * into it (a top pane pressing `j` expands); pressed against an outer wall
  * it shrinks instead (a bottom pane pressing `j` collapses, its far divider
- * moving the same way). `paneGeometry` sizes every child as a share of the
- * full area, so a `deltaPx` divider move is a `deltaPx / sizePx` share
- * change. Only the active child's weight changes; siblings keep their
- * weights relative to one another.
+ * moving the same way). `paneGeometry` sizes every child as a share of its
+ * parent, so a `deltaPx` divider move is a `deltaPx / extent` share change —
+ * `extent` being the split's own pixel size along the axis (the caller only
+ * knows the whole area; a same-axis ancestor scales it down). Only the
+ * active child's weight changes; siblings keep their weights relative to
+ * one another.
  */
 export function resizeWeights(
   node: PaneNode,
@@ -227,12 +229,22 @@ export function resizeWeights(
   const axis = dir === "h" || dir === "l" ? "row" : "column";
   const forward = dir === "l" || dir === "j";
   let done = false;
-  const walkDown = (n: PaneNode): PaneNode => {
+  // `scale` is the fraction of the pane area the split being walked occupies
+  // along `axis`: 1 at the root, multiplied by each same-axis ancestor's
+  // share on the way down. The innermost same-axis split containing the pane
+  // is the one that resizes, and its own pixel extent is `sizePx * scale`.
+  const walkDown = (n: PaneNode, scale: number): PaneNode => {
     if (n.kind === "leaf") return n;
-    const children = n.children.map((child) =>
-      containsPane(child, paneId) ? walkDown(child) : child,
+    const sum = n.weights.reduce((a, b) => a + b, 0) || 1;
+    const onAxis = n.dir === axis;
+    // Only the pane's own branch can matter, and only a same-axis ancestor
+    // narrows the extent, so descend with a scaled share for that child.
+    const children = n.children.map((child, i) =>
+      containsPane(child, paneId)
+        ? walkDown(child, onAxis ? scale * ((n.weights[i] ?? 1) / sum) : scale)
+        : child,
     );
-    if (n.dir === axis && !done) {
+    if (onAxis && !done) {
       const index = children.findIndex((child) => containsPane(child, paneId));
       if (index >= 0) {
         const last = children.length - 1;
@@ -242,12 +254,14 @@ export function resizeWeights(
         const sign = forward ? (index < last ? 1 : -1) : index > 0 ? 1 : -1;
         const weights = [...n.weights];
         const weight = weights[index] ?? 1;
-        const share = weight / weights.reduce((a, b) => a + b, 0);
+        const share = weight / sum;
+        const extent = sizePx * scale;
+        if (extent <= 0) return { ...n, children };
         const nextShare = Math.min(
-          Math.max(share + (sign * deltaPx) / sizePx, 0.05),
+          Math.max(share + (sign * deltaPx) / extent, 0.05),
           0.95,
         );
-        const rest = weights.reduce((a, b) => a + b, 0) - weight;
+        const rest = sum - weight;
         weights[index] = (nextShare * rest) / (1 - nextShare);
         done = true;
         return { ...n, children, weights };
@@ -255,7 +269,7 @@ export function resizeWeights(
     }
     return { ...n, children };
   };
-  return walkDown(node);
+  return walkDown(node, 1);
 }
 
 /**
@@ -323,13 +337,26 @@ export function paneGeometry(node: PaneNode): Map<PaneId, PaneRect> {
       return;
     }
     const sum = n.weights.reduce((a, b) => a + b, 0) || 1;
+    // `share`/`offset` are percentages of `rect`, not of the whole area, so
+    // they scale by `rect`'s own extent. A split nested inside another along
+    // the same axis (a `ctrl+w v` on half of an already-vertical split) only
+    // spans a fraction of the area; sizing its children against the whole
+    // area would push them past the pane's edge, where they get clipped.
     let offset = 0;
     n.children.forEach((child, i) => {
       const share = ((n.weights[i] ?? 1) / sum) * 100;
       if (n.dir === "row") {
-        walk(child, { ...rect, left: rect.left + offset, width: share });
+        walk(child, {
+          ...rect,
+          left: rect.left + (rect.width * offset) / 100,
+          width: (rect.width * share) / 100,
+        });
       } else {
-        walk(child, { ...rect, top: rect.top + offset, height: share });
+        walk(child, {
+          ...rect,
+          top: rect.top + (rect.height * offset) / 100,
+          height: (rect.height * share) / 100,
+        });
       }
       offset += share;
     });
