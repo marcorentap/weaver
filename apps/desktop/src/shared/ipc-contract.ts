@@ -55,6 +55,23 @@ export interface LinkOption {
   expand?: boolean;
 }
 
+/**
+ * The material one `@<type>:<value>` reference a message attaches points at,
+ * as the block that carries it: the reference as written is the block's
+ * label, and what it points at is the block's body. A reference is resolved
+ * in main — the renderer has no filesystem — and inserted into the graph by
+ * the renderer, right above the message it was written in, so a run anchored
+ * on that message reads the material as context above the turn it answers.
+ * A reference that resolves to nothing is left out entirely: the token stays
+ * in the message, and the model can still follow it with its tools.
+ */
+export interface LinkMaterial {
+  /** The reference as written, e.g. `@file:src/app.ts`. */
+  label: string;
+  /** What it points at, as the `read` tool would show it (a skill in full). */
+  text: string;
+}
+
 export interface ChatSessionSummary {
   id: string;
   name: string;
@@ -262,6 +279,12 @@ export interface WeaverApi {
      *  completes against that block's project rather than a fixed root;
      *  undefined leaves the provider at the process's own project root. */
     search(type: string, query: string, pwd?: string): Promise<LinkOption[]>;
+    /** The material `text`'s `@<type>:<value>` references point at, one per
+     *  distinct reference in the order they appear, as the blocks to insert
+     *  above the message. `pwd` is the message's own merged `WEAVER_PWD`, so
+     *  a relative `@file:` resolves where a run anchored there would resolve
+     *  it; undefined leaves the resolution at the process's own project root. */
+    materials(text: string, pwd?: string): Promise<LinkMaterial[]>;
   };
   hindsight: {
     /** Queue `content` for storage in the configured Hindsight memory bank,

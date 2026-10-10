@@ -98,10 +98,12 @@ Everything lives in `packages/core`.
   (the whole visible graph, for naming a session) — so a run over an explicit
   set of blocks reads its material with the roles the blocks already hold,
   never as a flattened string. `@file:` and
-  `@skill:` references a user message attaches are read there too — the
-  renderer has no filesystem — and appended as their own `developer` messages
-  just before that first turn (`main/lib/references.ts`): a skill in full, a
-  file as the same truncated, tree-sitter-indexed view the `read` tool gives.
+  `@skill:` references a user message attaches are not sent with the run at
+  all: main resolves them (`main/lib/links/material.ts`) and the renderer
+  writes each one into the graph as a `text` block of its own, just above
+  the message, so the message's own run — and every run after it — reads the
+  material as ordinary blocks above its turn: a skill in full, a file as the
+  same truncated, tree-sitter-indexed view the `read` tool gives.
 - A **kind** (`defineKind`) is defined _entirely_ by a zod schema plus:
   `role` (the conversational role its content takes in a run's context; omit
   for `developer`), `context` (false to keep the kind's blocks out of a run's

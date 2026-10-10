@@ -1,9 +1,9 @@
 /**
  * One `@<type>:<value>` reference written inline in a message, the same
  * token `LinkInput` completes: the type after the `@`, the value after the
- * `:`. It is the renderer's promise that it deliberately pointed the run at
- * something, so the run attaches that thing itself instead of leaving the
- * model to read the token as prose.
+ * `:`. It is the renderer's promise that it deliberately pointed the app at
+ * something, so the app materializes that thing itself — as a block above
+ * the message — instead of leaving the model to read the token as prose.
  */
 export type Reference = {
   /** The token after `@`, e.g. "file" or "skill". */

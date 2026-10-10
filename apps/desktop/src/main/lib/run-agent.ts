@@ -32,7 +32,6 @@ import {
 } from "./read-source.js";
 import { spliceContext, weaveContext } from "./context-wire.js";
 import { modelTakesImages } from "./model-vision.js";
-import { referenceMessages } from "./references.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
@@ -736,25 +735,6 @@ export async function runAgent(
     // The working directory is resolved earlier, ahead of the plain-run
     // branch, so both kinds of run and the media they attach agree on it.
 
-    // `@file:`/`@skill:` references the user attached to a message become
-    // `developer` context of their own, read here (the renderer has no
-    // filesystem) and against this run's own `cwd` (so a relative path means
-    // what the `read` tool would mean by it). They follow the graph context,
-    // so the material sits just ahead of the turn being answered, and a
-    // reference repeated across turns is carried once. See
-    // `referenceMessages`.
-    const references = await referenceMessages(
-      [
-        ...body.context
-          .filter((message) => message.role === "user")
-          .map((message) => message.content),
-        body.prompt,
-      ],
-      cwd,
-    );
-    const context =
-      references.length > 0 ? [...body.context, ...references] : body.context;
-
     const settingsManager = createAgentSettings(cwd);
     const resourceLoader = createAgentResourceLoader({
       cwd,
@@ -1008,7 +988,13 @@ export async function runAgent(
       const next = extensionPayload
         ? await extensionPayload(payload, model)
         : payload;
-      return spliceContext(next ?? payload, context, vision, cwd, anchorImages);
+      return spliceContext(
+        next ?? payload,
+        body.context,
+        vision,
+        cwd,
+        anchorImages,
+      );
     };
 
     // Arguments arrive with the call and the result with its end, so they

@@ -24,9 +24,8 @@ A user message may attach a reference inline as `@<type>:<value>`. When you
 see one, the user is deliberately pointing you at that thing and expects you
 to consult it before answering — do not read the token as ordinary prose.
 
-Known types are already attached for you, each as its own `developer`
-message ahead of the turn you are answering, with the reference written
-above the material it answers:
+Known types are already attached for you, each as a block of its own in the
+turns above the one you are answering, labeled with the reference it answers:
 
 - `@skill:<name>` — an agent skill, in full. Follow it.
 - `@file:./path` — a file in the project, as the `read` tool would show it:
@@ -35,7 +34,7 @@ above the material it answers:
   path resolves against your working directory. Read the sections you need
   with the `read` tool, and do not re-read a file that was already attached.
 
-A reference you do not see attached is one the run could not resolve — a
+A reference with no block beside it is one that could not be resolved — a
 missing file, an unknown skill, or a type this harness does not know. Treat
 it as a reference the user attached and resolve its value with the tools you
 have, or say what you could not resolve, rather than silently ignoring it.

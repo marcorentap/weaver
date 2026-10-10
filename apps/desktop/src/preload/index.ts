@@ -7,6 +7,7 @@ import type {
   CheckResult,
   CreateSessionResult,
   HindsightRetainResult,
+  LinkMaterial,
   LinkOption,
   LinkTypeDescriptor,
   LoadGraphResult,
@@ -93,6 +94,10 @@ const api: WeaverApi = {
     search: (type, query, pwd) =>
       ipcRenderer.invoke("links:search", type, query, pwd) as Promise<
         LinkOption[]
+      >,
+    materials: (text, pwd) =>
+      ipcRenderer.invoke("links:materials", text, pwd) as Promise<
+        LinkMaterial[]
       >,
   },
   hindsight: {

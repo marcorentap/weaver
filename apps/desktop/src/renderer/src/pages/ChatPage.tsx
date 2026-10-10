@@ -105,6 +105,22 @@ type Row = {
 
 const INDENT_REM = 1;
 
+/** The `Block` a block just written to the store becomes in the live graph.
+ *  The links are `insertBlock`'s to write, so both start empty; only the id
+ *  and the data are the caller's. */
+function blockFromInput(input: BlockInput): Block {
+  return {
+    id: input.id,
+    kind: input.kind,
+    label: input.label,
+    createdAt: input.createdAt,
+    modifiedAt: Date.now(),
+    next: null,
+    children: null,
+    data: input.data ?? {},
+  };
+}
+
 function flatten(
   nodes: ChatNode[],
   expanded: ReadonlySet<BlockId>,
@@ -1487,19 +1503,7 @@ function ChatView({
       setError(result.error);
       return;
     }
-    engine.addBlock(
-      {
-        id: input.id,
-        kind: input.kind,
-        label: input.label,
-        createdAt: input.createdAt,
-        modifiedAt: Date.now(),
-        next: null,
-        children: null,
-        data: input.data ?? {},
-      },
-      creating,
-    );
+    engine.addBlock(blockFromInput(input), creating);
     if (creating.parentId) setOpen(creating.parentId, true);
     setPendingFocus({ id: input.id, openActions: true });
     setCreating(null);
@@ -1507,10 +1511,11 @@ function ChatView({
     setPopup(null);
   };
 
-  /** Persists the `i`/`I` flow's message as a `user` block, then follows it
-   *  with whatever the submit key asked for: the default inference run, or
-   *  (with shift, `ctrl+shift+enter`) the custom inference dialog, the same
-   *  one `X` opens on an existing block. */
+  /** Persists the `i`/`I` flow's message as a `user` block, and the material
+   *  its `@`-references point at as blocks of their own just above it, then
+   *  follows the message with whatever the submit key asked for: the default
+   *  inference run, or (with shift, `ctrl+shift+enter`) the custom inference
+   *  dialog, the same one `X` opens on an existing block. */
   const createUserBlock = async (text: string, custom = false) => {
     if (!session || !creating) return;
     if (creating.afterId && engine.isLocked(creating.afterId)) {
@@ -1519,6 +1524,44 @@ function ChatView({
       return;
     }
     setSaving(true);
+    // Every `@<type>:<value>` the message attaches becomes a block of its
+    // own, written just above the message rather than sent as context of
+    // this one run: the graph above a block is its context, so a block below
+    // it would be read by no run anchored there, while one above is read by
+    // that message's run and by every run after it, and can be edited or
+    // deleted like any other block. Resolving a reference is filesystem work,
+    // which main does — the renderer has no filesystem — and which yields
+    // only the label and the text; the block they become is written into the
+    // graph here, like any other. A reference that resolves to nothing leaves
+    // nothing behind; the token stays in the message. See `LinkMaterial`.
+    const at = creating;
+    const materials = await window.api.links.materials(
+      text,
+      pwdForPosition(graph, at),
+    );
+    let afterId: BlockId | null = at.afterId;
+    for (const material of materials) {
+      const materialInput: BlockInput = {
+        id: crypto.randomUUID(),
+        kind: TEXT_KIND,
+        label: material.label,
+        createdAt: Date.now(),
+        data: { text: material.text },
+      };
+      const materialAt: Position = { parentId: at.parentId, afterId };
+      const written = await window.api.chat.createChatBlock(
+        session.id,
+        materialInput,
+        materialAt,
+      );
+      if (written.error) {
+        setSaving(false);
+        setError(written.error);
+        return;
+      }
+      engine.addBlock(blockFromInput(materialInput), materialAt);
+      afterId = materialInput.id;
+    }
     const input: BlockInput = {
       id: crypto.randomUUID(),
       kind: USER_KIND,
@@ -1526,30 +1569,21 @@ function ChatView({
       createdAt: Date.now(),
       data: { text },
     };
+    // After whatever material was written, so the message keeps the last
+    // word of the pair — it is the thing the material was attached to.
+    const userAt: Position = { parentId: at.parentId, afterId };
     const result = await window.api.chat.createChatBlock(
       session.id,
       input,
-      creating,
+      userAt,
     );
     setSaving(false);
     if (result.error) {
       setError(result.error);
       return;
     }
-    engine.addBlock(
-      {
-        id: input.id,
-        kind: input.kind,
-        label: input.label,
-        createdAt: input.createdAt,
-        modifiedAt: Date.now(),
-        next: null,
-        children: null,
-        data: input.data ?? {},
-      },
-      creating,
-    );
-    if (creating.parentId) setOpen(creating.parentId, true);
+    engine.addBlock(blockFromInput(input), userAt);
+    if (at.parentId) setOpen(at.parentId, true);
     setPendingFocus({
       id: input.id,
       openActions: false,
