@@ -1,22 +1,17 @@
 import { ipcMain, type IpcMainInvokeEvent } from "electron";
 import { z } from "zod";
 import type { AgentEvent, AgentRunRequest } from "../../shared/agent-events.js";
-import { agentRunRequest } from "../../shared/agent-events.js";
 import type { CheckResult, ProviderUsageResult } from "../../shared/ipc-contract.js";
 import { buildAgentRuntime } from "../lib/agent-runtime.js";
 import { projectRoot } from "../lib/project.js";
 import { providerUrl } from "../lib/provider.js";
-import { readRemoteSettings, remoteBaseUrl } from "../lib/remote-settings.js";
 import { runAgent } from "../lib/run-agent.js";
-import { schemaMessage } from "../lib/schema-error.js";
 
 /** In-flight runs, keyed by `runId`, so `agent:run:cancel` can abort one
  *  without a `Request`/`AbortSignal` to listen on. Entries are removed once
- *  a run reaches `done`/`error` on its own, or once cancelled. A local run
- *  aborts its session; a remote run aborts the HTTP stream. `answer` is how
- *  a run parked on a question is released, and is absent for a run that
- *  cannot be asked one: a remote run raised its questions on the machine
- *  that ran it, not here. */
+ *  a run reaches `done`/`error` on its own, or once cancelled. Aborting the
+ *  run aborts its session. `answer` is how a run parked on a question is
+ *  released. */
 const runs = new Map<
   string,
   {
@@ -26,10 +21,8 @@ const runs = new Map<
 >();
 
 /**
- * One agent run, dispatched to wherever the settings say: this machine when
- * the remote connection is off, the configured remote instance when it is
- * on. Both paths speak the same `AgentEvent` stream, so the renderer cannot
- * tell which one it used.
+ * One agent run, on this machine, streamed to the renderer as the same
+ * `AgentEvent` shape a run has always spoken.
  */
 async function handleRun(
   event: IpcMainInvokeEvent,
@@ -65,25 +58,6 @@ async function handleRun(
   };
 
   try {
-    const remote = readRemoteSettings();
-    if (remote.enabled) {
-      const base = remoteBaseUrl(remote.url, remote.port);
-      if (!base) {
-        emit({ type: "error", message: "remote: URL invalid" });
-        return;
-      }
-      if (!remote.key.trim()) {
-        emit({ type: "error", message: "remote: no key set" });
-        return;
-      }
-      await runRemote(
-        { base, key: remote.key.trim() },
-        runId,
-        rawRequest,
-        emit,
-      );
-      return;
-    }
     await runAgent(
       rawRequest,
       {
@@ -114,94 +88,6 @@ async function handleRun(
   } finally {
     settleWaits();
     runs.delete(runId);
-  }
-}
-
-/** Streams one run to the configured remote instance and re-emits every
- *  event locally, same shape as a local run. Cancelling the run aborts the
- *  HTTP request, which the server treats as session abort. */
-async function runRemote(
-  remote: { base: string; key: string },
-  runId: string,
-  rawRequest: unknown,
-  emit: (event: AgentEvent) => void,
-): Promise<void> {
-  // Validated here so a malformed request fails before it is shipped across
-  // the network (the server would reject it too, but loudly where the user
-  // can fix it is better than a 400 from a machine they cannot see).
-  let request: AgentRunRequest;
-  try {
-    request = agentRunRequest.parse(rawRequest);
-  } catch (error) {
-    emit({ type: "error", message: schemaMessage(error) });
-    return;
-  }
-
-  const controller = new AbortController();
-  runs.set(runId, { abort: () => controller.abort() });
-
-  try {
-    const response = await fetch(`${remote.base}/v1/run`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${remote.key}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(request),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      emit({
-        type: "error",
-        message:
-          response.status === 401 || response.status === 403
-            ? "remote rejected the key"
-            : `remote: HTTP ${response.status}${body ? `: ${body}` : ""}`,
-      });
-      return;
-    }
-    if (!response.body) {
-      emit({ type: "error", message: "remote: empty response" });
-      return;
-    }
-
-    // NDJSON in, `AgentEvent`s out. The stream ends on the server's terminal
-    // event, or when the request breaks (server died mid-run), which is
-    // exactly what an error event is for.
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let newline: number;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, newline).trim();
-        buffer = buffer.slice(newline + 1);
-        if (!line) continue;
-        let parsed: AgentEvent;
-        try {
-          parsed = JSON.parse(line) as AgentEvent;
-        } catch {
-          continue;
-        }
-        emit(parsed);
-        if (parsed.type === "done" || parsed.type === "error") {
-          await reader.cancel().catch(() => undefined);
-          return;
-        }
-      }
-    }
-    // The body ended without a terminal event: the server went away.
-    emit({ type: "error", message: "remote: run ended" });
-  } catch (error) {
-    if (controller.signal.aborted) return; // cancelled by the operator
-    emit({
-      type: "error",
-      message: `remote unreachable: ${error instanceof Error ? error.message : String(error)}`,
-    });
   }
 }
 

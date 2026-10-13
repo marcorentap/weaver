@@ -130,20 +130,6 @@ type Settings = {
    *  `inferDefaultModel`. Summarization runs share the endpoint and key
    *  with inference (`aiEndpoint`/`aiApiKey`). */
   summDefaultModel: string;
-  /** Whether agent runs go through a remote weaver instance. */
-  remoteEnabled: boolean;
-  /** Scheme'd host of the remote instance, e.g. "http://192.168.1.20". */
-  remoteHost: string;
-  /** Port of the remote instance; ignored when `remoteHost` carries one. */
-  remotePort: number;
-  /** Key the remote instance issued. */
-  remoteKey: string;
-  /** Whether this machine's own server should be running (persisted so it
-   *  comes back after a restart; toggle on/off controls it live). */
-  remoteServerEnabled: boolean;
-  /** Interface the server listens on, "0.0.0.0" for all. */
-  remoteServerHost: string;
-  remoteServerPort: number;
 };
 
 const STORAGE_KEY = "weaver.settings";
@@ -186,13 +172,6 @@ const DEFAULTS: Settings = {
   inferMaxTokens: 8192,
   summMaxTokens: 8192,
   summProviderSettings: {},
-  remoteEnabled: false,
-  remoteHost: "",
-  remotePort: 3111,
-  remoteKey: "",
-  remoteServerEnabled: false,
-  remoteServerHost: "0.0.0.0",
-  remoteServerPort: 3111,
 };
 
 /** Snapshot of everything the provider exposes; `hydrated` flips once the
@@ -266,13 +245,6 @@ type SettingsContextValue = {
     key: string,
     value: string,
   ) => void;
-  setRemoteEnabled: (value: boolean) => void;
-  setRemoteHost: (value: string) => void;
-  setRemotePort: (value: number) => void;
-  setRemoteKey: (value: string) => void;
-  setRemoteServerEnabled: (value: boolean) => void;
-  setRemoteServerHost: (value: string) => void;
-  setRemoteServerPort: (value: number) => void;
 };
 
 const context = createContext<SettingsContextValue | null>(null);
@@ -331,16 +303,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             summMaxTokens: stored?.summMaxTokens ?? DEFAULTS.summMaxTokens,
             summProviderSettings:
               stored?.summProviderSettings ?? DEFAULTS.summProviderSettings,
-            remoteEnabled: stored?.remoteEnabled ?? DEFAULTS.remoteEnabled,
-            remoteHost: stored?.remoteHost ?? DEFAULTS.remoteHost,
-            remotePort: stored?.remotePort ?? DEFAULTS.remotePort,
-            remoteKey: stored?.remoteKey ?? DEFAULTS.remoteKey,
-            remoteServerEnabled:
-              stored?.remoteServerEnabled ?? DEFAULTS.remoteServerEnabled,
-            remoteServerHost:
-              stored?.remoteServerHost ?? DEFAULTS.remoteServerHost,
-            remoteServerPort:
-              stored?.remoteServerPort ?? DEFAULTS.remoteServerPort,
           },
           hydrated: true,
         });
@@ -488,34 +450,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     (value: number) => set("summMaxTokens", value),
     [set],
   );
-  const setRemoteEnabled = useCallback(
-    (value: boolean) => set("remoteEnabled", value),
-    [set],
-  );
-  const setRemoteHost = useCallback(
-    (value: string) => set("remoteHost", value),
-    [set],
-  );
-  const setRemotePort = useCallback(
-    (value: number) => set("remotePort", value),
-    [set],
-  );
-  const setRemoteKey = useCallback(
-    (value: string) => set("remoteKey", value),
-    [set],
-  );
-  const setRemoteServerEnabled = useCallback(
-    (value: boolean) => set("remoteServerEnabled", value),
-    [set],
-  );
-  const setRemoteServerHost = useCallback(
-    (value: string) => set("remoteServerHost", value),
-    [set],
-  );
-  const setRemoteServerPort = useCallback(
-    (value: number) => set("remoteServerPort", value),
-    [set],
-  );
 
   const value = useMemo(
     () => ({
@@ -545,13 +479,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummThinkingLevel,
       setInferMaxTokens,
       setSummMaxTokens,
-      setRemoteEnabled,
-      setRemoteHost,
-      setRemotePort,
-      setRemoteKey,
-      setRemoteServerEnabled,
-      setRemoteServerHost,
-      setRemoteServerPort,
     }),
     [
       settings,
@@ -580,13 +507,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setSummThinkingLevel,
       setInferMaxTokens,
       setSummMaxTokens,
-      setRemoteEnabled,
-      setRemoteHost,
-      setRemotePort,
-      setRemoteKey,
-      setRemoteServerEnabled,
-      setRemoteServerHost,
-      setRemoteServerPort,
     ],
   );
 

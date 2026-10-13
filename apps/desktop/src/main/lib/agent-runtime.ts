@@ -29,9 +29,9 @@ export function pluginSetting(
   }
 }
 
-/** Everything a run needs that is the same for the local app and for this
- *  machine's own remote server (same process, same plugins, same store).
- *  The per-run parts — `root` and `onSession` — are supplied by the caller. */
+/** Everything a run needs that is the same from run to run (same process,
+ *  same plugins, same store). The per-run parts — `root` and `onSession` —
+ *  are supplied by the caller. */
 export function buildAgentRuntime(): AgentRuntime {
   const { kinds, tools } = loadedPlugins();
   const store = getStore();

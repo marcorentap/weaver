@@ -14,7 +14,6 @@ import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
 import { registerHindsightHandlers } from "./ipc/hindsight.js";
 import { registerLinkHandlers } from "./ipc/links.js";
-import { registerRemoteHandlers, startServerFromStoredSettings } from "./ipc/remote.js";
 import { ensurePluginsLoaded } from "./lib/plugins.js";
 import { CHORD_LEADER_CHANNEL, swallowedCombo } from "../shared/keys.js";
 
@@ -173,10 +172,6 @@ void app.whenReady().then(async () => {
   registerPluginHandlers();
   registerHindsightHandlers();
   registerLinkHandlers();
-  registerRemoteHandlers();
-  // If the operator left this machine's server on, bring it back up before
-  // the window opens so a remote peer is never left hanging on a restart.
-  startServerFromStoredSettings();
 
   installApplicationMenu();
   createWindow();

@@ -14,11 +14,10 @@ apps/desktop/src/
   main/            Electron main process (owns disk, SQLite, subprocesses)
     index.ts       entry; windows, protocol registration
     agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
-    ipc/           one file per IPC group: agent, chat, links, media-protocol, plugins, remote, settings, hindsight
+    ipc/           one file per IPC group: agent, chat, links, media-protocol, plugins, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
                    read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
                    context-wire.ts (graph → provider payload), model-vision.ts (does the model take images)
-    remote/        server.ts (HTTP + streaming agent runs), instance.ts, keys.ts
   preload/         the only typed bridge exposed to the renderer
   renderer/src/    React UI (no Node access)
     lib/           chat-store, live-graph (client model), inference, keymap, pages, routes, settings, viewport, links
@@ -143,9 +142,8 @@ validation pick it up from the registry.
 
 ## Agent runs
 
-`main/lib/run-agent.ts` (`runAgent`) is caller-agnostic — used by the Electron
-IPC handler and by the remote HTTP server, so a remote run acts on the
-_server's_ filesystem. It mounts a `weaver` provider on pi's `ModelRuntime`
+`main/lib/run-agent.ts` (`runAgent`) is the run engine, called by the Electron
+IPC handler. It mounts a `weaver` provider on pi's `ModelRuntime`
 (endpoint/key from the request) and either runs plain (no tools, used for
 summarization) or creates a full pi session with our custom tools
 (read/write/edit/display_media) plus plugin tools and plugin-provided kinds.
@@ -166,8 +164,7 @@ summarization) or creates a full pi session with our custom tools
   materializes that block and leaves the agent loop parked inside its own call;
   `runAgent` emits a `wait` event (not `block`), and the caller resolves it
   through `AgentRunContext.wait`, which the IPC handler wires to
-  `agent:run:answer` and the remote server omits (so a remote run degrades to
-  the tool's own text). On the renderer side the block lands as the run's output
+  `agent:run:answer`. On the renderer side the block lands as the run's output
   and its engine watches it: `live-graph.ts` holds it in `pendingWaits`, exempts
   it from the run's lock (`lockedBlockIds`) because answering _is_ an edit, and
   answers the tool the moment the block's `resume` reads a value out of the

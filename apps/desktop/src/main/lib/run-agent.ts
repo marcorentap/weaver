@@ -75,10 +75,8 @@ const DISCOVERY_DEFAULTS = {
  */
 const INLINE_MEDIA_IMAGE = /!\[[^\]]*\]\(\s*(file:\/\/[^\s)]+)\)/g;
 
-/** On a remote instance, this is the machine where the connection (and the
- *  block that references the URI) lives, so there is nothing to register:
- *  the emitted block's data travels as data, and serving the URI's bytes is
- *  that machine's problem. */
+/** Every run in the desktop app goes through this registration, so the
+ *  URIs it names are served before their blocks persist. */
 function registerInlineMedia(
   text: string,
   registerPendingMedia?: ((uri: string) => void) | undefined,
@@ -91,12 +89,11 @@ function registerInlineMedia(
 }
 
 /**
- * Everything a run needs that differs between the local app and a remote
- * instance. The runner itself (session, tools, prompt, event mapping) is
- * agent-SDK and filesystem code with no Electron in it, so the desktop app
- * and the remote server can drop in different bindings for the same run:
- * where events go, what the project root is, which plugins are loaded, what
- * a plugin's settings are, how a run can be aborted.
+ * Everything a run needs that the runner itself does not own: where events
+ * go, what the project root is, which plugins are loaded, what a plugin's
+ * settings are, how a run can be aborted. The runner (session, tools,
+ * prompt, event mapping) is agent-SDK and filesystem code with no Electron
+ * in it, so the app binds these in itself and the runner stays free of it.
  */
 export type AgentRunContext = {
   /** Base directory relative `WEAVER_PWD` values resolve against and, when
@@ -114,9 +111,9 @@ export type AgentRunContext = {
    * with the wire `id` the emitted `wait` event will carry; whatever it
    * returns settles the tool call, so a caller that can reach a user must
    * resolve it — with the answer, or with null when nobody will answer — or
-   * the agent's loop stays parked on it forever. Omitted by a caller with no
-   * user to reach (the remote server), which leaves such tools to fall back
-   * on their own text.
+   * the agent's loop stays parked on it forever. A caller with no user to
+   * reach can omit it, which leaves such tools to fall back on their own
+   * text.
    */
   wait?: (
     id: string,
@@ -124,13 +121,13 @@ export type AgentRunContext = {
     data: BlockData,
     label: string,
   ) => Promise<string | null>;
-  /** Called once a run exists so the caller can abort it (IPC cancel,
-   *  a remote client disconnecting). Agent and plain-LLM runs each call it
-   *  once they have a live request to tear down. */
+  /** Called once a run exists so the caller can abort it (IPC cancel).
+   *  Agent and plain-LLM runs each call it once they have a live request to
+   *  tear down. */
   onSession?: (abort: () => void) => void;
   /** Called for URIs a live run asserts it is about to show, so the local
-   *  media protocol serves them before their block persists. The remote
-   *  server passes nothing. */
+   *  media protocol serves them before their block persists. A caller that
+   *  has no local media protocol to register them with passes nothing. */
   registerPendingMedia?: (uri: string) => void;
 };
 
@@ -148,8 +145,7 @@ export type AgentRunContext = {
  * Bundled main-process code is a single flattened `out/main/index.js`, so
  * `import.meta.dirname` at run time is `out/main`, the same directory
  * `vite-plugin-static-copy` (see electron.vite.config.ts) copies
- * `agent/system-prompt.md` into. The remote server runs inside the same
- * process as the app, so the same relative read resolves there too.
+ * `agent/system-prompt.md` into.
  */
 const WEAVER_SYSTEM_PROMPT = readFileSync(
   join(import.meta.dirname, "agent/system-prompt.md"),
@@ -399,10 +395,9 @@ function formatBytes(bytes: number): string {
  * One full agent run. Validates the request, mounts the model, tools and
  * plugins, runs the session, and maps every SDK event into the app's
  * `AgentEvent` shape, emitted through `emit` until a terminal
- * (`done`/`error`) event. Caller-agnostic: the Electron IPC handler and the
- * remote server both call this, differing only in their `AgentRunContext`.
- * Resolves after the terminal event has been emitted; a run that was aborted
- * via `ctx.onSession`'s abort still resolves here.
+ * (`done`/`error`) event. Resolves after the terminal event has been
+ * emitted; a run that was aborted via `ctx.onSession`'s abort still resolves
+ * here.
  */
 export async function runAgent(
   request: unknown,
@@ -518,9 +513,7 @@ export async function runAgent(
      * directory the agent starts in, and the remaining variables reach its
      * tools. A relative `WEAVER_PWD` resolves against the project root, the
      * same base the media protocol falls back to; an unset one leaves the
-     * agent at the project root as before. On a remote run, `ctx.root` is
-     * the server's own project root, so the same request acts on the
-     * server's filesystem.
+     * agent at the project root as before.
      *
      * A plain run has no tools and no session, but it is still resolved this
      * far: the same directory is what a media block's relative path resolves
