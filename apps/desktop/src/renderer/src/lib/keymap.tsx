@@ -95,6 +95,12 @@ export type KeyLayer = {
 /** Reserved by the harness, so it works even inside a modal layer. */
 export const HELP_KEY = "?";
 
+/** The layer the help popup's own menu pushes. It is a menu like any other
+ *  (j/k walk it, esc closes it), and it documents none of that about itself:
+ *  those keys are the same in every popup, and listing them would have help
+ *  describing the popup you are reading it in. */
+export const HELP_LAYER_ID = "help";
+
 type KeymapContext = {
   /**
    * Live layers, rewritten after every render of their owner. Bindings close
@@ -192,9 +198,7 @@ export function KeymapProvider({
   const push = useCallback((id: string) => {
     setStack((current) => [...current, { id, transient: false }]);
     return () =>
-      setStack((current) =>
-        current.filter((entry) => entry.id !== id),
-      );
+      setStack((current) => current.filter((entry) => entry.id !== id));
   }, []);
 
   useEffect(() => {
@@ -329,10 +333,7 @@ export function KeymapProvider({
      * a transient frame miss pops it and swallows the key; non-modal layers
      * fall through.
      */
-    function handleCombo(
-      combo: string,
-      opts: { countable: boolean },
-    ): boolean {
+    function handleCombo(combo: string, opts: { countable: boolean }): boolean {
       for (let i = stack.length - 1; i >= 0; i -= 1) {
         const entry = stack[i]!;
         const layer = layers.get(entry.id);
@@ -377,7 +378,11 @@ export function KeymapProvider({
       // `shift+j`) is never a follower and must not cancel a parked frame:
       // without this, `ctrl+w` then `alt+h` would cancel the pane frame on
       // the `Alt` keydown and the `h` would land against nothing.
-      if (/^(Alt|Control|Meta|Shift|CapsLock|NumLock|Fn|OS|Super)$/i.test(event.key)) {
+      if (
+        /^(Alt|Control|Meta|Shift|CapsLock|NumLock|Fn|OS|Super)$/i.test(
+          event.key,
+        )
+      ) {
         return;
       }
 
@@ -414,7 +419,29 @@ export function KeymapProvider({
       }
       if (helpOpen) {
         event.preventDefault();
-        if (event.key === "Escape") setHelpOpen(false);
+        if (event.key === "Escape") {
+          setHelpOpen(false);
+          return;
+        }
+        // Help is a menu in its own right (see `KeyHelp`), and it is the only
+        // thing allowed to see a key while it is up: the popup's layer is
+        // pushed by a mount effect, which runs after this handler is
+        // installed, so a press landing in that window finds no layer to
+        // reach and is swallowed rather than falling through to the mode
+        // underneath and running its action behind the popup.
+        const top = topReachableIndex();
+        const topLayer = top === -1 ? undefined : layers.get(stack[top]!.id);
+        // Named with the modifiers actually held, so `ctrl+j` reaches the
+        // help menu as `ctrl+j` (which it does not bind) rather than as a
+        // bare `j` that would walk its cursor.
+        const key = keyComboName(event.key, {
+          ctrl: event.ctrlKey,
+          meta: event.metaKey,
+          alt: event.altKey,
+        });
+        if (topLayer?.id === HELP_LAYER_ID && key) {
+          handleCombo(key, { countable: false });
+        }
         return;
       }
 
@@ -512,9 +539,14 @@ export function KeymapProvider({
   const reachable = stack
     .flatMap((entry) => {
       const layer = layers.get(entry.id);
-      return layer && (!layer.scope || layer.scope === activePaneId)
-        ? [layer]
-        : [];
+      // Help's own menu is a modal layer like any other, and it sits on top
+      // of the stack while the popup is up — so it occludes the very modes it
+      // exists to describe, and the occlusion below would leave this list
+      // with nothing but help in it, which the filter then drops too. Help
+      // asks what a key could reach with help out of the way, so it comes off
+      // here, before the occlusion, not after.
+      if (!layer || layer.id === HELP_LAYER_ID) return [];
+      return !layer.scope || layer.scope === activePaneId ? [layer] : [];
     })
     .reduce<KeyLayer[]>(
       (kept, layer) => (layer.modal ? [layer] : [...kept, layer]),

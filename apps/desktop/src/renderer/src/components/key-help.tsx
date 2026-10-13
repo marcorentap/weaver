@@ -1,16 +1,32 @@
-import { ModalFrame } from "@/components/modal-frame";
-import { HELP_KEY } from "@/lib/keymap";
+import { KeyMenu, type KeyMenuItem } from "@/components/key-menu";
+import { HELP_KEY, HELP_LAYER_ID } from "@/lib/keymap";
 
 export type HelpLayer = {
   /** Mode name. */
   id: string;
-  bindings: { keys: string; label: string }[];
+  bindings: {
+    keys: string;
+    label: string;
+    /** A second column on the right, the same slot a session row gives a
+     *  timestamp or an id. */
+    detail?: string;
+  }[];
 };
 
 /**
- * Help for the current mode. Keybindings are one section of it, listed
- * innermost mode first; only reachable layers are passed in, so nothing here
- * is a key that would be swallowed.
+ * Help for the current mode, as the menu every other popup is: one scrolling
+ * list of rows — a key column, a label, a right-hand detail — with a cursor
+ * that j/k or the arrows walk, hover following it, and the selected row
+ * highlighted. Layer names are menu headings rather than a second kind of
+ * section, so the popup is a single list from top to bottom.
+ *
+ * The rows document bindings rather than actions: each one shows its chord in
+ * the key column but binds nothing (`keyLabel` without `key`), and has no
+ * `run`, so entering help to read it can never fire the page's own action
+ * underneath. Reading is all the cursor is for here.
+ *
+ * Bindings are listed innermost mode first; only reachable layers are passed
+ * in, so nothing here is a key that would be swallowed.
  */
 export function KeyHelp({
   layers,
@@ -19,35 +35,27 @@ export function KeyHelp({
   layers: HelpLayer[];
   onClose: () => void;
 }) {
+  const items: KeyMenuItem[] = layers
+    .slice()
+    .reverse()
+    .flatMap((layer) => [
+      { heading: layer.id },
+      ...layer.bindings.map((binding) => ({
+        keyLabel: binding.keys,
+        label: binding.label,
+        detail: binding.detail,
+      })),
+    ]);
+
   return (
-    <ModalFrame
-      label="Help"
+    <KeyMenu
+      id={HELP_LAYER_ID}
       title="Help"
       meta={layers.map((layer) => layer.id).join(" › ")}
-      footer={`${HELP_KEY} or esc Close`}
+      items={items}
+      keyWidth="w-32"
+      hint={`${HELP_KEY} or esc Close`}
       onClose={onClose}
-    >
-      <div className="max-h-96 overflow-y-auto overscroll-contain pb-1">
-        <h2 className="border-b px-3 py-0.5 font-medium">Keybindings</h2>
-        {layers
-          .slice()
-          .reverse()
-          .map((layer) => (
-            <section key={layer.id}>
-              <h3 className="px-3 pt-1 text-muted-foreground">{layer.id}</h3>
-              <ul>
-                {layer.bindings.map((binding) => (
-                  <li key={binding.keys} className="flex gap-3 px-3 py-0.5">
-                    <span className="w-16 shrink-0 font-medium">
-                      {binding.keys}
-                    </span>
-                    <span className="min-w-0 truncate">{binding.label}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-      </div>
-    </ModalFrame>
+    />
   );
 }

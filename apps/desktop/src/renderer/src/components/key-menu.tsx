@@ -4,24 +4,40 @@ import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
 
-export type KeyMenuItem = {
-  label: string;
-  /** Extra column, e.g. a timestamp or an id. */
-  detail?: string;
-  /** Optional direct shortcut, on top of arrow keys plus enter. */
-  key?: string;
-  /** When true the item reads as locked: dimmed with a lock glyph, skipped
-   *  by cursor navigation, and its key and enter both no-op — shown rather
-   *  than removed so the row it guards stays visible while a sibling
-   *  action is in flight. */
-  disabled?: boolean;
-  /** How `key` reads as a label, for keys that aren't a printable
-   *  character — the space bar is `" "` at the keyboard but `"⎵"` in the
-   *  gutter and help. */
-  keyLabel?: string;
-  destructive?: boolean;
-  run: () => void;
-};
+export type KeyMenuItem =
+  | {
+      /** A heading for the rows that follow it. Not a row of its own: the
+       *  cursor skips it, enter does nothing on it, and it binds no key. A
+       *  menu that wants groups (help, one per mode) heads them this way
+       *  rather than splitting into several menus. */
+      heading: string;
+    }
+  | {
+      label: string;
+      /** Extra column, e.g. a timestamp or an id. */
+      detail?: string;
+      /** Optional direct shortcut, on top of arrow keys plus enter. */
+      key?: string;
+      /** When true the item reads as locked: dimmed with a lock glyph, skipped
+       *  by cursor navigation, and its key and enter both no-op — shown rather
+       *  than removed so the row it guards stays visible while a sibling
+       *  action is in flight. */
+      disabled?: boolean;
+      /** How the key column reads for this row. A printable `key` is its own
+       *  label; the space bar is `" "` at the keyboard but `"⎵"` here. Set
+       *  it *without* `key` for a key the menu only documents and does not
+       *  bind — help's chords, which describe the page underneath and must
+       *  not fire while the popup is up. */
+      keyLabel?: string;
+      destructive?: boolean;
+      /** The action. Omitted by rows that only document something, like
+       *  help's bindings: they highlight and scroll, and do nothing else. */
+      run?: () => void;
+    };
+
+function isHeading(item: KeyMenuItem): item is { heading: string } {
+  return "heading" in item;
+}
 
 /**
  * A keyboard-only popup, the modal layer a page's normal mode enters.
@@ -34,18 +50,28 @@ export function KeyMenu({
   meta,
   items,
   hint,
+  keyWidth = "w-8",
   onClose,
 }: {
   id: string;
   title: string;
   meta?: string;
   items: KeyMenuItem[];
+  /** Width class of the key column. One character is enough for a menu's
+   *  own shortcut; help's column holds real chords (`ctrl+shift+enter`), so
+   *  it asks for more and lets its labels be the part that truncates. */
+  keyWidth?: string;
   /** A dim line under the menu, for keys the menu itself doesn't own, e.g.
    *  "NUM — switch to a tab". */
   hint?: string;
   onClose: () => void;
 }) {
-  const [cursor, setCursor] = useState(0);
+  // Opens on the first row the cursor may rest on; a menu that starts with a
+  // heading would otherwise open with nothing highlighted.
+  const [cursor, setCursor] = useState(() => {
+    const first = items.findIndex((item) => !isHeading(item) && !item.disabled);
+    return first === -1 ? 0 : first;
+  });
   const index = Math.min(cursor, Math.max(items.length - 1, 0));
   const listRef = useRef<HTMLUListElement>(null);
 
@@ -61,13 +87,16 @@ export function KeyMenu({
   const move = (delta: number) => {
     if (items.length === 0) return;
     setCursor((current) => {
-      if (items.every((item) => item.disabled)) return current;
+      const restable = (item: KeyMenuItem | undefined) =>
+        !!item && !isHeading(item) && !item.disabled;
+      if (items.every((item) => !restable(item))) return current;
       let next = Math.min(current, items.length - 1) + delta;
-      // Hop over disabled rows, so the cursor never rests on an action
-      // enter cannot run. Wraps, and stays put if everything is locked.
+      // Hop over headings and disabled rows alike, so the cursor never rests
+      // on a line enter cannot run. Wraps, and stays put if everything the
+      // cursor could reach is locked.
       for (let i = 0; i < items.length; i++) {
         next = ((next % items.length) + items.length) % items.length;
-        if (!items[next]?.disabled) return next;
+        if (restable(items[next])) return next;
         next += delta;
       }
       return current;
@@ -91,7 +120,11 @@ export function KeyMenu({
       {
         keys: ["Enter"],
         help: [{ keys: "enter", label: "Run selected item" }],
-        run: () => (items[index]?.disabled ? undefined : items[index]?.run()),
+        run: () => {
+          const item = items[index];
+          if (!item || isHeading(item) || item.disabled) return;
+          item.run?.();
+        },
       },
       {
         keys: ["Escape"],
@@ -99,14 +132,16 @@ export function KeyMenu({
         run: onClose,
       },
       ...items.flatMap((item) =>
-        item.key
+        !isHeading(item) && item.key
           ? [
               {
                 keys: [item.key],
-                help: [{
-                  keys: item.keyLabel ?? item.key,
-                  label: item.label,
-                }],
+                help: [
+                  {
+                    keys: item.keyLabel ?? item.key,
+                    label: item.label,
+                  },
+                ],
                 run: item.disabled ? () => {} : item.run,
               },
             ]
@@ -123,12 +158,26 @@ export function KeyMenu({
       onClose={onClose}
       footer={hint}
     >
-      <ul ref={listRef} className="max-h-72 overflow-y-auto overscroll-contain py-1">
-          {items.length === 0 ? (
-            <li className="px-3 py-1 text-muted-foreground">Nothing here</li>
-          ) : (
-            items.map((item, i) => (
-              <li key={item.label} aria-current={i === index}>
+      <ul
+        ref={listRef}
+        className="max-h-72 overflow-y-auto overscroll-contain py-1"
+      >
+        {items.length === 0 ? (
+          <li className="px-3 py-1 text-muted-foreground">Nothing here</li>
+        ) : (
+          items.map((item, i) =>
+            isHeading(item) ? (
+              <li
+                key={`heading-${item.heading}`}
+                className="px-3 pt-1 text-muted-foreground"
+              >
+                {item.heading}
+              </li>
+            ) : (
+              // Rows are positional, and their labels are not unique —
+              // help repeats the same wording in every mode it lists — so the
+              // index is the identity React can actually use here.
+              <li key={i} aria-current={i === index}>
                 <button
                   type="button"
                   disabled={item.disabled}
@@ -145,11 +194,13 @@ export function KeyMenu({
                       "cursor-not-allowed opacity-60 text-muted-foreground",
                   )}
                 >
-                  <span className="w-8 shrink-0 text-muted-foreground">
+                  <span
+                    className={cn(keyWidth, "shrink-0 text-muted-foreground")}
+                  >
                     {item.disabled ? (
                       <Lock className="size-3" />
                     ) : (
-                      item.keyLabel ?? item.key ?? " "
+                      (item.keyLabel ?? item.key ?? " ")
                     )}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
@@ -163,8 +214,9 @@ export function KeyMenu({
                   ) : null}
                 </button>
               </li>
-            ))
-          )}
+            ),
+          )
+        )}
       </ul>
     </ModalFrame>
   );
