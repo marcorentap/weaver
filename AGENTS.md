@@ -26,7 +26,7 @@ apps/desktop/src/
 packages/core      Block graph model + kind system (no app deps)
 packages/store     SQLite persistence (node:sqlite)
 packages/plugins   Plugin contract (definePlugin)
-plugins/*          bundled plugins: rich-media, user-input, agent-seerxng, agent-hindsight
+plugins/*          bundled plugins: rich-media, user-input, agent-seerxng, agent-hindsight, agent-subagents
 ```
 
 Dependency direction is one-way: `desktop → plugins → store/core → plugins package`.

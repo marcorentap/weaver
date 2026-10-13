@@ -25,6 +25,7 @@ export default defineConfig({
           "@repo/store",
           "@plugins/agent-hindsight",
           "@plugins/agent-seerxng",
+          "@plugins/agent-subagents",
           "@plugins/rich-media",
           "@plugins/user-input",
         ],

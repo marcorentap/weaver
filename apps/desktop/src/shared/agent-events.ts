@@ -200,9 +200,14 @@ export const agentRunRequest = z.object({
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;
 
-/** Every built-in tool name a block may ask for, `bash`/`write`/`edit`
- *  included. The main process runs commands as whoever started the app, so
- *  this is also the default when a block names none. */
+/** Every tool name a block may ask for, the harness's own built-ins
+ *  (`bash`/`write`/`edit` included) beside the ones plugins contribute
+ *  (`ask_user`, `web_search`, the hindsight tools, `spawn_subagent`). A run
+ *  mounts every plugin's tools regardless, but a tool is only active — the
+ *  one the model is offered — when its name is on this list, so a tool
+ *  missing from here is a tool no inference can call. The main process runs
+ *  commands as whoever started the app, so this is also the default when a
+ *  block names none. */
 export const ALLOWED_TOOLS = [
   "ask_user",
   "read",
@@ -212,6 +217,7 @@ export const ALLOWED_TOOLS = [
   "write",
   "edit",
   "web_search",
+  "spawn_subagent",
   "hindsight_retain",
   "hindsight_recall",
   "hindsight_reflect",
