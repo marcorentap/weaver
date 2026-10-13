@@ -1,4 +1,4 @@
-import type { BlockData, BlockKind } from "@repo/core";
+import type { BlockData, BlockKind, ContextMessage } from "@repo/core";
 
 /**
  * One setting a plugin contributes to the app's Settings page, described
@@ -80,6 +80,25 @@ export type ToolRunContext = {
     data: BlockData,
     label: string,
   ) => Promise<string | null>;
+  /**
+   * Run a subagent on `messages` and return what it finally answered, or
+   * throw when its run failed. The messages are the subagent's whole
+   * context, sent as the turns they already are: a `user` message is an
+   * instruction to it, an `assistant` message is something it should treat as
+   * its own earlier reply, and a `developer` message is material it reads but
+   * is not continuing. The subagent inherits this run's inference
+   * configuration and environment, and its own transcript lands nested under
+   * the block of the tool call that spawned it, so an agent spawning another
+   * is visible as that call's branch rather than as more of this run's
+   * output.
+   *
+   * Optional on the same terms as the other two: a harness that cannot run a
+   * nested agent omits it, and a tool that needs one must say so in text
+   * instead of assuming it exists. The subagent is itself an agent run, so a
+   * tool mounted on this run is mounted on that one too — spawning may
+   * recurse.
+   */
+  spawnAgent?: (messages: ContextMessage[]) => Promise<string>;
 };
 
 /**
@@ -94,6 +113,15 @@ export type PluginTool = {
   description: string | string[];
   /** TypeBox object schema the agent validates arguments against. */
   parameters: Record<string, unknown>;
+  /**
+   * Run this tool's batch one call at a time rather than letting its calls
+   * overlap. The agent SDK runs a whole batch of tool calls concurrently by
+   * default; setting this makes the batch containing this tool sequential, so
+   * two of its calls cannot be in flight at once. For a tool that streams a
+   * nested run of its own, that is not a preference: two overlapping nested
+   * transcripts would arrive interleaved and read as one another's.
+   */
+  sequential?: boolean;
   /** Resolve a call. Throw to report a failure. */
   execute: (
     args: Record<string, unknown>,

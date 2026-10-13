@@ -160,6 +160,28 @@ summarization) or creates a full pi session with our custom tools
   never on the first failed attempt.
 - `display_media` deliberately only turns a URI into a media block, so the model
   can't hand-write a kind's own fields.
+- A tool can start another run inside its own call:
+  `ctx.spawnAgent(messages)` (see `ToolRunContext`) runs a nested agent on
+  the messages it is given, inheriting the spawning run's request (endpoint,
+  model, tools, discovery flags, merged environment), so a tool mounted on
+  one run is mounted on the next and spawning recurses. The nested run's
+  events travel the same channel wrapped in `nest`/`unnest` — its tool and
+  question ids namespaced by the spawning call's wire id, so nothing
+  collides — and the renderer appends its whole transcript as `children` of
+  the tool call's own block. `main/lib/run-agent.ts` wraps the events;
+  `live-graph.ts` keeps a nest stack for what arrives inside a scope, and
+  locks a locked block's children with it. The transcript is a record, not
+  the parent's context: a tool block snapshots only its own call and
+  output, and `messagesAbove`/`messagesOfGraph` never descend into children,
+  so the parent model receives the subagent's final answer alone — as the
+  tool result, and later as that one line in the tool block's snapshot.
+  Nothing of the subagent's reasoning, its tool calls, or the messages it
+  was handed ever reaches the parent, and the subagent sees only the
+  `messages` it was given rather than the graph above the spawning block.
+  Both sides are told the answer is one-way: the tool's description tells a
+  spawner to require a final answer that stands on its own, and
+  `SUBAGENT_ANSWER_NOTE` says the same to the subagent in its own context, so
+  the contract holds even when the instruction forgets it.
 - A run can stop partway. A tool that calls `ctx.wait(kind, data, label)`
   materializes that block and leaves the agent loop parked inside its own call;
   `runAgent` emits a `wait` event (not `block`), and the caller resolves it

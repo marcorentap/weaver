@@ -12,7 +12,12 @@ import {
   InMemoryCredentialStore,
   type OpenRouterRouting,
 } from "@earendil-works/pi-ai";
-import { WEAVER_PWD, type BlockData, type KindRegistry } from "@repo/core";
+import {
+  WEAVER_PWD,
+  type BlockData,
+  type ContextMessage,
+  type KindRegistry,
+} from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
 import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
 import { ASK_USER_TOOL } from "@plugins/user-input";
@@ -40,6 +45,60 @@ import {
   createAgentResourceLoader,
   createAgentSettings,
 } from "./agent-resources.js";
+
+/**
+ * The prompt a spawned subagent is run with. Its instructions are all in the
+ * `messages` its spawning tool passed as context, which reach the model as
+ * the turns they already are; this is only the run's own closing user turn,
+ * which a request has to end on, so the subagent answers the task above it
+ * rather than being asked to invent one. Phrased to point back at that
+ * material instead of adding an instruction of its own.
+ */
+const SUBAGENT_PROMPT = "Carry out the task described above.";
+
+/**
+ * What a spawned subagent is told about the shape of what it is doing, as the
+ * last developer turn before its own prompt. Its spawning tool is asked to
+ * say this in its instruction too (see the `spawn_subagent` description), but
+ * the contract is one the subagent cannot otherwise know and the parent can
+ * forget: only the final message travels back, so a subagent that answers
+ * "done — details above" may as well have answered nothing. Stated here so a
+ * run always ends with an answer the caller can use.
+ */
+const SUBAGENT_ANSWER_NOTE: ContextMessage = {
+  role: "developer",
+  content:
+    "Only your final message reaches whoever asked for this work. Your " +
+    "reasoning, the tools you call, what they return, and every turn before " +
+    "that final one stay in a transcript they cannot read. Put the whole " +
+    "result in that final message, standing on its own: the facts, the paths, " +
+    "the numbers, the code, the quotes. Do not point at your own working — " +
+    '"as shown above", "the file I read", "the second option" — because ' +
+    "none of it is visible from there.",
+};
+
+/**
+ * Rewrites a nested run's events so nothing it names can collide with the
+ * outer run's: every tool call and question the nested run opens is known by
+ * a per-run counter, so prefixing each id with the spawning tool's own id
+ * keeps `tool_start`/`tool_delta`/`tool`/`wait` distinct across levels, and a
+ * further-nested run's `nest` target gets the same prefix. The renderer nests
+ * by that id and answers questions by it, so the rewritten id is exactly the
+ * one both sides agree on.
+ */
+function namespaceNestedEvent(event: AgentEvent, prefix: string): AgentEvent {
+  switch (event.type) {
+    case "tool_start":
+    case "tool_delta":
+    case "tool":
+    case "wait":
+      return { ...event, id: `${prefix}${event.id}` };
+    case "nest":
+      return { ...event, tool: `${prefix}${event.tool}` };
+    default:
+      return event;
+  }
+}
 
 /**
  * What a run gets when the request doesn't say. Extensions, skills and
@@ -673,6 +732,104 @@ export async function runAgent(
     // same terms as the tool ids below: unique without depending on anyone
     // else's id scheme, since all the renderer does with one is hand it back.
     let nextWaitId = 0;
+
+    /**
+     * Run a subagent on `messages` and hand its final answer back, nesting
+     * its transcript under the block of the tool call `parentToolId` names.
+     * The subagent is a full agent run of its own — the same request the
+     * spawning run was built from, down to the endpoint, model, provider
+     * tune, tool list, discovery flags and merged environment — with only two
+     * things replaced: its `context` is the messages the tool passed, and its
+     * prompt is the closing user turn those instructions are answered from.
+     * Spawning may therefore recurse, since this same tool is mounted on the
+     * run it starts.
+     *
+     * The nested run streams into the same event channel, wrapped in
+     * `nest`/`unnest` so the renderer puts its whole transcript under the
+     * spawning call's block, and its `done`/`error` are swallowed: the caller
+     * is the tool call, which hears success as the returned text and failure
+     * as the throw, never the renderer as a second run ending.
+     */
+    const spawnSubagent = async (
+      messages: ContextMessage[],
+      parentToolId: string,
+      signal: AbortSignal | undefined,
+    ): Promise<string> => {
+      const subRequest: AgentRunRequest = {
+        ...body,
+        // The note rides last among the material, closest to the task, so the
+        // subagent reads what its answer has to do immediately before being
+        // asked for it.
+        context: [...messages, SUBAGENT_ANSWER_NOTE],
+        prompt: SUBAGENT_PROMPT,
+        promptImages: undefined,
+        plain: false,
+      };
+      // Every id the nested run names is prefixed with the spawning tool's,
+      // so its own `tool_start`/`wait` counters cannot be read as the outer
+      // run's. The same prefix is used on the answer side below, so a
+      // question raised inside the subagent is released by the id the
+      // renderer was given back.
+      const prefix = `${parentToolId}/`;
+      let failure: string | null = null;
+      let lastText = "";
+      emit({ type: "nest", tool: parentToolId });
+      try {
+        await runAgent(
+          subRequest,
+          {
+            ...ctx,
+            // The nested run shares the outer one's lifetime: a run that is
+            // cancelled stops the subagent it spawned too, rather than
+            // leaving it working on a task nobody is waiting for. It is not
+            // registered through the caller's own `onSession`, which belongs
+            // to the run the caller started.
+            onSession: (abort) => {
+              if (signal?.aborted) abort();
+              else
+                signal?.addEventListener("abort", () => abort(), {
+                  once: true,
+                });
+            },
+            wait: waitFor
+              ? (id, kind, data, label) =>
+                  waitFor(`${prefix}${id}`, kind, data, label)
+              : undefined,
+          },
+          (event) => {
+            if (event.type === "done") return;
+            if (event.type === "error") {
+              failure = event.message;
+              return;
+            }
+            // The subagent's answer is its last assistant message, and
+            // nothing earlier counts. A finished tool call — a `tool`, or the
+            // `block`/`wait` a media or question call raises in its place —
+            // means the run kept going past whatever it had said, so that
+            // text was working, not an answer, and is dropped here. Without
+            // this a run that ended without a closing message would hand the
+            // parent its own mid-run aside ("I'll look into it") as though it
+            // were the result: `message_end` emits no `text` at all for an
+            // empty message, so nothing later would ever overwrite it.
+            if (
+              event.type === "tool" ||
+              event.type === "block" ||
+              event.type === "wait"
+            ) {
+              lastText = "";
+            } else if (event.type === "text") {
+              lastText = event.text;
+            }
+            emit(namespaceNestedEvent(event, prefix));
+          },
+        );
+      } finally {
+        emit({ type: "unnest" });
+      }
+      if (failure !== null) throw new Error(failure);
+      return lastText;
+    };
+
     const mountedPluginTools = ctx.pluginTools.map((tool) =>
       defineTool({
         name: tool.name,
@@ -683,7 +840,15 @@ export async function runAgent(
         parameters: tool.parameters as Parameters<
           typeof defineTool
         >[0]["parameters"],
-        execute: async (_toolCallId, args) => {
+        // A tool that must not overlap another call of its own batch says so
+        // itself; the SDK reads this off the mounted tool (see
+        // `PluginTool.sequential`).
+        ...(tool.sequential ? { executionMode: "sequential" as const } : {}),
+        execute: async (toolCallId, args, signal) => {
+          // The wire id the renderer knows this call's block by. It is set
+          // when the call started, before `execute` runs, so a nested run can
+          // nest under that block and its ids can be namespaced by it.
+          const parentToolId = pendingArgs.get(toolCallId)?.id;
           const result = await tool.execute(args as Record<string, unknown>, {
             getSetting: ctx.getSetting,
             // An agent run lives in the graph it appends to, so a plugin
@@ -716,6 +881,15 @@ export async function runAgent(
                   return answer;
                 }
               : undefined,
+            // A subagent of this very run, streamed into the same channel and
+            // nested under the block of the call that asked for it. Absent
+            // when the harness cannot place such a call's block — a bare
+            // tool host — so a tool that needs one falls back on text. See
+            // `ToolRunContext.spawnAgent`.
+            spawnAgent:
+              parentToolId === undefined
+                ? undefined
+                : (messages) => spawnSubagent(messages, parentToolId, signal),
           });
           return {
             content: [{ type: "text" as const, text: result.content }],
