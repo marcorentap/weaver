@@ -281,6 +281,10 @@ export type LiveGraph = {
  * output that exists to be edited, and the edit is what sets it going again
  * (see `defineKind.resume`), so it has to be reachable by the same paths
  * every other block is. Everything the run wrote around it stays locked.
+ *
+ * A locked block's own children are locked with it: a subagent's transcript
+ * hangs under the tool block that spawned it, and a run that is still
+ * writing into that branch owns it just as much as the chain that holds it.
  */
 export function lockedBlockIds(
   graph: BlockGraph,
@@ -295,6 +299,19 @@ export function lockedBlockIds(
       if (!waiting.has(cur)) locked.add(cur);
       if (cur === tail) break;
       cur = graph.blocks[cur]?.next ?? null;
+    }
+  }
+  // Whatever is nested under what the run appended is being written by the
+  // same run. The walk is one level at a time so a nested subagent's own
+  // branch is reached too, however deep it goes; a waiting block's subtree is
+  // left alone, since a question is there to be answered, not frozen.
+  const nested = [...locked];
+  while (nested.length > 0) {
+    const id = nested.pop() as BlockId;
+    for (const child of childIds(graph, id)) {
+      if (waiting.has(child) || locked.has(child)) continue;
+      locked.add(child);
+      nested.push(child);
     }
   }
   return locked;
@@ -599,6 +616,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // streamed delta.
     pushUndo();
     const parentId = findParent(snapshot.graph, id);
+    // Where a subagent's transcript goes while a `nest` scope is open: the
+    // block of the nested run's spawning tool call, so its whole branch
+    // hangs off that call's block instead of trailing after this run's own
+    // output. A stack, because a subagent may itself spawn one; a level whose
+    // spawning block never landed is pushed as `null` anyway, so `unnest`
+    // always pops the level its own `nest` opened.
+    const nestStack: (BlockId | null)[] = [];
     const append = (
       kind: string,
       data: BlockData,
@@ -618,6 +642,32 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         data,
         ...(hidden ? { hidden: true } : {}),
       };
+      const nest = nestStack[nestStack.length - 1] ?? null;
+      // A nesting parent deleted mid-run — the tool block a subagent's
+      // transcript hangs off, discarded while it still streams — leaves
+      // nowhere nested to append, so the nested run's next block falls back
+      // to where any other block would go rather than throwing into whoever
+      // is streaming events at it.
+      const into = nest !== null && snapshot.graph.blocks[nest] ? nest : null;
+      if (into !== null) {
+        // A nested block goes *inside* the spawning call's own block, as its
+        // last child — what a hook's `addBlock` does, and for the same
+        // reason: `Position.afterId` names the chain the block is linked
+        // into, so pointing it at the parent itself would link this block
+        // beside that parent, in the run's own chain, instead of under it.
+        // `null` is the honest answer when nothing is nested there yet.
+        // Asking the live graph on every append rather than remembering an
+        // insertion point means a nested block deleted mid-run cannot leave
+        // one stale behind.
+        commit(
+          insertBlock(snapshot.graph, child, {
+            parentId: into,
+            afterId: lastChildId(snapshot.graph, into),
+          }),
+          true,
+        );
+        return newId;
+      }
       // Where the next block goes is the run's own tail, not a position
       // remembered here: while a run is parked on a question, the block it is
       // parked on is the tail *and* editable, so it can be discarded before
@@ -943,6 +993,21 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
             // every later edit goes through releases it here and now, so the
             // run is never held open by a question nobody has left to ask.
             resolveWaits();
+          } else if (event.type === "nest") {
+            // A subagent's run started inside one of this run's tool calls;
+            // everything it streams until `unnest` belongs under that call's
+            // block. The wire id names the call, which the renderer already
+            // turned into a block when its `tool_start` arrived, so the
+            // whole transcript hangs off that block as one branch. An
+            // unknown id means the call's block never landed (a tool host
+            // that skipped its `tool_start`), and then the nested blocks
+            // fall back to appending where any other block would.
+            const parent = toolBlocks.get(event.tool);
+            nestStack.push(parent ?? null);
+            resetStreaming();
+          } else if (event.type === "unnest") {
+            nestStack.pop();
+            resetStreaming();
           } else if (event.type === "error") {
             failure = event.message;
           }

@@ -848,14 +848,34 @@ function ChatView({
   // state while rendering" pass. Guarded by clearing `pendingFocus` once
   // applied, so this cannot loop.
   if (pendingFocus) {
-    const i = rows.findIndex((entry) => entry.block.id === pendingFocus.id);
-    if (i !== -1) {
-      setCursor(i);
-      if (pendingFocus.openActions) setPopup({ kind: "actions" });
-      if (pendingFocus.answerWait) setPopup({ kind: "multichoiceSelect" });
-      if (pendingFocus.runInference) void runInference(pendingFocus.id);
-      if (pendingFocus.customInference) setPopup({ kind: "customInference" });
-      setPendingFocus(null);
+    // A nested block appears in no row while any container above it is
+    // folded, so the chain down to it is opened first. This is what makes a
+    // question a subagent raised reachable: it lands under the call that
+    // spawned it, and a run parked on a block nobody can see is a run nobody
+    // can release. Only the way down is touched, so every other container
+    // keeps whatever the user chose for it.
+    const ancestors: BlockId[] = [];
+    for (
+      let at = findParent(graph, pendingFocus.id);
+      at !== null;
+      at = findParent(graph, at)
+    ) {
+      ancestors.push(at);
+    }
+    if (ancestors.some((id) => !expanded.has(id))) {
+      // Re-runs this pass once the opening has landed and the row is in
+      // `rows`; `pendingFocus` is still set, so nothing is lost by waiting.
+      setExpanded((current) => new Set([...current, ...ancestors]));
+    } else {
+      const i = rows.findIndex((entry) => entry.block.id === pendingFocus.id);
+      if (i !== -1) {
+        setCursor(i);
+        if (pendingFocus.openActions) setPopup({ kind: "actions" });
+        if (pendingFocus.answerWait) setPopup({ kind: "multichoiceSelect" });
+        if (pendingFocus.runInference) void runInference(pendingFocus.id);
+        if (pendingFocus.customInference) setPopup({ kind: "customInference" });
+        setPendingFocus(null);
+      }
     }
   }
   const index = Math.min(cursor, Math.max(rows.length - 1, 0));
