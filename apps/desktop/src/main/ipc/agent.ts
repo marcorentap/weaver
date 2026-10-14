@@ -57,6 +57,24 @@ async function handleRun(
     event.sender.send(channel, agentEvent);
   };
 
+  // The id is the renderer's, and it keys both the event channel and the
+  // `runs` map. A second run reusing an id already in flight would clobber
+  // the first's entry — leaving the first unabortable, and letting its
+  // `finally` delete the second's — so the id is reserved before the first
+  // await, and a duplicate is refused instead of racing. The entry is
+  // replaced with the real one once the run has a session to abort; until
+  // then a cancel simply has nothing to do, exactly as before.
+  if (runs.has(runId)) {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send(channel, {
+        type: "error",
+        message: `a run with id "${runId}" is already in flight`,
+      });
+    }
+    return;
+  }
+  runs.set(runId, { abort: () => {} });
+
   try {
     await runAgent(
       rawRequest,
