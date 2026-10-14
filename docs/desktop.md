@@ -110,7 +110,11 @@ the kinds were supplied, `assertValidData`. A malformed block never reaches
 disk, which is why nothing downstream has to defend against one.
 
 Reads are validated with zod. The schema version lives in `PRAGMA user_version`,
-currently 6, and a mismatch is an error rather than a guess.
+currently 6. An older database is migrated forward one step at a time, each step
+an entry in a table keyed by the version it reaches; a version below the current
+one with no step to it, or a database newer than this build, is an error rather
+than a guess, so a version is never stamped on a database that did not really
+reach it.
 
 `main/lib/store.ts` is a thin wrapper that opens the store once for the app's
 lifetime, with the loaded plugin kinds. On an empty store it writes a seed graph:

@@ -169,12 +169,16 @@ The agent path mounts tools, loads resources and creates a session.
 The tool set is the harness's own four plus whatever the plugins contribute. The
 model-visible names are `read`, `write`, `edit` and `display_media`, which
 replace the SDK's tools of the same name so that `path` may be a `file:`,
-`http(s):` or `ssh:` URI as well as a filesystem path. Every built-in is on by
-default; `ALLOWED_TOOLS` in `shared/agent-events.ts` is the list a block may pick
-from. `display_media` is mounted on every agent run whether a block names it or
-not, because a run has to be able to show a picture without the operator
-thinking to enable a tool first. This is a single-operator harness, so `bash`
-and `write` are not held back from the model.
+`http(s):` or `ssh:` URI as well as a filesystem path. Every tool is on by
+default; a block may pick a subset from the union the run computes at mount
+time, of `ALLOWED_TOOLS` in `shared/agent-events.ts` (the harness's own tools)
+and the names the loaded plugins contribute through `ctx.pluginTools`. A
+plugin's tool is therefore offered to the model without any core list naming it,
+which is what lets a drop-in plugin add a tool that actually reaches a run.
+`display_media` is mounted on every agent run whether a block names it or not,
+because a run has to be able to show a picture without the operator thinking to
+enable a tool first. This is a single-operator harness, so `bash` and `write`
+are not held back from the model.
 
 `display_media` is deliberately narrow. It turns a URI into a media block and
 nothing else. An earlier generic version let the model name any kind and fill in

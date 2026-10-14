@@ -114,8 +114,18 @@ type BlockView = {
   fields?: (block) => BlockField[];   // editable fields, with labels and hints
   Preview?: ComponentType<...>;  // the full-size view
   raw?: (block, graph) => string | null;  // a URL for the underlying file
+  labelClass?: (block) => string;  // the label's color, by who produced the block
+  copy?: (block) => { label; value } | null;  // the "Copy content" action
+  answerable?: boolean;  // the block's menu offers the kind's answer dialog
 };
 ```
+
+The last three are per-kind behaviour the ledger would otherwise have to spell
+out in a switch over kind ids: the color a block's label takes, the one string
+`y` copies, and whether the block's actions menu offers an entry that opens the
+kind's own answer dialog. Keeping them on the view means the page never names a
+kind: once a kind has an entry (still written by hand, as above), the ledger
+treats it exactly as it treats a bundled one.
 
 `viewFor(block)` looks the kind up in the registry and parses the block's data
 against the kind's schema before it renders anything. A parse failure swaps in
@@ -150,8 +160,11 @@ hardcoded on either side.
 
 `lib/settings.tsx` is a module-level store over one store key,
 `weaver.settings`, holding the app's own preferences: appearance, the AI
-provider's endpoint and key, inference defaults, summarization defaults. Writes
-are optimistic and fire the IPC without waiting.
+provider's endpoint and key, inference defaults, summarization defaults. The
+shape and every default are one zod schema; hydration parses the stored blob
+through it, so a field an older blob is missing, or one holding a wrong-typed
+value, falls back to its own default rather than resetting the whole object.
+Writes are optimistic and fire the IPC without waiting.
 
 `pages/SettingsPage.tsx` declares settings as data. A `SettingDef` is an option,
 a number, a string, an info row or an action, flattened into rows and navigated
