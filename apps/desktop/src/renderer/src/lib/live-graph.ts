@@ -20,6 +20,7 @@ import {
   messagesOfBlocks,
   messagesOfGraph,
   moveBlock as moveBlockCore,
+  newBlock,
   removeBlock,
   snapshotBlock,
   TEXT_KIND,
@@ -505,17 +506,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         // children first must append to what that left behind.
         const graph = snapshot.graph;
         const newId = crypto.randomUUID();
-        const now = Date.now();
-        const child: Block = {
-          id: newId,
-          kind: childKind,
-          label,
-          createdAt: now,
-          modifiedAt: now,
-          next: null,
-          children: null,
-          data,
-        };
+        const child = newBlock({ id: newId, kind: childKind, label, data });
         commit(
           insertBlock(graph, child, {
             parentId,
@@ -630,18 +621,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       hidden?: boolean,
     ) => {
       const newId = crypto.randomUUID();
-      const now = Date.now();
-      const child: Block = {
-        id: newId,
-        kind,
-        label,
-        createdAt: now,
-        modifiedAt: now,
-        next: null,
-        children: null,
-        data,
-        ...(hidden ? { hidden: true } : {}),
-      };
+      const child = newBlock({ id: newId, kind, label, data, hidden });
       const nest = nestStack[nestStack.length - 1] ?? null;
       // A nesting parent deleted mid-run — the tool block a subagent's
       // transcript hangs off, discarded while it still streams — leaves
