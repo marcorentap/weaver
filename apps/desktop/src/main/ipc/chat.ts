@@ -1,6 +1,7 @@
 import { ipcMain } from "electron";
 import type { Block, BlockGraph, Position } from "@repo/core";
 import {
+  cloneGraph,
   ENV_KIND,
   insertBlock,
   moveBlock,
@@ -243,22 +244,26 @@ function duplicateChatSession(sourceId: string): CreateSessionResult {
   const graph = defaultGraph();
   pendingSessions.set(id, { name, graph });
   try {
-    const blocks = Object.values(store.loadGraph(sourceId).blocks);
-    if (blocks.length === 0) {
+    const source = store.loadGraph(sourceId);
+    if (Object.keys(source.blocks).length === 0) {
       // The source has no content (a pending, never-written session): the
       // copy is just an empty session under its own name, pending until its
       // first block, exactly like `createChatSession`.
       return { error: null, id, name, graph };
     }
-    const remap = new Map(blocks.map((block) => [block.id, newId()]));
-    const copied: BlockInput[] = blocks.map((block) => ({
-      id: remap.get(block.id)!,
+    // `cloneGraph` mints a fresh id for every block and remaps every link,
+    // so the copy cannot silently detach a subtree the way a hand-rolled
+    // remap can. The caller only turns the cloned blocks back into the
+    // store's row shape.
+    const copy = cloneGraph(source, newId);
+    const copied: BlockInput[] = Object.values(copy.blocks).map((block) => ({
+      id: block.id,
       kind: block.kind,
       label: block.label,
       createdAt: block.createdAt,
-      next: block.next ? remap.get(block.next) : null,
-      children: block.children ? remap.get(block.children) : null,
-      data: structuredClone(block.data),
+      next: block.next,
+      children: block.children,
+      data: block.data,
       hidden: block.hidden,
     }));
     ensureSessionRow(store, id);
