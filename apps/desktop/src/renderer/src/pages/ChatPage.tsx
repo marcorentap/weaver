@@ -24,8 +24,8 @@ import {
   lastChildId,
   messagesOfBlocks,
   messagesOfGraph,
+  newBlock,
   TEXT_KIND,
-  textState,
   topLevelBlockIds,
 } from "@repo/core";
 import type { BlockInput } from "@repo/store";
@@ -59,18 +59,8 @@ import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
 import { pwdForBlock, pwdForPosition } from "@/lib/env";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
-import {
-  ASSISTANT_KIND,
-  TOOL_KIND,
-  toolState,
-  USER_KIND,
-} from "@plugins/rich-media";
-import { MEDIA_KIND, mediaState } from "@/blocks/media";
-import {
-  MULTICHOICE_KIND,
-  multichoiceSnapshot,
-  multichoiceState,
-} from "@plugins/user-input";
+import { TOOL_KIND, USER_KIND } from "@plugins/rich-media";
+import { MULTICHOICE_KIND, multichoiceState } from "@plugins/user-input";
 
 /** Which modal popup, if any, sits above chat's normal mode. */
 type Popup =
@@ -106,19 +96,16 @@ type Row = {
 const INDENT_REM = 1;
 
 /** The `Block` a block just written to the store becomes in the live graph.
- *  The links are `insertBlock`'s to write, so both start empty; only the id
- *  and the data are the caller's. */
+ *  The links are `insertBlock`'s to write, so both start empty; only the id,
+ *  the original creation time and the data are the caller's. */
 function blockFromInput(input: BlockInput): Block {
-  return {
+  return newBlock({
     id: input.id,
     kind: input.kind,
     label: input.label,
-    createdAt: input.createdAt,
-    modifiedAt: Date.now(),
-    next: null,
-    children: null,
     data: input.data ?? {},
-  };
+    createdAt: input.createdAt,
+  });
 }
 
 function flatten(
@@ -204,53 +191,25 @@ function InsertGap({
   );
 }
 
-/** Label color by who produced a block. A person typing it (`user` kind),
- *  or an inference run appending it after the block that asked, a reply's
- *  own prose or a tool call it made along the way. Anything else (a media
- *  block someone added by hand) stays uncolored. */
+/** Label color by who produced a block: a person typing it, or an inference
+ *  run appending it after the block that asked. The kind-specific half comes
+ *  from the block's own view (`labelClass`), so this never names a kind; only
+ *  the label conventions that hold across kinds — an error, or a run's
+ *  reasoning — live here, because they are written onto blocks of any kind.
+ */
 function originClass(block: Block): string {
   if (block.label === "error") return "text-destructive";
-  if (block.kind === USER_KIND) return "text-blue-400";
-  if (block.kind === ASSISTANT_KIND || block.kind === TOOL_KIND) {
-    return "text-emerald-400";
-  }
   if (block.label === "thinking") return "text-muted-foreground";
-  return "";
+  return viewFor(block).labelClass?.(block) ?? "";
 }
 
-/** What "Copy content" (`y`) means for a kind, or null for a kind with no
- *  single string worth copying; "Copy ID" already covers the block itself. */
+/** What "Copy content" (`y`) means for a block, from its kind's own view, or
+ *  null for a kind with no single string worth copying. */
 function copyableContent(
   block: Block,
 ): { label: string; value: string } | null {
-  switch (block.kind) {
-    case TEXT_KIND:
-    case USER_KIND:
-    case ASSISTANT_KIND:
-      return { label: "Copy content", value: textState.parse(block.data).text };
-    case MEDIA_KIND:
-      return { label: "Copy URI", value: mediaState.parse(block.data).uri };
-    case TOOL_KIND:
-      return {
-        label: "Copy output",
-        value: toolState.parse(block.data).output,
-      };
-    case MULTICHOICE_KIND:
-      return {
-        label: "Copy answer",
-        value: multichoiceSnapshot(multichoiceState.parse(block.data)),
-      };
-    default:
-      return null;
-  }
+  return viewFor(block).copy?.(block) ?? null;
 }
-
-/**
- * The kind's own block action for a multichoice question: one entry that
- * opens the real answer dialog. Everything else — picking, renaming,
- * adding and removing options, the Other text and the note — lives in that
- * dialog, so the actions menu stays as thin as every other block's.
- */
 
 /** Tall content is clipped to this many lines until it is unhidden. Rows are
  *  `text-xs`, whose line height is exactly `1rem`, so this is also its
@@ -1884,7 +1843,7 @@ function ChatView({
           // A multichoice block's own action: one entry that opens the
           // answer dialog — checkboxes, renaming, adding, removing, Other
           // and the note — entered with space, like opening a menu.
-          ...(row.block.kind === MULTICHOICE_KIND && !locked
+          ...(viewFor(row.block).answerable && !locked
             ? [
                 {
                   label: "Select answer",

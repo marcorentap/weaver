@@ -37,6 +37,7 @@ import {
 import type { ToolState } from "@plugins/rich-media";
 import {
   MULTICHOICE_KIND,
+  multichoiceSnapshot,
   multichoiceState,
   OTHER_OPTION,
   type MultichoiceState,
@@ -96,6 +97,28 @@ export type BlockView = {
   fields?: (block: Block) => BlockField[];
   Preview?: (props: { block: Block; graph: BlockGraph }) => ReactNode;
   raw?: (block: Block, graph: BlockGraph) => string;
+  /**
+   * The class the rail paints this kind's block label with, or omitted for
+   * the default. It lives on the view because the color comes from the
+   * kind's own convention — who produced the block — and not from anything
+   * the rail knows; a page coloring labels by kind would have to name every
+   * kind, which is exactly what this registry exists to avoid.
+   */
+  labelClass?: (block: Block) => string;
+  /**
+   * The one string this kind offers under "Copy content" (`y`), or null for
+   * a kind with nothing worth copying on its own — "Copy ID" already covers
+   * the block. Kept beside the kind's state parser so the value it copies is
+   * read the same way the view reads it.
+   */
+  copy?: (block: Block) => { label: string; value: string } | null;
+  /**
+   * Whether this kind's block is a question answered through a dialog, so
+   * the block's actions menu offers an entry that opens it. A flag rather
+   * than a predicate, because the dialog itself is the kind's own (see
+   * `MultichoiceSelect`); the menu only needs to know one exists.
+   */
+  answerable?: boolean;
 };
 
 function UserRow({ text }: { text: string }) {
@@ -480,6 +503,10 @@ export const blockViews: Record<string, BlockView> = {
       />
     ),
     raw: (block) => textBlobUrl(textState.parse(block.data).text),
+    copy: (block) => ({
+      label: "Copy content",
+      value: textState.parse(block.data).text,
+    }),
   },
 
   // A run's reply. Its state is the same `{ text }` a text block holds and it
@@ -507,6 +534,13 @@ export const blockViews: Record<string, BlockView> = {
       />
     ),
     raw: (block) => textBlobUrl(assistantState.parse(block.data).text),
+    // A run's own words are colored the same as the tool calls it makes
+    // along the way: both are the inference working, not the person typing.
+    labelClass: () => "text-emerald-400",
+    copy: (block) => ({
+      label: "Copy content",
+      value: assistantState.parse(block.data).text,
+    }),
   },
 
   // An environment block is `.env` config, not prose: it renders as a code
@@ -589,6 +623,10 @@ export const blockViews: Record<string, BlockView> = {
         ? uri
         : (resolveMediaUri(uri, pwdForBlock(graph, block.id)) ?? uri);
     },
+    copy: (block) => ({
+      label: "Copy URI",
+      value: mediaState.parse(block.data).uri,
+    }),
   },
 
   [USER_KIND]: {
@@ -613,6 +651,11 @@ export const blockViews: Record<string, BlockView> = {
         className="h-[70vh] w-full overflow-auto overscroll-contain"
       />
     ),
+    labelClass: () => "text-blue-400",
+    copy: (block) => ({
+      label: "Copy content",
+      value: userState.parse(block.data).text,
+    }),
   },
 
   [TOOL_KIND]: {
@@ -632,6 +675,12 @@ export const blockViews: Record<string, BlockView> = {
     },
     Preview: ({ block }) => <ToolPreview state={toolState.parse(block.data)} />,
     raw: (block) => textBlobUrl(toolState.parse(block.data).output),
+    // A tool call is the run working, so its label matches the reply's.
+    labelClass: () => "text-emerald-400",
+    copy: (block) => ({
+      label: "Copy output",
+      value: toolState.parse(block.data).output,
+    }),
   },
 
   // A question block is content the user answers, not prose: it renders as
@@ -657,6 +706,13 @@ export const blockViews: Record<string, BlockView> = {
     Preview: ({ block }) => (
       <MultichoicePreview state={multichoiceState.parse(block.data)} />
     ),
+    // The question is answered through the kind's own dialog; the actions
+    // menu only offers the entry that opens it.
+    answerable: true,
+    copy: (block) => ({
+      label: "Copy answer",
+      value: multichoiceSnapshot(multichoiceState.parse(block.data)),
+    }),
   },
 };
 
