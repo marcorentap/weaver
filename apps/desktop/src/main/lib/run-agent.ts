@@ -1111,13 +1111,20 @@ export async function runAgent(
       },
     });
 
-    const requested = body.tools.filter((name) =>
-      (ALLOWED_TOOLS as readonly string[]).includes(name),
-    );
-    // Every built-in tool by default: this is a single-operator
-    // harness, not a hosted service, so there is no untrusted third
-    // party to hold `bash`/`write`/`edit` back from.
-    const tools = requested.length > 0 ? requested : [...ALLOWED_TOOLS];
+    // The allow-list is the harness's own tools unioned with whatever the
+    // loaded plugins contribute, so a plugin's tool is offered to the model
+    // without core naming it. A tool missing from here is a tool no
+    // inference can call, so deriving the plugin half at mount time is what
+    // makes a drop-in plugin's tool usable instead of inert.
+    const allowedTools = [
+      ...ALLOWED_TOOLS,
+      ...ctx.pluginTools.map((tool) => tool.name),
+    ];
+    const requested = body.tools.filter((name) => allowedTools.includes(name));
+    // Every allowed tool by default: this is a single-operator harness, not
+    // a hosted service, so there is no untrusted third party to hold
+    // `bash`/`write`/`edit` back from.
+    const tools = requested.length > 0 ? requested : allowedTools;
 
     const { session } = await createAgentSession({
       cwd,

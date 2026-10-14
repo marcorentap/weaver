@@ -153,8 +153,10 @@ export const agentRunRequest = z.object({
    *  content parts when the model takes image input. Omitted when the block
    *  being run has none. */
   promptImages: z.array(contextImage).optional(),
-  /** Built-in tool names to enable for this run. Empty means every built-in
-   *  tool (see `ALLOWED_TOOLS`). */
+  /** Tool names to enable for this run. Empty means every tool the harness
+   *  and the loaded plugins together make available: the built-ins
+   *  (`ALLOWED_TOOLS`) plus whatever `ctx.pluginTools` contributes, so a
+   *  plugin's tool is offered without core naming it here. */
   tools: z.array(z.string()),
   /** The provider `shared/provider-routing.ts` detected from `endpoint`,
    *  if any, so the main process can apply that provider's own request
@@ -200,26 +202,18 @@ export const agentRunRequest = z.object({
 
 export type AgentRunRequest = z.infer<typeof agentRunRequest>;
 
-/** Every tool name a block may ask for, the harness's own built-ins
- *  (`bash`/`write`/`edit` included) beside the ones plugins contribute
- *  (`ask_user`, `web_search`, the hindsight tools, `spawn_subagent`). A run
- *  mounts every plugin's tools regardless, but a tool is only active — the
- *  one the model is offered — when its name is on this list, so a tool
- *  missing from here is a tool no inference can call. The main process runs
- *  commands as whoever started the app, so this is also the default when a
- *  block names none. */
+/** The harness's own built-in tools — the ones it ships rather than ones a
+ *  plugin contributes (`ask_user`, `web_search`, the hindsight tools,
+ *  `spawn_subagent`). The run engine unions this list with the names of the
+ *  tools the loaded plugins actually mount, so a plugin's tool is allowed
+ *  without core naming it here, and a drop-in plugin needs no change to this
+ *  file. The main process runs commands as whoever started the app, so this
+ *  is also the default when a block names no tools at all. */
 export const ALLOWED_TOOLS = [
-  "ask_user",
   "read",
   "grep",
   "find",
   "bash",
   "write",
   "edit",
-  "web_search",
-  "spawn_subagent",
-  "hindsight_retain",
-  "hindsight_recall",
-  "hindsight_reflect",
-  "hindsight_list",
 ] as const;
