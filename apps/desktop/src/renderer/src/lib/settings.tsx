@@ -6,6 +6,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import { z } from "zod";
 
 /**
  * Appearance and AI provider preferences, persisted under one key in the
@@ -54,125 +55,123 @@ export const DEFAULT_FONT_SIZE = 15;
 export const MIN_FONT_SIZE = 10;
 export const MAX_FONT_SIZE = 20;
 
-type Settings = {
+/**
+ * One settings field, wrapped so a missing or unreadable stored value falls
+ * back to `fallback` without taking the rest of the settings down with it.
+ * `.catch` covers both cases a stored blob can present: a key absent from an
+ * older blob (undefined fails the schema) and a wrong-typed value (a
+ * hand-edited store, a field whose type changed since it was written). Being
+ * per field, one corrupt value resets only itself rather than the whole
+ * object.
+ */
+function field<T extends z.ZodTypeAny>(
+  schema: T,
+  fallback: z.output<T>,
+): z.ZodCatch<T> {
+  return schema.catch(fallback);
+}
+
+/**
+ * The persisted settings, as a schema. The `Settings` type and the defaults
+ * are both derived from it, and hydration parses through it, so adding a
+ * field is one edit here rather than five — and a stored value is validated
+ * instead of cast. Each `field` carries its own fallback, which replaces
+ * the hand-written `?? DEFAULTS.x` re-enumeration hydration used to carry.
+ */
+const settingsSchema = z.object({
   /** Left-hand gutter beside each chat block. */
-  lineNumber: LineNumberMode;
+  lineNumber: field(
+    z.enum(["off", "absolute", "relative"]),
+    "absolute",
+  ),
   /** Whether preformatted content, code and a tool's output, wraps instead
    *  of scrolling sideways. */
-  wordWrap: WordWrapMode;
+  wordWrap: field(z.enum(["off", "on"]), "off"),
   /** Root font size in px. Applied to `<html>`, so every rem-sized element
    *  scales with it. */
-  fontSize: number;
+  fontSize: field(z.number().int(), DEFAULT_FONT_SIZE),
   /** Default URL of an OpenAI-completions provider, e.g.
    *  "http://seer:4000/v1". An agent block appends "/chat/completions"
    *  itself. */
-  aiEndpoint: string;
+  aiEndpoint: field(z.string(), ""),
   /** Bearer token sent to `aiEndpoint`. */
-  aiApiKey: string;
+  aiApiKey: field(z.string(), ""),
   /** Default model an inference run (an agent block, or the `X` modal's
    *  row) falls back to when its own `model` field is blank. */
-  inferDefaultModel: string;
+  inferDefaultModel: field(z.string(), ""),
   /** Per-provider settings (routing preferences, and the like), keyed by
    *  the provider id `shared/provider-routing.ts` detects from
    *  `aiEndpoint`. Keyed rather than flat so flipping endpoints between
    *  two known providers never clobbers the other one's saved values. */
-  aiProviderSettings: Record<string, Record<string, string>>;
+  aiProviderSettings: field(
+    z.record(z.string(), z.record(z.string(), z.string())),
+    {},
+  ),
   /** Per-provider settings for summarization runs, keyed by the provider
    *  id detected from the shared `aiEndpoint`. Same shape and purpose as
    *  `aiProviderSettings`, kept apart so summaries can be tuned (or left
    *  untuned) independently of the model that answers blocks. */
-  summProviderSettings: Record<string, Record<string, string>>;
+  summProviderSettings: field(
+    z.record(z.string(), z.record(z.string(), z.string())),
+    {},
+  ),
   /** Reasoning effort the inference run asks the model for, one of
    *  pi's own levels (see `shared/agent-events.ts`), or blank for the SDK's
    *  default. App-wide default of the `X` modal's row. */
-  inferThinkingLevel: string;
+  inferThinkingLevel: field(z.string(), ""),
   /** Cap on how many output tokens a default inference run's model may
    *  produce. Zero means no cap (the provider's own default). The `X`
    *  modal's per-run override draws from this when it leaves the field
    *  blank. */
-  inferMaxTokens: number;
+  inferMaxTokens: field(z.number(), 8192),
   /** Same for a default summarization run; blank falls back to
    *  `inferThinkingLevel`, like the default model beside it. */
-  summThinkingLevel: string;
+  summThinkingLevel: field(z.string(), ""),
   /** Same cap for a default summarization run, kept apart from
    *  `inferMaxTokens` so a summary can be capped independently of the
    *  model that answers blocks; zero means no cap (the provider's own
    *  default). Each defaults to the same hardcoded cap a fresh install has
    *  always had. */
-  summMaxTokens: number;
+  summMaxTokens: field(z.number(), 8192),
   /** What pi's `DefaultResourceLoader` loads on each inference run,
    *  inverted (`true` = don't load) so the names match the SDK flags the
    *  main process passes through. These are the app-wide defaults the `X`
    *  modal prefills per run. Same five flags, samely named, for a
    *  summarization run (`summNo…`): summaries share the inference harness
    *  defaults or tune them half as hard, whichever the rows below set. */
-  inferNoExtensions: boolean;
-  inferNoSkills: boolean;
-  inferNoPromptTemplates: boolean;
-  inferNoThemes: boolean;
-  inferNoContextFiles: boolean;
+  inferNoExtensions: field(z.boolean(), false),
+  inferNoSkills: field(z.boolean(), false),
+  inferNoPromptTemplates: field(z.boolean(), true),
+  inferNoThemes: field(z.boolean(), true),
+  inferNoContextFiles: field(z.boolean(), false),
   /** Same five `DefaultResourceLoader` flags for a summarization run. */
-  summNoExtensions: boolean;
-  summNoSkills: boolean;
-  summNoPromptTemplates: boolean;
-  summNoThemes: boolean;
-  summNoContextFiles: boolean;
+  summNoExtensions: field(z.boolean(), false),
+  summNoSkills: field(z.boolean(), false),
+  summNoPromptTemplates: field(z.boolean(), true),
+  summNoThemes: field(z.boolean(), true),
+  summNoContextFiles: field(z.boolean(), false),
   /** Whether a summarization run (`s` / `S`) goes through the pi agent
    *  instead of a plain LLM call. Off keeps the read-only compress-and-
    *  reply behavior; on mounts the whole harness, so the `summNo…` rows
    *  next to it (extensions, skills, prompt templates, themes, context
    *  files) actually apply and the run can use tools. */
-  summAgent: boolean;
+  summAgent: field(z.boolean(), false),
   /** Default model a summarization run (`s` on a block) falls back to when
    *  its own `model` field is blank. Kept apart from the inference default
    *  so a smaller or cheaper model can compress conversations without
    *  touching the one that answers them; a blank value falls back to
    *  `inferDefaultModel`. Summarization runs share the endpoint and key
    *  with inference (`aiEndpoint`/`aiApiKey`). */
-  summDefaultModel: string;
-};
+  summDefaultModel: field(z.string(), ""),
+});
+
+export type Settings = z.infer<typeof settingsSchema>;
 
 const STORAGE_KEY = "weaver.settings";
 
-const DEFAULTS: Settings = {
-  lineNumber: "absolute",
-  wordWrap: "off",
-  fontSize: DEFAULT_FONT_SIZE,
-  aiEndpoint: "",
-  aiApiKey: "",
-  inferDefaultModel: "",
-  aiProviderSettings: {},
-  // Extensions, skills and context files are part of a block's context and
-  // default on; Pi's prompt templates and themes would change how
-  // surrounding weaver chrome renders and stay off. Same defaults the main
-  // process applies when the run omits a flag (`DISCOVERY_DEFAULTS`), for
-  // inference and summarization alike.
-  inferNoExtensions: false,
-  inferNoSkills: false,
-  inferNoPromptTemplates: true,
-  inferNoThemes: true,
-  inferNoContextFiles: false,
-  summNoExtensions: false,
-  summNoSkills: false,
-  summNoPromptTemplates: true,
-  summNoThemes: true,
-  summNoContextFiles: false,
-  // Summaries stay plain until the agentic toggle is flipped, so a fresh
-  // install behaves exactly as it always has.
-  summAgent: false,
-  // Summarization runs fall back to the inference default model when this
-  // is blank, so it starts empty.
-  summDefaultModel: "",
-  // Blank reasoning effort means the SDK picks, the same default a fresh
-  // install has always had.
-  inferThinkingLevel: "",
-  summThinkingLevel: "",
-  // Matches the hardcoded cap a fresh install has always had, so nothing
-  // changes until a user tunes the rows; zero means no cap.
-  inferMaxTokens: 8192,
-  summMaxTokens: 8192,
-  summProviderSettings: {},
-};
+/** A fresh, complete `Settings`, read through the schema like every other
+ *  persisted value so a bad default fails here rather than at first use. */
+const DEFAULTS: Settings = settingsSchema.parse({});
 
 /** Snapshot of everything the provider exposes; `hydrated` flips once the
  *  stored value has been read, so consumers never flash the wrong gutter. */
@@ -263,49 +262,13 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
         const raw = await window.api.settings.get(STORAGE_KEY);
-        const stored = raw ? (JSON.parse(raw) as Partial<Settings>) : null;
-        commit({
-          settings: {
-            lineNumber: stored?.lineNumber ?? DEFAULTS.lineNumber,
-            wordWrap: stored?.wordWrap ?? DEFAULTS.wordWrap,
-            fontSize: stored?.fontSize ?? DEFAULTS.fontSize,
-            aiEndpoint: stored?.aiEndpoint ?? DEFAULTS.aiEndpoint,
-            aiApiKey: stored?.aiApiKey ?? DEFAULTS.aiApiKey,
-            inferDefaultModel:
-              stored?.inferDefaultModel ?? DEFAULTS.inferDefaultModel,
-            aiProviderSettings:
-              stored?.aiProviderSettings ?? DEFAULTS.aiProviderSettings,
-            inferNoExtensions:
-              stored?.inferNoExtensions ?? DEFAULTS.inferNoExtensions,
-            inferNoSkills: stored?.inferNoSkills ?? DEFAULTS.inferNoSkills,
-            inferNoPromptTemplates:
-              stored?.inferNoPromptTemplates ?? DEFAULTS.inferNoPromptTemplates,
-            inferNoThemes: stored?.inferNoThemes ?? DEFAULTS.inferNoThemes,
-            inferNoContextFiles:
-              stored?.inferNoContextFiles ?? DEFAULTS.inferNoContextFiles,
-            summNoExtensions:
-              stored?.summNoExtensions ?? DEFAULTS.summNoExtensions,
-            summNoSkills: stored?.summNoSkills ?? DEFAULTS.summNoSkills,
-            summNoPromptTemplates:
-              stored?.summNoPromptTemplates ?? DEFAULTS.summNoPromptTemplates,
-            summNoThemes: stored?.summNoThemes ?? DEFAULTS.summNoThemes,
-            summNoContextFiles:
-              stored?.summNoContextFiles ?? DEFAULTS.summNoContextFiles,
-            summAgent: stored?.summAgent ?? DEFAULTS.summAgent,
-            summDefaultModel:
-              stored?.summDefaultModel ?? DEFAULTS.summDefaultModel,
-            inferThinkingLevel:
-              stored?.inferThinkingLevel ?? DEFAULTS.inferThinkingLevel,
-            summThinkingLevel:
-              stored?.summThinkingLevel ?? DEFAULTS.summThinkingLevel,
-            inferMaxTokens:
-              stored?.inferMaxTokens ?? DEFAULTS.inferMaxTokens,
-            summMaxTokens: stored?.summMaxTokens ?? DEFAULTS.summMaxTokens,
-            summProviderSettings:
-              stored?.summProviderSettings ?? DEFAULTS.summProviderSettings,
-          },
-          hydrated: true,
-        });
+        // Parsed through the schema, so every field is present and of the
+        // right type: a stored blob missing a key (an older version) or
+        // holding a wrong-typed one falls back to its default per field,
+        // and a value that is not settings at all fails the parse and is
+        // treated like an empty store below.
+        const stored = raw ? settingsSchema.parse(JSON.parse(raw)) : DEFAULTS;
+        commit({ settings: stored, hydrated: true });
       } catch {
         // Corrupt stored JSON, or the main process unreachable. Keep
         // defaults, don't crash the shell.
