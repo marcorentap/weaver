@@ -221,6 +221,40 @@ export function insertBlock(
 }
 
 /**
+ * A brand-new block, in the exact shape `insertBlock` expects: both links
+ * null, since `insertBlock` is what writes them. Building one here rather
+ * than as an object literal at each call site keeps the field set in one
+ * place, so a change to `Block` cannot leave one construction path behind —
+ * a missing `hidden` or a stale `modifiedAt` is a graph inconsistency the
+ * store would only catch on the next write.
+ *
+ * `id` and `createdAt` are the caller's, so a caller keeps control of
+ * identity and clock (a random id at one site, a stored block's original
+ * timestamp at another); `modifiedAt` is always now, since a fresh block is
+ * by definition just written.
+ */
+export function newBlock(args: {
+  id: BlockId;
+  kind: string;
+  label: string;
+  data: BlockData;
+  createdAt?: number;
+  hidden?: boolean;
+}): Block {
+  return {
+    id: args.id,
+    kind: args.kind,
+    label: args.label,
+    createdAt: args.createdAt ?? Date.now(),
+    modifiedAt: Date.now(),
+    next: null,
+    children: null,
+    data: args.data,
+    ...(args.hidden ? { hidden: true } : {}),
+  };
+}
+
+/**
  * Move `id`, and everything nested under it, to `at`. Moving a block into
  * its own subtree throws. That would cut the moved branch out of the tree
  * entirely, leaving a ring nothing can reach.
@@ -241,6 +275,43 @@ export function moveBlock(
     throw new Error(`cannot move block ${id} inside itself`);
   }
   return link(unlink(graph, id), id, at);
+}
+
+/**
+ * A structural copy of `graph`: every block kept, every id replaced by a
+ * fresh one from `mint`, and every `next`/`children` link remapped to match.
+ *
+ * Links are rewritten here rather than at the caller because remapping a
+ * tree by hand is exactly the pointer surgery nothing else in the app does:
+ * a link left pointing at an old id silently detaches a subtree, and a
+ * caller that forgets `root` loses the whole copy. `mint` supplies the new
+ * ids so they stay the caller's to choose — a store's random id, a test's
+ * counter — and every other block field carries over unchanged, including
+ * block order, since order lives in the links being remapped.
+ *
+ * Block `data` is shared, not deep-copied: a block's state is only ever read
+ * through its kind's schema, so a copy that shares it cannot disagree with
+ * its source. A caller that needs the two to be independent clones the state
+ * itself.
+ */
+export function cloneGraph(graph: BlockGraph, mint: () => BlockId): BlockGraph {
+  const ids = new Map<BlockId, BlockId>();
+  for (const id of Object.keys(graph.blocks)) ids.set(id, mint());
+
+  const remap = (id: BlockId | null): BlockId | null =>
+    id === null ? null : (ids.get(id) as BlockId);
+
+  const blocks: Record<BlockId, Block> = {};
+  for (const [id, block] of Object.entries(graph.blocks)) {
+    const copy = ids.get(id) as BlockId;
+    blocks[copy] = {
+      ...block,
+      id: copy,
+      next: remap(block.next),
+      children: remap(block.children),
+    };
+  }
+  return { blocks, root: remap(graph.root) };
 }
 
 /** Drop `id` and everything nested under it, closing the chain behind it. */
