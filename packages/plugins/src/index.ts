@@ -117,9 +117,12 @@ export type PluginTool = {
    * Run this tool's batch one call at a time rather than letting its calls
    * overlap. The agent SDK runs a whole batch of tool calls concurrently by
    * default; setting this makes the batch containing this tool sequential, so
-   * two of its calls cannot be in flight at once. For a tool that streams a
-   * nested run of its own, that is not a preference: two overlapping nested
-   * transcripts would arrive interleaved and read as one another's.
+   * two of its calls cannot be in flight at once. For a tool whose calls
+   * genuinely cannot share a moment — one that mutates a resource the whole
+   * batch contends for — that is not a preference; a tool whose only reason
+   * would be a nested run's transcript is not: `spawnAgent`'s transcript is
+   * scoped to the call that spawned it, so concurrent subagents land in their
+   * own branches rather than in one another's.
    */
   sequential?: boolean;
   /** Resolve a call. Throw to report a failure. */

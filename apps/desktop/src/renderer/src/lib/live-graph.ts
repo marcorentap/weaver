@@ -607,22 +607,55 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // streamed delta.
     pushUndo();
     const parentId = findParent(snapshot.graph, id);
-    // Where a subagent's transcript goes while a `nest` scope is open: the
-    // block of the nested run's spawning tool call, so its whole branch
-    // hangs off that call's block instead of trailing after this run's own
-    // output. A stack, because a subagent may itself spawn one; a level whose
-    // spawning block never landed is pushed as `null` anyway, so `unnest`
-    // always pops the level its own `nest` opened.
-    const nestStack: (BlockId | null)[] = [];
+    // A run's tool calls each occupy one `tool` block, opened by the wire's
+    // `tool_start` and streamed into by `tool_delta`. `toolBlocks` maps the
+    // wire id (main-process-assigned, namespaced by every spawning level
+    // above it) to the block id, so the calls of one turn that run in
+    // parallel each land in their own block — and so a subagent's events,
+    // which name their spawning call's wire id as their `nest` scope, can be
+    // placed under that call's block.
+    const toolBlocks = new Map<string, BlockId>();
+    // Where a subagent's transcript goes, and where its own text stream is:
+    // one frame per scope, the run's own stream under scope "" and every
+    // subagent under the wire id path of the tool call that spawned it. Kept
+    // apart rather than in a single stack because subagents run in parallel —
+    // two transcripts streaming at once would otherwise write into one
+    // another's reply block and hang off one another's spawn block. Creating
+    // a frame on demand is safe because a call's `tool_start` lands in
+    // `toolBlocks` before the call can spawn anything, so the spawner's block
+    // is there to resolve by the time its first scoped event arrives.
+    type StreamFrame = {
+      thinkingId: BlockId | null;
+      replyId: BlockId | null;
+      thinkingText: string;
+      replyText: string;
+    };
+    const frames = new Map<string, StreamFrame>();
+    const frameFor = (scope: string): StreamFrame => {
+      let frame = frames.get(scope);
+      if (frame === undefined) {
+        frame = {
+          thinkingId: null,
+          replyId: null,
+          thinkingText: "",
+          replyText: "",
+        };
+        frames.set(scope, frame);
+      }
+      return frame;
+    };
     const append = (
       kind: string,
       data: BlockData,
       label: string,
       hidden?: boolean,
+      scope = "",
     ) => {
       const newId = crypto.randomUUID();
       const child = newBlock({ id: newId, kind, label, data, hidden });
-      const nest = nestStack[nestStack.length - 1] ?? null;
+      // A scoped block goes under the call that spawned its run; the run's
+      // own blocks append where the run has been appending.
+      const nest = scope === "" ? null : (toolBlocks.get(scope) ?? null);
       // A nesting parent deleted mid-run — the tool block a subagent's
       // transcript hangs off, discarded while it still streams — leaves
       // nowhere nested to append, so the nested run's next block falls back
@@ -674,10 +707,6 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
     // starts hidden (`enter` → `h` shows it): it stays out of the rendered
     // list and out of the agent's context until the user unfolds it, so the
     // reply reads as the answer without the chain of thought behind it.
-    let thinkingId: BlockId | null = null;
-    let replyId: BlockId | null = null;
-    let thinkingText = "";
-    let replyText = "";
     /** Push `text` into an already-open block, or start one if its stream
      *  has not yet. `id` is written back through the same `snapshot` so a
      *  run of updates each sees the previous one. */
@@ -695,12 +724,6 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         true,
       );
     };
-    // A run's tool calls each occupy one `tool` block, opened by the wire's
-    // `tool_start` and streamed into by `tool_delta`. `toolBlocks` maps the
-    // wire id (main-process-assigned, unique per run) to the block id, so
-    // the calls of one turn that run in parallel each land in their own
-    // block.
-    const toolBlocks = new Map<string, BlockId>();
     const patchTool = (id: BlockId, output: string, ok?: boolean) => {
       const current = snapshot.graph.blocks[id];
       if (!current) return; // Deleted mid-stream.
@@ -723,30 +746,40 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         true,
       );
     };
-    const updateThinking = () => {
-      if (thinkingId === null) {
-        thinkingId = append(
+    const updateThinking = (scope: string) => {
+      const frame = frameFor(scope);
+      if (frame.thinkingId === null) {
+        frame.thinkingId = append(
           TEXT_KIND,
-          { text: thinkingText },
+          { text: frame.thinkingText },
           "thinking",
           true,
+          scope,
         );
       } else {
-        patchText(thinkingId, thinkingText);
+        patchText(frame.thinkingId, frame.thinkingText);
       }
     };
-    const updateReply = () => {
-      if (replyId === null) {
-        replyId = append(answerKind, { text: replyText }, answerLabel);
+    const updateReply = (scope: string) => {
+      const frame = frameFor(scope);
+      if (frame.replyId === null) {
+        frame.replyId = append(
+          answerKind,
+          { text: frame.replyText },
+          answerLabel,
+          undefined,
+          scope,
+        );
       } else {
-        patchText(replyId, replyText);
+        patchText(frame.replyId, frame.replyText);
       }
     };
-    const resetStreaming = () => {
-      thinkingId = null;
-      replyId = null;
-      thinkingText = "";
-      replyText = "";
+    const resetStreaming = (scope: string) => {
+      const frame = frameFor(scope);
+      frame.thinkingId = null;
+      frame.replyId = null;
+      frame.thinkingText = "";
+      frame.replyText = "";
     };
     // Pre-flight failures land as an appended error block too, and never
     // set `running`, because there is nothing in flight to show a spinner
@@ -868,25 +901,34 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           // dropped event. `done` is handled explicitly rather than left to
           // a fallthrough, so its role — the terminal signal `await done`
           // below settles on — is stated where the other events are.
+          //
+          // Which stream this event belongs to: the run's own (`""`), or one
+          // a subagent is writing, named by the wire id path of the call
+          // that spawned it. Read per event rather than tracked across
+          // events because subagents run in parallel and their transcripts
+          // arrive interleaved, so "which scope was last opened" is not a
+          // question the order of events can answer.
+          const scope = event.nest ?? "";
           switch (event.type) {
             case "thinking_delta": {
-              thinkingText += event.text;
-              updateThinking();
+              frameFor(scope).thinkingText += event.text;
+              updateThinking(scope);
               break;
             }
             case "thinking": {
               // Deltas already streamed this into the block; only a
               // non-streaming provider's whole-reasoning event needs to set
               // it here, ahead of the `text` event that follows.
-              if (thinkingId === null) {
-                thinkingText = event.text;
-                updateThinking();
+              const frame = frameFor(scope);
+              if (frame.thinkingId === null) {
+                frame.thinkingText = event.text;
+                updateThinking(scope);
               }
               break;
             }
             case "text_delta": {
-              replyText += event.text;
-              updateReply();
+              frameFor(scope).replyText += event.text;
+              updateReply(scope);
               break;
             }
             case "text": {
@@ -895,19 +937,28 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               // appending a duplicate. If no deltas arrived (a non-streaming
               // provider, or text that came with no preceding delta at all),
               // append the message whole, exactly as before deltas existed.
-              if (replyId === null) {
-                replyText = event.text;
-                append(answerKind, { text: replyText }, answerLabel);
+              const frame = frameFor(scope);
+              if (frame.replyId === null) {
+                frame.replyText = event.text;
+                append(
+                  answerKind,
+                  { text: frame.replyText },
+                  answerLabel,
+                  undefined,
+                  scope,
+                );
               }
-              resetStreaming();
+              resetStreaming(scope);
               break;
             }
             case "tool_start": {
-              resetStreaming();
+              resetStreaming(scope);
               const blockId = append(
                 TOOL_KIND,
                 { name: event.name, args: event.args, output: "", ok: true },
                 event.name,
+                undefined,
+                scope,
               );
               toolBlocks.set(event.id, blockId);
               break;
@@ -929,7 +980,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               break;
             }
             case "tool": {
-              resetStreaming();
+              resetStreaming(scope);
               const blockId = toolBlocks.get(event.id);
               if (blockId !== undefined) {
                 toolBlocks.delete(event.id);
@@ -949,12 +1000,14 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
                     ok: event.ok,
                   },
                   event.name,
+                  undefined,
+                  scope,
                 );
               }
               break;
             }
             case "block": {
-              resetStreaming();
+              resetStreaming(scope);
               const target = kinds[event.kind];
               if (!target) break;
               try {
@@ -962,7 +1015,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               } catch {
                 break;
               }
-              append(event.kind, event.data, event.label);
+              append(event.kind, event.data, event.label, undefined, scope);
               break;
             }
             case "wait": {
@@ -975,7 +1028,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               // the block lands and the engine watches it: whatever edit
               // later makes its kind's `resume` say something is what answers
               // the tool.
-              resetStreaming();
+              resetStreaming(scope);
               const target = kinds[event.kind];
               let parsed = false;
               if (target) {
@@ -990,7 +1043,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
                 answer(event.id, null);
                 break;
               }
-              const blockId = append(event.kind, event.data, event.label);
+              const blockId = append(
+                event.kind,
+                event.data,
+                event.label,
+                undefined,
+                scope,
+              );
               pendingWaits.set(blockId, { id: event.id, runId: id, answer });
               setWaiting(blockId, true);
               // A block that is answered as it lands — a tool handing over a
@@ -999,26 +1058,6 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               // the run is never held open by a question nobody has left to
               // ask.
               resolveWaits();
-              break;
-            }
-            case "nest": {
-              // A subagent's run started inside one of this run's tool
-              // calls; everything it streams until `unnest` belongs under
-              // that call's block. The wire id names the call, which the
-              // renderer already turned into a block when its `tool_start`
-              // arrived, so the whole transcript hangs off that block as one
-              // branch. An unknown id means the call's block never landed (a
-              // tool host that skipped its `tool_start`), and then the
-              // nested blocks fall back to appending where any other block
-              // would.
-              const parent = toolBlocks.get(event.tool);
-              nestStack.push(parent ?? null);
-              resetStreaming();
-              break;
-            }
-            case "unnest": {
-              nestStack.pop();
-              resetStreaming();
               break;
             }
             case "error": {

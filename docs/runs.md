@@ -60,13 +60,16 @@ both sides. The renderer turns each one into a block as it arrives:
 | `tool_start`, `tool_delta`, `tool` | one `tool` block per wire id                     |
 | `block`                            | a block of the named kind, after its data parses |
 | `wait`                             | the question block the run stopped on            |
-| `nest`, `unnest`                   | scopes the blocks in between under a tool call   |
 | `error`                            | a `text` block labelled "error"                  |
 | `done`                             | nothing; the run is over                         |
 
 Deltas append into a block that is already there, and the closing `text` or
 `tool` event carries the authoritative full content. A provider that never
 streams still works, because the full event arrives either way.
+
+Every event a nested run emits also carries a `nest` field naming the tool call
+that spawned it, which is how a subagent's blocks land under that call's block
+rather than in the spawning run's own output; see Subagents.
 
 ## The run holds its own tail
 
@@ -233,10 +236,14 @@ things replaced: its context is the messages the tool passed, and its prompt is
 a closing user turn those instructions are answered from. Because the same tool
 is mounted on the run it starts, spawning recurses.
 
-The nested run streams into the same channel wrapped in `nest` and `unnest`, and
-every id it names is prefixed with the spawning tool call's wire id, so a nested
-tool call or question cannot be mistaken for the outer run's. The renderer
-appends the whole nested transcript as children of the tool call's block.
+The nested run streams into the same channel, every event it emits carrying a
+`nest` scope that names the spawning tool call's wire id, and every id it names
+is prefixed with that same id, so a nested tool call or question cannot be
+mistaken for the outer run's. The renderer appends each event under the tool
+call's block. Because the scope rides each event rather than a scope the stream
+opens and closes, two subagents spawned in one batch run at the same time
+without their transcripts merging: each event knows which call it belongs to,
+whatever order the two happen to arrive in.
 
 The parent never sees any of it. A tool block snapshots only its own call and
 output, and the message walks never descend into children, so what reaches the

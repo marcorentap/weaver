@@ -18,6 +18,19 @@ export const THINKING_LEVELS = [
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /**
+ * The scope a nested run's event belongs to: the wire id path of the tool
+ * call that spawned it, the same path its own tool and question ids are
+ * namespaced by. Present on every event a subagent streams, absent on the
+ * run's own, so the renderer can hang a subagent's whole transcript off the
+ * block of the call that asked for it — including while another subagent
+ * streams at the same time, since each event names its own scope rather than
+ * relying on the order it arrived in. A further-nested run's path is prefixed
+ * by each level above it (`a/b/c`), so the nearest spawner is the one the
+ * whole path resolves to.
+ */
+const nestScope = { nest: z.string().optional() };
+
+/**
  * What one step of an agent run looks like on the wire.
  *
  * The main process's `agent:run:start` handler emits these as
@@ -30,18 +43,22 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
  */
 export const agentEvent = z.discriminatedUnion("type", [
   /** An assistant message. The agent's own words, not a tool's output. */
-  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({ type: z.literal("text"), text: z.string(), ...nestScope }),
   /** One incremental chunk of an assistant message while it is still being
    *  generated, in generation order. A `text` event still follows once the
    *  message is complete. Its `text` is the authoritative full message,
    *  used verbatim when no deltas arrived (a run that used no streaming) and
    *  as the streaming block's finish signal otherwise. */
-  z.object({ type: z.literal("text_delta"), text: z.string() }),
+  z.object({ type: z.literal("text_delta"), text: z.string(), ...nestScope }),
   /** The model's reasoning, spoken before its reply. Some providers stream
    *  it as `thinking_delta` chunks; a `thinking` event still follows once
    *  the message is complete, on the same terms as `text`/`text_delta`. */
-  z.object({ type: z.literal("thinking"), text: z.string() }),
-  z.object({ type: z.literal("thinking_delta"), text: z.string() }),
+  z.object({ type: z.literal("thinking"), text: z.string(), ...nestScope }),
+  z.object({
+    type: z.literal("thinking_delta"),
+    text: z.string(),
+    ...nestScope,
+  }),
   /** A tool call started. Opens the tool block so the call shows up while
    *  it runs, and gives the `tool_delta`/`tool` events that follow an `id`
    *  to land in the same block with. */
@@ -50,12 +67,18 @@ export const agentEvent = z.discriminatedUnion("type", [
     id: z.string(),
     name: z.string(),
     args: z.string(),
+    ...nestScope,
   }),
   /** One incremental chunk of a running tool's output, in execution order.
    *  Only tools that request streaming updates emit these, so a call may
    *  go straight from `tool_start` to `tool`. The finished call's `tool`
    *  event is still the authoritative full output. */
-  z.object({ type: z.literal("tool_delta"), id: z.string(), text: z.string() }),
+  z.object({
+    type: z.literal("tool_delta"),
+    id: z.string(),
+    text: z.string(),
+    ...nestScope,
+  }),
   /** A finished tool call, with whatever it printed. */
   z.object({
     type: z.literal("tool"),
@@ -64,6 +87,7 @@ export const agentEvent = z.discriminatedUnion("type", [
     args: z.string(),
     output: z.string(),
     ok: z.boolean(),
+    ...nestScope,
   }),
   /** A media block the `display_media` tool created. `data` is validated
    *  against the media kind's schema before it is sent. The run carries on
@@ -73,6 +97,7 @@ export const agentEvent = z.discriminatedUnion("type", [
     kind: z.string(),
     label: z.string(),
     data: z.record(z.string(), z.unknown()),
+    ...nestScope,
   }),
   /** A block a run has stopped on: the tool that raised it is still inside
    *  its own call, and the run cannot take another step until the person
@@ -88,24 +113,12 @@ export const agentEvent = z.discriminatedUnion("type", [
     kind: z.string(),
     label: z.string(),
     data: z.record(z.string(), z.unknown()),
+    ...nestScope,
   }),
-  /**
-   * A run nested inside this one — a subagent a tool spawned — starts
-   * streaming its blocks under the block of the tool call `tool` names (a
-   * `tool_start` wire id). Everything the nested run emits until the
-   * matching `unnest` belongs to that call, so its whole transcript reads as
-   * the call's own nested work instead of as a pile of sibling blocks. The
-   * renderer resolves `tool` against the call's block, which is why the
-   * nested run's own tool and question ids arrive namespaced by that same
-   * id: a nested call and the outer one cannot be mistaken for each other.
-   */
-  z.object({ type: z.literal("nest"), tool: z.string() }),
-  /** The nested run `nest` opened is over; later blocks append as before. */
-  z.object({ type: z.literal("unnest") }),
   /** The run failed. Nothing follows it. */
-  z.object({ type: z.literal("error"), message: z.string() }),
+  z.object({ type: z.literal("error"), message: z.string(), ...nestScope }),
   /** The run finished cleanly. Nothing follows. */
-  z.object({ type: z.literal("done") }),
+  z.object({ type: z.literal("done"), ...nestScope }),
 ]);
 
 export type AgentEvent = z.infer<typeof agentEvent>;

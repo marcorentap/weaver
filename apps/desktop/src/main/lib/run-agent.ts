@@ -81,22 +81,28 @@ const SUBAGENT_ANSWER_NOTE: ContextMessage = {
  * Rewrites a nested run's events so nothing it names can collide with the
  * outer run's: every tool call and question the nested run opens is known by
  * a per-run counter, so prefixing each id with the spawning tool's own id
- * keeps `tool_start`/`tool_delta`/`tool`/`wait` distinct across levels, and a
- * further-nested run's `nest` target gets the same prefix. The renderer nests
- * by that id and answers questions by it, so the rewritten id is exactly the
- * one both sides agree on.
+ * keeps `tool_start`/`tool_delta`/`tool`/`wait` distinct across levels. The
+ * same prefix goes on the event's `nest` scope — the path of the call that
+ * spawned it, composed level by level as the event climbs back out — so the
+ * renderer can place each event under that call's block from the event alone,
+ * with no reliance on the order two concurrent subagents happen to stream in.
+ * The renderer nests by that id and answers questions by it, so the rewritten
+ * id is exactly the one both sides agree on.
  */
 function namespaceNestedEvent(event: AgentEvent, prefix: string): AgentEvent {
+  // A run spawned further down already carries its own scope path; this level
+  // joins the front of it. A run spawned directly here has none, and this
+  // level's own spawning call is its scope — the prefix without the trailing
+  // separator that delimits the next level down.
+  const nest = event.nest ? `${prefix}${event.nest}` : prefix.slice(0, -1);
   switch (event.type) {
     case "tool_start":
     case "tool_delta":
     case "tool":
     case "wait":
-      return { ...event, id: `${prefix}${event.id}` };
-    case "nest":
-      return { ...event, tool: `${prefix}${event.tool}` };
+      return { ...event, id: `${prefix}${event.id}`, nest };
     default:
-      return event;
+      return { ...event, nest };
   }
 }
 
@@ -744,11 +750,13 @@ export async function runAgent(
      * Spawning may therefore recurse, since this same tool is mounted on the
      * run it starts.
      *
-     * The nested run streams into the same event channel, wrapped in
-     * `nest`/`unnest` so the renderer puts its whole transcript under the
-     * spawning call's block, and its `done`/`error` are swallowed: the caller
-     * is the tool call, which hears success as the returned text and failure
-     * as the throw, never the renderer as a second run ending.
+     * The nested run streams into the same event channel, every event it
+     * emits carrying a `nest` scope that names this call's own wire id, so
+     * the renderer hangs its whole transcript off this call's block — and
+     * keeps two concurrent subagents' transcripts apart while they arrive
+     * interleaved. Its `done`/`error` are swallowed: the caller is the tool
+     * call, which hears success as the returned text and failure as the
+     * throw, never the renderer as a second run ending.
      */
     const spawnSubagent = async (
       messages: ContextMessage[],
@@ -773,59 +781,54 @@ export async function runAgent(
       const prefix = `${parentToolId}/`;
       let failure: string | null = null;
       let lastText = "";
-      emit({ type: "nest", tool: parentToolId });
-      try {
-        await runAgent(
-          subRequest,
-          {
-            ...ctx,
-            // The nested run shares the outer one's lifetime: a run that is
-            // cancelled stops the subagent it spawned too, rather than
-            // leaving it working on a task nobody is waiting for. It is not
-            // registered through the caller's own `onSession`, which belongs
-            // to the run the caller started.
-            onSession: (abort) => {
-              if (signal?.aborted) abort();
-              else
-                signal?.addEventListener("abort", () => abort(), {
-                  once: true,
-                });
-            },
-            wait: waitFor
-              ? (id, kind, data, label) =>
-                  waitFor(`${prefix}${id}`, kind, data, label)
-              : undefined,
+      await runAgent(
+        subRequest,
+        {
+          ...ctx,
+          // The nested run shares the outer one's lifetime: a run that is
+          // cancelled stops the subagent it spawned too, rather than
+          // leaving it working on a task nobody is waiting for. It is not
+          // registered through the caller's own `onSession`, which belongs
+          // to the run the caller started.
+          onSession: (abort) => {
+            if (signal?.aborted) abort();
+            else
+              signal?.addEventListener("abort", () => abort(), {
+                once: true,
+              });
           },
-          (event) => {
-            if (event.type === "done") return;
-            if (event.type === "error") {
-              failure = event.message;
-              return;
-            }
-            // The subagent's answer is its last assistant message, and
-            // nothing earlier counts. A finished tool call — a `tool`, or the
-            // `block`/`wait` a media or question call raises in its place —
-            // means the run kept going past whatever it had said, so that
-            // text was working, not an answer, and is dropped here. Without
-            // this a run that ended without a closing message would hand the
-            // parent its own mid-run aside ("I'll look into it") as though it
-            // were the result: `message_end` emits no `text` at all for an
-            // empty message, so nothing later would ever overwrite it.
-            if (
-              event.type === "tool" ||
-              event.type === "block" ||
-              event.type === "wait"
-            ) {
-              lastText = "";
-            } else if (event.type === "text") {
-              lastText = event.text;
-            }
-            emit(namespaceNestedEvent(event, prefix));
-          },
-        );
-      } finally {
-        emit({ type: "unnest" });
-      }
+          wait: waitFor
+            ? (id, kind, data, label) =>
+                waitFor(`${prefix}${id}`, kind, data, label)
+            : undefined,
+        },
+        (event) => {
+          if (event.type === "done") return;
+          if (event.type === "error") {
+            failure = event.message;
+            return;
+          }
+          // The subagent's answer is its last assistant message, and
+          // nothing earlier counts. A finished tool call — a `tool`, or the
+          // `block`/`wait` a media or question call raises in its place —
+          // means the run kept going past whatever it had said, so that
+          // text was working, not an answer, and is dropped here. Without
+          // this a run that ended without a closing message would hand the
+          // parent its own mid-run aside ("I'll look into it") as though it
+          // were the result: `message_end` emits no `text` at all for an
+          // empty message, so nothing later would ever overwrite it.
+          if (
+            event.type === "tool" ||
+            event.type === "block" ||
+            event.type === "wait"
+          ) {
+            lastText = "";
+          } else if (event.type === "text") {
+            lastText = event.text;
+          }
+          emit(namespaceNestedEvent(event, prefix));
+        },
+      );
       if (failure !== null) throw new Error(failure);
       return lastText;
     };

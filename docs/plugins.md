@@ -53,7 +53,8 @@ type PluginTool = {
 ```
 
 `sequential` asks the SDK to run the batch containing this tool one call at a
-time. A subagent tool sets it so two nested transcripts cannot interleave.
+time. A subagent tool does not need it: a nested transcript is scoped to the
+call that spawned it, so concurrent subagents land in their own branches.
 
 Throwing from `execute` reports failure. The agent loop turns a throw into a
 failed tool result, so a rejected call is visible as a failed one rather than
@@ -168,7 +169,9 @@ be saved from the UI without going through a run.
 ### agent-subagents
 
 One tool, `spawn_subagent`, taking an array of `{ role, content }` messages. It
-requires `ctx.spawnAgent` and returns the subagent's answer as its own result.
+requires `ctx.spawnAgent`, returns the subagent's answer as its own result, and
+lets several calls in one batch run at once, each transcript under its own
+call's block.
 
 ## Kinds the renderer knows about
 

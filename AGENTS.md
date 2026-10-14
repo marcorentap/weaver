@@ -165,12 +165,16 @@ summarization) or creates a full pi session with our custom tools
   the messages it is given, inheriting the spawning run's request (endpoint,
   model, tools, discovery flags, merged environment), so a tool mounted on
   one run is mounted on the next and spawning recurses. The nested run's
-  events travel the same channel wrapped in `nest`/`unnest` — its tool and
-  question ids namespaced by the spawning call's wire id, so nothing
-  collides — and the renderer appends its whole transcript as `children` of
-  the tool call's own block. `main/lib/run-agent.ts` wraps the events;
-  `live-graph.ts` keeps a nest stack for what arrives inside a scope, and
-  locks a locked block's children with it. The transcript is a record, not
+  events travel the same channel, each carrying a `nest` scope that names
+  the spawning call's wire id — its tool and question ids namespaced by that
+  same id, so nothing collides — and the renderer appends each event under
+  the tool call's own block as `children`. `main/lib/run-agent.ts` rewrites
+  the events; `live-graph.ts` routes each one by its `nest` scope into the
+  frame that scope's text stream belongs to, and locks a locked block's
+  children with it. Because the scope rides each event rather than a scope
+  the stream opens and closes, two subagents spawned in one batch run at the
+  same time without their transcripts merging or one another's blocks
+  holding them apart. The transcript is a record, not
   the parent's context: a tool block snapshots only its own call and
   output, and `messagesAbove`/`messagesOfGraph` never descend into children,
   so the parent model receives the subagent's final answer alone — as the
