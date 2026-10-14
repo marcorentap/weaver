@@ -862,134 +862,180 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           plain,
         },
         (event) => {
-          if (event.type === "thinking_delta") {
-            thinkingText += event.text;
-            updateThinking();
-          } else if (event.type === "thinking") {
-            // Deltas already streamed this into the block; only a
-            // non-streaming provider's whole-reasoning event needs to set
-            // it here, ahead of the `text` event that follows.
-            if (thinkingId === null) {
-              thinkingText = event.text;
+          // A `switch` over the discriminated union, with the `default`
+          // narrowing `event` to `never`: adding a variant to `AgentEvent`
+          // without handling it here is a compile error, not a silently
+          // dropped event. `done` is handled explicitly rather than left to
+          // a fallthrough, so its role — the terminal signal `await done`
+          // below settles on — is stated where the other events are.
+          switch (event.type) {
+            case "thinking_delta": {
+              thinkingText += event.text;
               updateThinking();
+              break;
             }
-          } else if (event.type === "text_delta") {
-            replyText += event.text;
-            updateReply();
-          } else if (event.type === "text") {
-            // Deltas already streamed this message in, so the reply block
-            // already holds it; this only ends the stream rather than
-            // appending a duplicate. If no deltas arrived (a non-streaming
-            // provider, or text that came with no preceding delta at all),
-            // append the message whole, exactly as before deltas existed.
-            if (replyId === null) {
-              replyText = event.text;
-              append(answerKind, { text: replyText }, answerLabel);
+            case "thinking": {
+              // Deltas already streamed this into the block; only a
+              // non-streaming provider's whole-reasoning event needs to set
+              // it here, ahead of the `text` event that follows.
+              if (thinkingId === null) {
+                thinkingText = event.text;
+                updateThinking();
+              }
+              break;
             }
-            resetStreaming();
-          } else if (event.type === "tool_start") {
-            resetStreaming();
-            const blockId = append(
-              TOOL_KIND,
-              { name: event.name, args: event.args, output: "", ok: true },
-              event.name,
-            );
-            toolBlocks.set(event.id, blockId);
-          } else if (event.type === "tool_delta") {
-            // The main process diffs each partial snapshot before sending,
-            // so this is the call's output appended so far; the authoritative
-            // whole still arrives with the closing `tool` event.
-            const blockId = toolBlocks.get(event.id);
-            if (blockId === undefined) return;
-            const current = snapshot.graph.blocks[blockId];
-            if (!current) return; // Deleted mid-stream.
-            const output =
-              typeof current.data.output === "string"
-                ? current.data.output
-                : "";
-            patchTool(blockId, output + event.text);
-          } else if (event.type === "tool") {
-            resetStreaming();
-            const blockId = toolBlocks.get(event.id);
-            if (blockId !== undefined) {
-              toolBlocks.delete(event.id);
-              // Authoritative: whatever the deltas said, this is what the
-              // call finished with.
-              patchTool(blockId, event.output, event.ok);
-            } else {
-              // No `tool_start` preceded this (a call whose start was
-              // skipped, or a remote that never streams), so append the
-              // block whole, as before streaming existed.
-              append(
+            case "text_delta": {
+              replyText += event.text;
+              updateReply();
+              break;
+            }
+            case "text": {
+              // Deltas already streamed this message in, so the reply block
+              // already holds it; this only ends the stream rather than
+              // appending a duplicate. If no deltas arrived (a non-streaming
+              // provider, or text that came with no preceding delta at all),
+              // append the message whole, exactly as before deltas existed.
+              if (replyId === null) {
+                replyText = event.text;
+                append(answerKind, { text: replyText }, answerLabel);
+              }
+              resetStreaming();
+              break;
+            }
+            case "tool_start": {
+              resetStreaming();
+              const blockId = append(
                 TOOL_KIND,
-                {
-                  name: event.name,
-                  args: event.args,
-                  output: event.output,
-                  ok: event.ok,
-                },
+                { name: event.name, args: event.args, output: "", ok: true },
                 event.name,
               );
+              toolBlocks.set(event.id, blockId);
+              break;
             }
-          } else if (event.type === "block") {
-            resetStreaming();
-            const target = kinds[event.kind];
-            if (!target) return;
-            try {
-              target.parse(event.data);
-            } catch {
-              return;
+            case "tool_delta": {
+              // The main process diffs each partial snapshot before sending,
+              // so this is the call's output appended so far; the
+              // authoritative whole still arrives with the closing `tool`
+              // event.
+              const blockId = toolBlocks.get(event.id);
+              if (blockId === undefined) break;
+              const current = snapshot.graph.blocks[blockId];
+              if (!current) break; // Deleted mid-stream.
+              const output =
+                typeof current.data.output === "string"
+                  ? current.data.output
+                  : "";
+              patchTool(blockId, output + event.text);
+              break;
             }
-            append(event.kind, event.data, event.label);
-          } else if (event.type === "wait") {
-            // The run is stopped inside the tool call that raised this, so
-            // the question has to be both visible and answerable. A kind the
-            // renderer does not know, or data its own schema rejects, leaves
-            // nobody able to see the question, let alone answer it, so the
-            // run is released straight away with no answer instead of being
-            // held open by a block that never appeared. Otherwise the block
-            // lands and the engine watches it: whatever edit later makes its
-            // kind's `resume` say something is what answers the tool.
-            resetStreaming();
-            const target = kinds[event.kind];
-            let parsed = false;
-            if (target) {
+            case "tool": {
+              resetStreaming();
+              const blockId = toolBlocks.get(event.id);
+              if (blockId !== undefined) {
+                toolBlocks.delete(event.id);
+                // Authoritative: whatever the deltas said, this is what the
+                // call finished with.
+                patchTool(blockId, event.output, event.ok);
+              } else {
+                // No `tool_start` preceded this (a call whose start was
+                // skipped, or a remote that never streams), so append the
+                // block whole, as before streaming existed.
+                append(
+                  TOOL_KIND,
+                  {
+                    name: event.name,
+                    args: event.args,
+                    output: event.output,
+                    ok: event.ok,
+                  },
+                  event.name,
+                );
+              }
+              break;
+            }
+            case "block": {
+              resetStreaming();
+              const target = kinds[event.kind];
+              if (!target) break;
               try {
                 target.parse(event.data);
-                parsed = true;
               } catch {
-                // Treated exactly like an unknown kind, below.
+                break;
               }
+              append(event.kind, event.data, event.label);
+              break;
             }
-            if (!parsed) {
-              answer(event.id, null);
-              return;
+            case "wait": {
+              // The run is stopped inside the tool call that raised this, so
+              // the question has to be both visible and answerable. A kind
+              // the renderer does not know, or data its own schema rejects,
+              // leaves nobody able to see the question, let alone answer it,
+              // so the run is released straight away with no answer instead
+              // of being held open by a block that never appeared. Otherwise
+              // the block lands and the engine watches it: whatever edit
+              // later makes its kind's `resume` say something is what answers
+              // the tool.
+              resetStreaming();
+              const target = kinds[event.kind];
+              let parsed = false;
+              if (target) {
+                try {
+                  target.parse(event.data);
+                  parsed = true;
+                } catch {
+                  // Treated exactly like an unknown kind, below.
+                }
+              }
+              if (!parsed) {
+                answer(event.id, null);
+                break;
+              }
+              const blockId = append(event.kind, event.data, event.label);
+              pendingWaits.set(blockId, { id: event.id, runId: id, answer });
+              setWaiting(blockId, true);
+              // A block that is answered as it lands — a tool handing over a
+              // state that already holds one — parks nothing: the same check
+              // every later edit goes through releases it here and now, so
+              // the run is never held open by a question nobody has left to
+              // ask.
+              resolveWaits();
+              break;
             }
-            const blockId = append(event.kind, event.data, event.label);
-            pendingWaits.set(blockId, { id: event.id, runId: id, answer });
-            setWaiting(blockId, true);
-            // A block that is answered as it lands — a tool handing over a
-            // state that already holds one — parks nothing: the same check
-            // every later edit goes through releases it here and now, so the
-            // run is never held open by a question nobody has left to ask.
-            resolveWaits();
-          } else if (event.type === "nest") {
-            // A subagent's run started inside one of this run's tool calls;
-            // everything it streams until `unnest` belongs under that call's
-            // block. The wire id names the call, which the renderer already
-            // turned into a block when its `tool_start` arrived, so the
-            // whole transcript hangs off that block as one branch. An
-            // unknown id means the call's block never landed (a tool host
-            // that skipped its `tool_start`), and then the nested blocks
-            // fall back to appending where any other block would.
-            const parent = toolBlocks.get(event.tool);
-            nestStack.push(parent ?? null);
-            resetStreaming();
-          } else if (event.type === "unnest") {
-            nestStack.pop();
-            resetStreaming();
-          } else if (event.type === "error") {
-            failure = event.message;
+            case "nest": {
+              // A subagent's run started inside one of this run's tool
+              // calls; everything it streams until `unnest` belongs under
+              // that call's block. The wire id names the call, which the
+              // renderer already turned into a block when its `tool_start`
+              // arrived, so the whole transcript hangs off that block as one
+              // branch. An unknown id means the call's block never landed (a
+              // tool host that skipped its `tool_start`), and then the
+              // nested blocks fall back to appending where any other block
+              // would.
+              const parent = toolBlocks.get(event.tool);
+              nestStack.push(parent ?? null);
+              resetStreaming();
+              break;
+            }
+            case "unnest": {
+              nestStack.pop();
+              resetStreaming();
+              break;
+            }
+            case "error": {
+              failure = event.message;
+              break;
+            }
+            case "done": {
+              // The run is over; `await done` below settles the promise.
+              // Nothing is materialized from the terminal event itself.
+              break;
+            }
+            default: {
+              // Unreachable while every variant has a case above. The
+              // assignment is what makes a missing one a compile error.
+              const unhandled: never = event;
+              void unhandled;
+            }
           }
         },
       );
