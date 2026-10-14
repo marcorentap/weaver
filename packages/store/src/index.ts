@@ -133,15 +133,34 @@ export function openStore(options: StoreOptions = {}): Store {
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   } else if (version !== SCHEMA_VERSION) {
     // A database from an older schema is migrated forward, not rejected.
-    // The current migration adds `hidden` to `block`; anything older
-    // predates it, so one ALTER TABLE brings every stored block forward
-    // as visible.
-    if (version < 6) {
-      db.exec("ALTER TABLE block ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0");
-    } else {
+    // Each step knows only how to reach the next version, so adding a column
+    // later is one entry in this map rather than another branch of a nested
+    // `if`. A step that is missing for a version below the current one is a
+    // hard error, not a skip: stamping `user_version` on a database partway
+    // through the chain would leave it claiming to be current while missing
+    // a table or column, and the failure would surface later as an opaque
+    // SQL error on an unrelated query. A database newer than this build
+    // cannot be read safely either, so it is refused rather than guessed at.
+    const migrations: Record<number, () => void> = {
+      // Version 6 added `block.hidden`; rows from before read as visible.
+      6: () =>
+        db.exec(
+          "ALTER TABLE block ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
+        ),
+    };
+    if (version > SCHEMA_VERSION) {
       throw new Error(
-        `store at ${path} has schema version ${version}, expected ${SCHEMA_VERSION}`,
+        `store at ${path} has schema version ${version}, newer than this build's ${SCHEMA_VERSION}`,
       );
+    }
+    for (let target = version + 1; target <= SCHEMA_VERSION; target++) {
+      const step = migrations[target];
+      if (!step) {
+        throw new Error(
+          `store at ${path} has schema version ${version}, which this build cannot migrate forward: no migration to version ${target}`,
+        );
+      }
+      step();
     }
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   }
