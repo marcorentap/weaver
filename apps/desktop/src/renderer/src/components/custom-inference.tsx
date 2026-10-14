@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { THINKING_LEVEL_OPTIONS } from "@/lib/settings";
+import { ON_OFF_OPTIONS, THINKING_LEVEL_OPTIONS } from "@/lib/settings";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
@@ -33,12 +33,6 @@ export type CustomInferenceRun = {
   noThemes?: boolean;
   noContextFiles?: boolean;
 };
-
-/** On/off choice the discovery rows use, mirroring the settings page. */
-const ON_OFF_OPTIONS = [
-  { value: "on", label: "On" },
-  { value: "off", label: "Off" },
-] as const;
 
 /**
  * A settings-style row inside the dialog: a label column on the left and a

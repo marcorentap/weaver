@@ -4,6 +4,7 @@ import {
   LINE_NUMBER_OPTIONS,
   MAX_FONT_SIZE,
   MIN_FONT_SIZE,
+  ON_OFF_OPTIONS,
   THINKING_LEVEL_OPTIONS,
   useSettings,
   WORD_WRAP_OPTIONS,
@@ -266,12 +267,6 @@ function commitEdit(def: EditableSettingDef, raw: string) {
     def.onChange(raw);
   }
 }
-
-/** On/off choice used by the option toggles. */
-const ON_OFF_OPTIONS = [
-  { value: "off", label: "Off" },
-  { value: "on", label: "On" },
-] as const;
 
 /** OpenRouter's key usage, as a markdown table for the "info" row under
  *  the AI provider credentials. Credits are USD, 1:1. The key's own

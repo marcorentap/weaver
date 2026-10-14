@@ -31,6 +31,14 @@ export const WORD_WRAP_OPTIONS = [
   { value: "on", label: "On" },
 ] as const satisfies readonly { value: WordWrapMode; label: string }[];
 
+/** The on/off choice the boolean toggles offer — the discovery rows in the
+ *  settings page and their mirror in the `X` dialog. One definition, so the
+ *  two cannot drift apart in order or labels the way they had. */
+export const ON_OFF_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "on", label: "On" },
+] as const;
+
 /**
  * The reasoning-effort choices the "Inference settings" and
  * "Summarization settings" sections (and the `X` / `S` dialogs) offer:
