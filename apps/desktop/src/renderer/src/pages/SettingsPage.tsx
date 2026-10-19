@@ -340,6 +340,35 @@ export default function SettingsPage() {
    *  collapsed group in chat (they keep no gutter number and no cursor). */
   const [closed, setClosed] = useState<ReadonlySet<string>>(() => new Set());
 
+  /** Whether a conversation export is in flight: the row's button is
+   *  disabled while it is, so a second picker can't open over the first. */
+  const [exporting, setExporting] = useState(false);
+  /** How the last export ended, shown under the button. A canceled dialog
+   *  says nothing at all — the user chose to stop, which needs no report. */
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const exportConversations = async () => {
+    setExporting(true);
+    try {
+      const result = await window.api.export.conversations();
+      if (result.canceled) return;
+      setExportNotice(
+        result.error
+          ? `Export failed: ${result.error}`
+          : `Exported ${result.conversations} ${
+              result.conversations === 1 ? "conversation" : "conversations"
+            } to ${result.path}${
+              result.skipped > 0
+                ? `. ${result.skipped} could not be read and ${
+                    result.skipped === 1 ? "was" : "were"
+                  } left out.`
+                : ""
+            }`,
+      );
+    } finally {
+      setExporting(false);
+    }
+  };
+
   /** Loaded plugins and their saved setting values. Loaded once, at app
    *  start, into the global plugins store — every Settings pane reads the
    *  same already-fetched data instead of re-running `plugins:list` plus a
@@ -765,6 +794,30 @@ export default function SettingsPage() {
         defs.push(pluginSettingDef(plugin, field, plugin.id, index));
       });
     }
+  }
+
+  // The last section on the page, and the only one that writes somewhere
+  // other than the store: every conversation leaves as one `.jsonl` file of
+  // turns (role and content, the same view a run over that session reads),
+  // zipped together. The export is a snapshot, so nothing here is a setting
+  // and nothing it touches changes.
+  defs.push({
+    kind: "action",
+    key: "export.conversations",
+    label: "Conversations",
+    description:
+      "Every session as one JSONL file of turns, in a zip, at a path you pick.",
+    section: "Export",
+    actionLabel: exporting ? "Exporting…" : "Export",
+    disabled: exporting,
+    onRun: () => void exportConversations(),
+  });
+  if (exportNotice !== null) {
+    defs.push({
+      kind: "info",
+      key: "export.notice",
+      content: exportNotice,
+    });
   }
 
   /** Fold or unfold a section. Its key is the group's identity: the

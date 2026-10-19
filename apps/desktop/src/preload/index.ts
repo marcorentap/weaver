@@ -6,6 +6,7 @@ import type {
 import type {
   CheckResult,
   CreateSessionResult,
+  ExportResult,
   HindsightRetainResult,
   LinkMaterial,
   LinkOption,
@@ -91,6 +92,10 @@ const api: WeaverApi = {
       ipcRenderer.invoke("links:materials", text, pwd) as Promise<
         LinkMaterial[]
       >,
+  },
+  export: {
+    conversations: () =>
+      ipcRenderer.invoke("export:conversations") as Promise<ExportResult>,
   },
   hindsight: {
     retain: (content) =>

@@ -180,6 +180,22 @@ export interface HindsightRetainResult {
   error?: string;
 }
 
+/** Result of `export.conversations`: where the zip went, and how many
+ *  conversations it holds. A canceled dialog is not an error, so `canceled`
+ *  says nothing was written rather than the export failing. */
+export interface ExportResult {
+  canceled: boolean;
+  /** The chosen zip path, on success. */
+  path: string | null;
+  /** Conversations written, one `.jsonl` file each. */
+  conversations: number;
+  /** Conversations left out because a block kind they hold no longer loads
+   *  (a plugin removed from the plugins directory), so they could not be
+   *  snapshotted. Reported rather than silently dropped. */
+  skipped: number;
+  error: string | null;
+}
+
 /**
  * The renderer-facing API `contextBridge` exposes as `window.api`. Every
  * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair,
@@ -277,6 +293,12 @@ export interface WeaverApi {
      *  a relative `@file:` resolves where a run anchored there would resolve
      *  it; undefined leaves the resolution at the process's own project root. */
     materials(text: string, pwd?: string): Promise<LinkMaterial[]>;
+  };
+  export: {
+    /** Every conversation as one `.jsonl` file per session, zipped, at the
+     *  path the user picks in the save dialog. A canceled dialog comes back
+     *  with `canceled: true` rather than as an error. */
+    conversations(): Promise<ExportResult>;
   };
   hindsight: {
     /** Queue `content` for storage in the configured Hindsight memory bank,

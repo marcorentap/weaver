@@ -14,6 +14,7 @@ import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
 import { registerHindsightHandlers } from "./ipc/hindsight.js";
 import { registerLinkHandlers } from "./ipc/links.js";
+import { registerExportHandlers } from "./ipc/export.js";
 import { ensurePluginsLoaded } from "./lib/plugins.js";
 import { CHORD_LEADER_CHANNEL, swallowedCombo } from "../shared/keys.js";
 
@@ -172,6 +173,7 @@ void app.whenReady().then(async () => {
   registerPluginHandlers();
   registerHindsightHandlers();
   registerLinkHandlers();
+  registerExportHandlers();
 
   installApplicationMenu();
   createWindow();
