@@ -69,6 +69,7 @@ app is the per-run event channel.
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat`      | `loadGraph`, `saveGraph`, `createChatBlock`, `createChatSession`, `renameChatSession`, `duplicateChatSession`, `deleteChatSession`, `updateBlockField`, `updateBlockLabel`, `moveChatBlock`, `deleteChatBlock` |
 | `clipboard` | `paste`                                                                                                                                                                                                        |
+| `artifacts` | `adopt`, `pathForFile`                                                                                                                                                                                         |
 | `agent`     | `check`, `providerUsage`, `run:start`, `run:cancel`, `run:answer`                                                                                                                                              |
 | `settings`  | `get`, `set`                                                                                                                                                                                                   |
 | `plugins`   | `list`, `validate`                                                                                                                                                                                             |
@@ -77,6 +78,36 @@ app is the per-run event channel.
 
 Settings are opaque key and value rows. There is no allowlist and no validation;
 the shape of a setting is the business of whoever reads it.
+
+## Getting a file in
+
+Two gestures add a file to a session without an agent writing it: `ctrl+v` on
+the chat page (the clipboard) and a drag from a file manager onto the chat page
+(a drop). Both end the same way — a `media` block pointing at a copy in
+`~/.weaver/artifacts/<session id>/<uuid>.<ext>` — because a file added to a
+conversation belongs to the conversation, not to whatever directory the project
+happens to be, and the original can move or change under a block that merely
+pointed at it.
+
+Pasting is `clipboard:paste`: main reads the clipboard itself, writes an image
+as PNG (`NativeImage.toPNG()` is the one encoding every platform produces, so
+the extension is known rather than guessed from e.g. macOS's TIFF format), and
+hands back either the stored path or the clipboard's text, which the renderer
+writes as a `text` block instead.
+
+Dropping is not the clipboard, and a dropped `File` is not a path the renderer
+can read: `artifacts.pathForFile` is the preload's `webUtils.getPathForFile`,
+which reads back the path Chromium kept for the file the OS handed it, and
+`artifacts.adopt` copies that file into the session's directory. A directory, or
+a file over 512 MB, comes back as an error rather than a copy. Both paths
+register the new URI as pending media, so the block renders before autosave has
+stored a reference to it.
+
+The renderer drops a file anywhere over the chat page and it lands in the gap
+after the cursor — the same gap `o` inserts into. A document-level handler in
+`main.tsx` swallows file drops everywhere else, because Chromium's default for
+one is to navigate the window to the dropped file and lose the session on
+screen.
 
 The `chat` mutations all run through `rewrite(graphId, apply)`, which loads the
 whole graph, applies one pure tree operation from `@repo/core`, and writes it

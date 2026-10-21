@@ -1,9 +1,10 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AgentEvent,
   AgentRunRequest,
 } from "../shared/agent-events.js";
 import type {
+  AdoptArtifactResult,
   CheckResult,
   ClipboardPaste,
   CreateSessionResult,
@@ -30,6 +31,18 @@ import type { Position } from "@repo/core";
  * browser bundle.
  */
 const api: WeaverApi = {
+  artifacts: {
+    adopt: (sessionId, path) =>
+      ipcRenderer.invoke(
+        "artifacts:adopt",
+        sessionId,
+        path,
+      ) as Promise<AdoptArtifactResult>,
+    // The only way back from a dropped `File` to a path: the renderer has no
+    // Node, and `webUtils` reads the path Chromium kept for the file the OS
+    // handed it.
+    pathForFile: (file) => webUtils.getPathForFile(file),
+  },
   clipboard: {
     paste: (sessionId) =>
       ipcRenderer.invoke(

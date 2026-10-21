@@ -76,6 +76,20 @@ export type ClipboardPaste =
   | { kind: "image"; uri: string }
   | { kind: "text"; text: string };
 
+/**
+ * What happened to a file dragged in from outside the app. `uri` is the
+ * session artifact the file was copied to, in the same shape a media block's
+ * own `uri` takes; `error` says why it was refused (a directory, a file too
+ * large to copy, a path that could not be read) and is null otherwise. Both
+ * fields are nullable states rather than a discriminated union because the
+ * one caller treats a refusal as a message to show, not as a different kind
+ * of answer to handle.
+ */
+export interface AdoptArtifactResult {
+  uri: string | null;
+  error: string | null;
+}
+
 export interface ChatSessionSummary {
   id: string;
   name: string;
@@ -217,6 +231,16 @@ export interface ExportResult {
  * open-ended event stream.
  */
 export interface WeaverApi {
+  artifacts: {
+    /** Copies the file at `path` into `sessionId`'s artifacts directory and
+     *  returns the copy's path, for a block to point at. */
+    adopt(sessionId: string, path: string): Promise<AdoptArtifactResult>;
+    /** The filesystem path a dropped `File` came from. A bounce through the
+     *  preload because only that side may reach Electron's `webUtils`, and
+     *  only there is the `File` still the one the OS handed over. Empty for
+     *  a dropped thing that is not a file on this disk (a URL drag, say). */
+    pathForFile(file: File): string;
+  };
   clipboard: {
     /** The clipboard as something to insert into `sessionId`: an image
      *  written to that session's artifacts directory, text as copied, or

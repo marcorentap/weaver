@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 
 /**
  * Where files the app produces on a person's behalf land, one directory per
@@ -49,5 +49,52 @@ export async function writeSessionArtifact(
   await mkdir(dir, { recursive: true });
   const path = join(dir, `${randomUUID()}.${extension}`);
   await writeFile(path, bytes);
+  return path;
+}
+
+/**
+ * How large a file may be before adopting it is refused. The copy is the
+ * whole of the cost: a dropped 4 GB video would stall the app for minutes
+ * with nothing on screen to say why, and the artifact could not be previewed
+ * in any case. Refusing with a message is the better failure.
+ */
+const ADOPT_LIMIT = 512 * 1024 * 1024;
+
+/** The extension a copied file keeps: its own, when it has a sane one. An
+ *  extension is what makes the media protocol serve the copy as the kind of
+ *  thing it is, so it is taken from the file's own name rather than guessed
+ *  from its bytes. A name with nothing usable after the dot gets `bin`, which
+ *  the media kind renders as an unknown file — honest about not knowing what
+ *  it is, and still a block one can point a run at. */
+function artifactExtension(name: string): string {
+  const ext = extname(name).slice(1).toLowerCase();
+  return /^[a-z0-9]{1,12}$/.test(ext) ? ext : "bin";
+}
+
+/**
+ * Takes an outside file — one dragged in from a file manager — into the
+ * session's artifacts directory and returns the copy's absolute path, which
+ * is what a media block's `uri` holds.
+ *
+ * The file is copied rather than referenced. A drag is a person saying "this
+ * belongs to the conversation", and the original may be moved, renamed or
+ * empty itself out from under a block that merely pointed at it. A copy also
+ * keeps the media protocol's job simple: the source could be anywhere on the
+ * disk, while an artifact is a file the app made and can vouch for.
+ */
+export async function adoptSessionArtifact(
+  sessionId: string,
+  source: string,
+): Promise<string> {
+  const info = await stat(source);
+  if (!info.isFile()) throw new Error(`not a file: ${source}`);
+  if (info.size > ADOPT_LIMIT) {
+    const limit = ADOPT_LIMIT / 1024 / 1024;
+    throw new Error(`too large to copy in (over ${limit} MB)`);
+  }
+  const dir = sessionArtifactsDir(sessionId);
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, `${randomUUID()}.${artifactExtension(source)}`);
+  await copyFile(source, path);
   return path;
 }

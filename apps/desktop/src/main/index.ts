@@ -10,6 +10,7 @@ import {
 import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-protocol.js";
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerClipboardHandlers } from "./ipc/clipboard.js";
+import { registerArtifactHandlers } from "./ipc/artifacts.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
@@ -185,6 +186,7 @@ void app.whenReady().then(async () => {
   await ensurePluginsLoaded();
   registerChatHandlers();
   registerClipboardHandlers();
+  registerArtifactHandlers();
   registerAgentHandlers();
   registerSettingsHandlers();
   registerPluginHandlers();

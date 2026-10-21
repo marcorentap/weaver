@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type DragEvent, type ReactNode } from "react";
 import {
   useCallback,
   useEffect,
@@ -1006,6 +1006,25 @@ function ChatView({
   };
 
   /**
+   * The gap a paste or a drop lands in: right after the selected block, or
+   * before the first one when nothing is selected — the same gap `o` opens
+   * the kind picker on. Null (with the reason shown) when the gap sits inside
+   * a run's still-streaming append span, where nothing may be inserted.
+   *
+   * Shared by both insertion paths because they differ only in where the
+   * content came from; the position, the refusal and the way the new block is
+   * focused afterwards are the same.
+   */
+  const insertionGap = (): Position | null => {
+    const at = computeInsertion(rows, row ? index + 1 : 0);
+    if (at.afterId && engine.isLocked(at.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      return null;
+    }
+    return at;
+  };
+
+  /**
    * `ctrl+v`: the clipboard as a block, in the gap after the cursor (before
    * the first block when nothing is selected) — the same gap `o` inserts
    * into, minus the kind picker, since what to insert is decided by what was
@@ -1026,11 +1045,8 @@ function ChatView({
     setError(null);
     // Read before the await: the gap the cursor is in is where the paste
     // lands, whatever the graph does while main reads the clipboard.
-    const at = computeInsertion(rows, row ? index + 1 : 0);
-    if (at.afterId && engine.isLocked(at.afterId)) {
-      setError("can't insert here while a reply is still streaming in");
-      return;
-    }
+    const at = insertionGap();
+    if (!at) return;
     let pasted: ClipboardPaste | null;
     try {
       pasted = await window.api.clipboard.paste(session.id);
@@ -1067,6 +1083,92 @@ function ChatView({
     if (at.parentId) setOpen(at.parentId, true);
     setPendingFocus({ id: input.id, openActions: false });
   };
+
+  /**
+   * Files dropped in from a file manager. Each is taken into the session's
+   * artifacts directory (`~/.weaver/artifacts/<session>/<uuid>.<ext>`) by
+   * main and becomes one `media` block pointing at that copy, in the order
+   * they were dropped, each after the last so a multi-file drag reads in the
+   * order it was gathered.
+   *
+   * A copy rather than a reference: what was dragged in is something the
+   * person means the conversation to hold, and the original may be moved or
+   * rewritten under a block that merely pointed at it. The block is `media`
+   * rather than `text` whatever the file is, because the media kind already
+   * knows how to render every kind of file — picture, video, PDF, highlighted
+   * source — from the extension the copy kept.
+   *
+   * Every refusal is collected rather than aborting the batch: one unreadable
+   * file among five should not cost the other four their blocks.
+   */
+  const adoptDroppedFiles = async (files: File[]) => {
+    if (!session || files.length === 0) return;
+    setError(null);
+    const at = insertionGap();
+    if (!at) return;
+    let afterId = at.afterId;
+    let lastId: BlockId | null = null;
+    const refusals: string[] = [];
+    for (const file of files) {
+      // The renderer cannot read a `File`, so its path comes back through the
+      // preload; a drag that is not a file on this disk (a URL from a browser
+      // window, say) has none, and there is nothing to copy.
+      const path = window.api.artifacts.pathForFile(file);
+      if (!path) {
+        refusals.push(`${file.name}: not a file on this disk`);
+        continue;
+      }
+      const adopted = await window.api.artifacts.adopt(session.id, path);
+      if (!adopted.uri) {
+        refusals.push(
+          `${file.name}: ${adopted.error ?? "could not be copied in"}`,
+        );
+        continue;
+      }
+      const input: BlockInput = {
+        id: crypto.randomUUID(),
+        kind: MEDIA_KIND,
+        // The file's own name, not the artifact's uuid, so the row says what
+        // the person dropped rather than what the copy happens to be called.
+        label: file.name,
+        createdAt: Date.now(),
+        data: { uri: adopted.uri },
+      };
+      const position: Position = { parentId: at.parentId, afterId };
+      const result = await window.api.chat.createChatBlock(
+        session.id,
+        input,
+        position,
+      );
+      if (result.error) {
+        refusals.push(`${file.name}: ${result.error}`);
+        continue;
+      }
+      engine.addBlock(blockFromInput(input), position);
+      afterId = input.id;
+      lastId = input.id;
+    }
+    if (lastId) {
+      if (at.parentId) setOpen(at.parentId, true);
+      setPendingFocus({ id: lastId, openActions: false });
+    }
+    if (refusals.length > 0) setError(refusals.join("; "));
+  };
+
+  /** Whether a drag carries files at all. A drag of selected text is left to
+   *  the DOM; only a file drag is the app's to handle. */
+  const dragCarriesFiles = (event: DragEvent) =>
+    event.dataTransfer.types.includes("Files");
+
+  /**
+   * `dragenter`/`dragleave` fire again for every element the pointer crosses
+   * inside the page, so a plain boolean would flicker off mid-drag. Counting
+   * entries and exits is the standard fix: the page is a drop target until
+   * the depth returns to zero. A drop resets the count outright rather than
+   * decrementing it, since the exits that follow a drop are not guaranteed.
+   */
+  const dropDepth = useRef(0);
+  const [dropping, setDropping] = useState(false);
 
   /** The chain a container holds, in order. The top-level chain for null. */
   const siblingsOf = (containerId: BlockId | null) =>
@@ -2392,7 +2494,41 @@ function ChatView({
   ];
 
   return (
-    <div ref={listRef} className="flex min-h-full flex-col">
+    <div
+      ref={listRef}
+      className="relative flex min-h-full flex-col"
+      // The page is the drop surface: a file let go anywhere over the chat
+      // lands as a block at the cursor, the same place `ctrl+v` puts one.
+      // `dragover` is the event that decides whether a drop is allowed at
+      // all — without a `preventDefault` here the browser refuses the drop
+      // and never fires it — so it carries the `copy` cursor too, saying
+      // what letting go will do. Whether the drag is ours to take is asked
+      // of its types, so dragging selected text within the page is left
+      // alone.
+      onDragEnter={(event) => {
+        if (!dragCarriesFiles(event)) return;
+        event.preventDefault();
+        dropDepth.current += 1;
+        setDropping(true);
+      }}
+      onDragOver={(event) => {
+        if (!dragCarriesFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(event) => {
+        if (!dragCarriesFiles(event)) return;
+        dropDepth.current = Math.max(0, dropDepth.current - 1);
+        if (dropDepth.current === 0) setDropping(false);
+      }}
+      onDrop={(event) => {
+        if (!dragCarriesFiles(event)) return;
+        event.preventDefault();
+        dropDepth.current = 0;
+        setDropping(false);
+        void adoptDroppedFiles([...event.dataTransfer.files]);
+      }}
+    >
       <ShellHeader>
         <header className="flex items-center gap-3 border-b px-3 py-1">
           <span className="font-semibold">Chat</span>
@@ -2417,6 +2553,16 @@ function ChatView({
           )}
         >
           {memoryFeedback.text}
+        </div>
+      ) : null}
+
+      {dropping ? (
+        // Positioned against the page rather than the window, so a pane
+        // showing chat says only that pane takes the drop.
+        <div className="pointer-events-none absolute inset-0 z-50 flex items-start justify-center bg-background/40 pt-16 ring-2 ring-inset ring-ring">
+          <span className="rounded border bg-background px-3 py-1 text-sm shadow-sm">
+            Drop to add as a block
+          </span>
         </div>
       ) : null}
 

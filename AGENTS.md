@@ -14,7 +14,7 @@ apps/desktop/src/
   main/            Electron main process (owns disk, SQLite, subprocesses)
     index.ts       entry; windows, protocol registration
     agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
-    ipc/           one file per IPC group: agent, chat, export, links, media-protocol, plugins, settings, hindsight
+    ipc/           one file per IPC group: agent, artifacts, chat, clipboard, export, links, media-protocol, plugins, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
                    read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
                    context-wire.ts (graph → provider payload), model-vision.ts (does the model take images)
