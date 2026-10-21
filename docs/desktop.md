@@ -74,6 +74,7 @@ app is the per-run event channel.
 | `settings`  | `get`, `set`                                                                                                                                                                                                   |
 | `plugins`   | `list`, `validate`                                                                                                                                                                                             |
 | `links`     | `types`, `search`, `materials`                                                                                                                                                                                 |
+| `export`    | `conversations`, `jsonl`                                                                                                                                                                                       |
 | `hindsight` | `retain`                                                                                                                                                                                                       |
 
 Settings are opaque key and value rows. There is no allowlist and no validation;
@@ -113,6 +114,21 @@ The `chat` mutations all run through `rewrite(graphId, apply)`, which loads the
 whole graph, applies one pure tree operation from `@repo/core`, and writes it
 back. Errors come back as `{ error: schemaMessage(...) }` rather than as a
 rejection, so the renderer can show which field was wrong.
+
+## Export
+
+A conversation exports as JSONL: one object per turn, in graph order, carrying
+the role each block's kind already gives it. `shared/conversation-jsonl.ts`
+builds it with `messagesOfGraph`, the same view a run over the session reads, so
+what lands on disk is what the model saw rather than a second interpretation of
+the blocks. Pictures travel as the URIs they were stored as; an export cannot
+carry a local file's bytes but it can name them.
+
+`export:conversations` zips every session, one `.jsonl` each.
+`export:jsonl` writes a single one where the user picks, and takes the text from
+the renderer rather than reading the store: the chat page's live graph is what
+the user is looking at, including edits autosave has not reached and sessions
+that have no row yet.
 
 `agent:check` probes the endpoint's model listing, which is how the app knows
 what a provider offers, and `agent:providerUsage` reads OpenRouter's key

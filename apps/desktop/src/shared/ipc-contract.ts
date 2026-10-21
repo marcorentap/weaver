@@ -222,6 +222,15 @@ export interface ExportResult {
   error: string | null;
 }
 
+/** Result of `export.jsonl`: where the single file went. Same shape as
+ *  `ExportResult` minus the counts an archive needs. */
+export interface ExportFileResult {
+  canceled: boolean;
+  /** The chosen `.jsonl` path, on success. */
+  path: string | null;
+  error: string | null;
+}
+
 /**
  * The renderer-facing API `contextBridge` exposes as `window.api`. Every
  * `chat.*` method is a one-shot `ipcRenderer.invoke` request/response pair,
@@ -341,6 +350,11 @@ export interface WeaverApi {
      *  path the user picks in the save dialog. A canceled dialog comes back
      *  with `canceled: true` rather than as an error. */
     conversations(): Promise<ExportResult>;
+    /** One session's JSONL, written where the user picks. `text` is built by
+     *  the renderer from the live graph (see `conversationJsonl`), so what
+     *  lands on disk is what the chat page is showing, unsaved edits and all.
+     *  `name` is the save dialog's suggested file name. */
+    jsonl(text: string, name: string): Promise<ExportFileResult>;
   };
   hindsight: {
     /** Queue `content` for storage in the configured Hindsight memory bank,

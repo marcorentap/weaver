@@ -35,6 +35,7 @@ import type {
   LoadGraphResult,
 } from "@shared/ipc-contract.js";
 import { newSessionTitle } from "@shared/session-title.js";
+import { conversationJsonl } from "@shared/conversation-jsonl.js";
 import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -662,16 +663,30 @@ function ChatView({
   /** True while the memory menu's `r` retain is writing to the Hindsight
    *  server: the row is disabled, so a second press can't double-queue. */
   const [retaining, setRetaining] = useState(false);
-  /** The memory menu's one-shot outcome, a transient banner under the
-   *  header. Success confirms which bank the item went to; failure carries
-   *  the server's (or a misconfiguration's) reason. */
-  const [memoryFeedback, setMemoryFeedback] = useState<{
+  /** A one-shot outcome from a menu action — a retain to memory, an export
+   *  — shown as a transient banner under the header. Success says what
+   *  happened; failure carries the reason. */
+  const [menuFeedback, setMenuFeedback] = useState<{
     tone: "ok" | "error";
     text: string;
   } | null>(null);
-  /** Clears `memoryFeedback` after its lapse, so a later action never
+  /** Clears `menuFeedback` after its lapse, so a later action never
    *  inherits the previous retain's banner. */
-  const memoryTimerRef = useRef<number | null>(null);
+  const menuTimerRef = useRef<number | null>(null);
+  /** Show `text` under the header for a few seconds. Every menu action that
+   *  reports an outcome goes through here: one banner and one timer, so two
+   *  actions in a row cannot leave the earlier line behind. */
+  const flashMenu = (tone: "ok" | "error", text: string) => {
+    if (menuTimerRef.current !== null) {
+      window.clearTimeout(menuTimerRef.current);
+    }
+    setMenuFeedback({ tone, text });
+    menuTimerRef.current = window.setTimeout(() => setMenuFeedback(null), 4000);
+  };
+  /** True while the session menu's `e` export is waiting on the save dialog
+   *  or the write: the row is disabled, so a second press cannot open a
+   *  second picker over the first. */
+  const [exportingSession, setExportingSession] = useState(false);
   const [error, setError] = useState<string | null>(null);
   /** Where a pending "new block" flow will land, chosen before the kind and
    *  label are; `pendingKind` is the kind picked in the step after. */
@@ -1857,9 +1872,9 @@ function ChatView({
   const retainMemory = async () => {
     if (retaining) return;
     setPopup(null);
-    setMemoryFeedback(null);
-    if (memoryTimerRef.current !== null) {
-      window.clearTimeout(memoryTimerRef.current);
+    setMenuFeedback(null);
+    if (menuTimerRef.current !== null) {
+      window.clearTimeout(menuTimerRef.current);
     }
     const selected =
       visualAnchor === null
@@ -1891,13 +1906,12 @@ function ChatView({
         ? messagesOfGraph(graph, kinds)
         : messagesOfBlocks(graph, scope, kinds);
     if (messages.length === 0) {
-      setMemoryFeedback({
-        tone: "error",
-        text:
-          scope === null
-            ? "session is empty, nothing to retain"
-            : "selection is empty, nothing to retain",
-      });
+      flashMenu(
+        "error",
+        scope === null
+          ? "session is empty, nothing to retain"
+          : "selection is empty, nothing to retain",
+      );
       return;
     }
     // The bank takes text, not a conversation, so each turn is written out
@@ -1919,24 +1933,56 @@ function ChatView({
     setRetaining(true);
     try {
       const result = await window.api.hindsight.retain(payload);
-      setMemoryFeedback(
+      flashMenu(
+        result.ok ? "ok" : "error",
         result.ok
-          ? { tone: "ok", text: `retained to memory bank "${result.bank}"` }
-          : { tone: "error", text: result.error ?? "retain failed" },
+          ? `retained to memory bank "${result.bank}"`
+          : (result.error ?? "retain failed"),
       );
     } catch (error) {
-      setMemoryFeedback({
-        tone: "error",
-        text: error instanceof Error ? error.message : "retain failed",
-      });
+      flashMenu(
+        "error",
+        error instanceof Error ? error.message : "retain failed",
+      );
     } finally {
       setRetaining(false);
-      // The banner is transient; let it lapse so a later action doesn't read
-      // as if it belonged to this one.
-      memoryTimerRef.current = window.setTimeout(
-        () => setMemoryFeedback(null),
-        4000,
+    }
+  };
+
+  /**
+   * The session menu's `e`: write the open session out as JSONL, at a path
+   * the user picks. The text comes from the live graph rather than the
+   * store, so it is exactly what is on screen — unsaved edits included — and
+   * a session that has never been written still exports.
+   *
+   * The file is named after the session id, the same name the archive uses
+   * for the same conversation (`main/ipc/export.ts`), so one session has one
+   * identity on disk however it was exported.
+   */
+  const exportSession = async () => {
+    if (!session || exportingSession) return;
+    setPopup(null);
+    setExportingSession(true);
+    try {
+      const result = await window.api.export.jsonl(
+        conversationJsonl(graph, kinds),
+        `weaver-ses-${session.id}.jsonl`,
       );
+      // A cancelled dialog says nothing: the user chose to stop.
+      if (result.canceled) return;
+      flashMenu(
+        result.error ? "error" : "ok",
+        result.error
+          ? `export failed: ${result.error}`
+          : `exported to ${result.path}`,
+      );
+    } catch (error) {
+      flashMenu(
+        "error",
+        error instanceof Error ? error.message : "export failed",
+      );
+    } finally {
+      setExportingSession(false);
     }
   };
 
@@ -2416,6 +2462,13 @@ function ChatView({
             },
           },
           {
+            label: "Export session",
+            key: "e",
+            disabled: exportingSession,
+            detail: "JSONL",
+            run: () => void exportSession(),
+          },
+          {
             label: "Delete session",
             key: "d",
             destructive: true,
@@ -2543,16 +2596,16 @@ function ChatView({
         </header>
       </ShellHeader>
 
-      {memoryFeedback ? (
+      {menuFeedback ? (
         <div
           className={cn(
             "border-b px-3 py-1 text-sm",
-            memoryFeedback.tone === "error"
+            menuFeedback.tone === "error"
               ? "border-destructive/30 bg-destructive/10 text-destructive"
               : "border-emerald-400/30 bg-emerald-400/10 text-emerald-400",
           )}
         >
-          {memoryFeedback.text}
+          {menuFeedback.text}
         </div>
       ) : null}
 

@@ -1,43 +1,15 @@
 import { createWriteStream } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { unlink, writeFile } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import { BrowserWindow, dialog, ipcMain } from "electron";
 import { ZipFile } from "yazl";
-import {
-  messagesOfGraph,
-  type BlockGraph,
-  type KindRegistry,
-} from "@repo/core";
+import { conversationJsonl } from "../../shared/conversation-jsonl.js";
 import { getStore } from "../lib/store.js";
 import { loadedPlugins } from "../lib/plugins.js";
-import type { ExportResult } from "../../shared/ipc-contract.js";
-
-/**
- * A conversation as JSONL: one JSON object per turn, in graph order, with
- * the role each block's kind already gives it. This is the same view a run
- * over the session reads (`messagesOfGraph`), not a re-rendering of it, so
- * an exported conversation is what the model saw rather than a second
- * interpretation of the blocks that could disagree with the first. Hidden
- * blocks, kinds marked `context: false` (the environment block) and blank
- * turns contribute nothing, exactly as they contribute nothing to a run.
- *
- * Pictures travel as the URIs they were stored as, beside the text
- * description the snapshot already wrote: an export cannot carry the bytes
- * of a local file, but it can name them.
- */
-function conversationJsonl(graph: BlockGraph, registry: KindRegistry): string {
-  return (
-    messagesOfGraph(graph, registry)
-      .map((message) =>
-        JSON.stringify({
-          role: message.role,
-          content: message.content,
-          ...(message.images?.length ? { images: message.images } : {}),
-        }),
-      )
-      .join("\n") + "\n"
-  );
-}
+import type {
+  ExportFileResult,
+  ExportResult,
+} from "../../shared/ipc-contract.js";
 
 /** The file one conversation becomes: `weaver-ses-<id>.jsonl`.
  *
@@ -94,7 +66,11 @@ export function registerExportHandlers(): void {
       }
 
       const window = BrowserWindow.fromWebContents(event.sender);
-      const path = await savePath(window);
+      const path = await savePath(window, {
+        title: "Export conversations",
+        defaultPath: `weaver-conversations-${new Date().toISOString().slice(0, 10)}.zip`,
+        filters: [{ name: "Zip archive", extensions: ["zip"] }],
+      });
       if (path === null)
         return {
           canceled: true,
@@ -129,6 +105,42 @@ export function registerExportHandlers(): void {
       };
     },
   );
+
+  /**
+   * Writes one session's JSONL where the user picks, with no archive around
+   * it: a single conversation is a single file.
+   *
+   * The text arrives already built from the renderer's live graph, because
+   * that is what the user is looking at — it may hold edits the store has not
+   * autosaved yet, and a fresh session may have no row there at all. The
+   * renderer owns the blocks; the main process owns the filesystem.
+   */
+  ipcMain.handle(
+    "export:jsonl",
+    async (event, text: string, name: string): Promise<ExportFileResult> => {
+      const window = BrowserWindow.fromWebContents(event.sender);
+      const path = await savePath(window, {
+        title: "Export conversation",
+        defaultPath: name,
+        filters: [{ name: "JSON Lines", extensions: ["jsonl"] }],
+      });
+      if (path === null) return { canceled: true, path: null, error: null };
+      try {
+        await writeFile(path, text, "utf8");
+      } catch (error) {
+        // A half-written file must not be left behind looking complete, for
+        // the same reason the archive's is removed: the export is one
+        // document, not a partial one.
+        await unlink(path).catch(() => {});
+        return {
+          canceled: false,
+          path: null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      return { canceled: false, path, error: null };
+    },
+  );
 }
 
 /** Writes `entries` as a zip at `path`. Every entry is deflated and its
@@ -147,12 +159,14 @@ async function writeZip(
   await pipeline(archive.outputStream, createWriteStream(path));
 }
 
-async function savePath(window: BrowserWindow | null): Promise<string | null> {
-  const options = {
-    title: "Export conversations",
-    defaultPath: `weaver-conversations-${new Date().toISOString().slice(0, 10)}.zip`,
-    filters: [{ name: "Zip archive", extensions: ["zip"] }],
-  };
+async function savePath(
+  window: BrowserWindow | null,
+  options: {
+    title: string;
+    defaultPath: string;
+    filters: Electron.FileFilter[];
+  },
+): Promise<string | null> {
   const result = window
     ? await dialog.showSaveDialog(window, options)
     : await dialog.showSaveDialog(options);

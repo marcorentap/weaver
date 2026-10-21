@@ -8,6 +8,7 @@ import type {
   CheckResult,
   ClipboardPaste,
   CreateSessionResult,
+  ExportFileResult,
   ExportResult,
   HindsightRetainResult,
   LinkMaterial,
@@ -117,6 +118,12 @@ const api: WeaverApi = {
   export: {
     conversations: () =>
       ipcRenderer.invoke("export:conversations") as Promise<ExportResult>,
+    jsonl: (text, name) =>
+      ipcRenderer.invoke(
+        "export:jsonl",
+        text,
+        name,
+      ) as Promise<ExportFileResult>,
   },
   hindsight: {
     retain: (content) =>
