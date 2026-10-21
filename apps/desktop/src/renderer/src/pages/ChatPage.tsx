@@ -31,6 +31,7 @@ import {
 import type { BlockInput } from "@repo/store";
 import type {
   ChatSessionSummary,
+  ClipboardPaste,
   LoadGraphResult,
 } from "@shared/ipc-contract.js";
 import { newSessionTitle } from "@shared/session-title.js";
@@ -59,7 +60,7 @@ import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
 import { pwdForBlock, pwdForPosition } from "@/lib/env";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
-import { TOOL_KIND, USER_KIND } from "@plugins/rich-media";
+import { MEDIA_KIND, TOOL_KIND, USER_KIND } from "@plugins/rich-media";
 import { MULTICHOICE_KIND, multichoiceState } from "@plugins/user-input";
 
 /** Which modal popup, if any, sits above chat's normal mode. */
@@ -1004,6 +1005,69 @@ function ChatView({
     setPopup({ kind: "createUser" });
   };
 
+  /**
+   * `ctrl+v`: the clipboard as a block, in the gap after the cursor (before
+   * the first block when nothing is selected) — the same gap `o` inserts
+   * into, minus the kind picker, since what to insert is decided by what was
+   * copied rather than by the person. An image arrives from main already
+   * written to `~/.weaver/artifacts/<session>/` and becomes a `media` block
+   * pointing at that file; anything else that was copied becomes a `text`
+   * block holding it.
+   *
+   * A paste is a block rather than text typed into a message because every
+   * block is context: a pasted screenshot or stack trace reads above the
+   * message that follows it exactly like any other block, and can be moved,
+   * edited or deleted on its own. Pasting into the message editor is left to
+   * the browser's own paste — the keymap ignores keys pressed inside a text
+   * field — so `ctrl+v` there still fills the message.
+   */
+  const pasteBlock = async () => {
+    if (!session) return;
+    setError(null);
+    // Read before the await: the gap the cursor is in is where the paste
+    // lands, whatever the graph does while main reads the clipboard.
+    const at = computeInsertion(rows, row ? index + 1 : 0);
+    if (at.afterId && engine.isLocked(at.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      return;
+    }
+    let pasted: ClipboardPaste | null;
+    try {
+      pasted = await window.api.clipboard.paste(session.id);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    if (!pasted) {
+      setError("nothing on the clipboard to paste");
+      return;
+    }
+    const input: BlockInput =
+      pasted.kind === "image"
+        ? {
+            id: crypto.randomUUID(),
+            kind: MEDIA_KIND,
+            label: "pasted image",
+            createdAt: Date.now(),
+            data: { uri: pasted.uri },
+          }
+        : {
+            id: crypto.randomUUID(),
+            kind: TEXT_KIND,
+            label: "pasted text",
+            createdAt: Date.now(),
+            data: { text: pasted.text },
+          };
+    const result = await window.api.chat.createChatBlock(session.id, input, at);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    engine.addBlock(blockFromInput(input), at);
+    if (at.parentId) setOpen(at.parentId, true);
+    setPendingFocus({ id: input.id, openActions: false });
+  };
+
   /** The chain a container holds, in order. The top-level chain for null. */
   const siblingsOf = (containerId: BlockId | null) =>
     containerId === null
@@ -1299,6 +1363,11 @@ function ChatView({
             }
           }
         },
+      },
+      {
+        keys: ["ctrl+v"],
+        help: [{ keys: "ctrl+v", label: "Paste the clipboard as a block" }],
+        run: () => void pasteBlock(),
       },
       {
         keys: ["s"],

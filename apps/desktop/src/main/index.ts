@@ -9,6 +9,7 @@ import {
 } from "electron";
 import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-protocol.js";
 import { registerChatHandlers } from "./ipc/chat.js";
+import { registerClipboardHandlers } from "./ipc/clipboard.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
@@ -76,7 +77,22 @@ function installApplicationMenu(): void {
         { type: "separator" },
         { role: "cut" },
         { role: "copy" },
-        { role: "paste" },
+        {
+          role: "paste",
+          // The chat page binds `ctrl+v` to pasting the clipboard as a block,
+          // and an accelerator registered with the menu would take the key
+          // before the page's keydown could see it — the same theft that
+          // made Ctrl+R need its menu item removed. Unlike that one, paste
+          // cannot simply leave: the item is what pastes into a text field
+          // on macOS, and clicking it must keep working everywhere.
+          // `registerAccelerator: false` (Linux/Windows) splits the two: the
+          // item still shows and still pastes when clicked, while the key
+          // falls through to the page. Chromium's own editing commands still
+          // paste it into an input, which is where the keymap declines to act
+          // anyway. macOS has no such option, and without the registered
+          // accelerator Cmd+V pastes nowhere there, so it keeps the menu's.
+          ...(isMac ? {} : { registerAccelerator: false }),
+        },
         ...(isMac
           ? ([{ role: "pasteAndMatchStyle" }, { role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])
           : ([{ role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])),
@@ -168,6 +184,7 @@ void app.whenReady().then(async () => {
   // loaded plugin tools from the start.
   await ensurePluginsLoaded();
   registerChatHandlers();
+  registerClipboardHandlers();
   registerAgentHandlers();
   registerSettingsHandlers();
   registerPluginHandlers();

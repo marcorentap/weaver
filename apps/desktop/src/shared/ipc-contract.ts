@@ -64,6 +64,18 @@ export interface LinkMaterial {
   text: string;
 }
 
+/**
+ * What the clipboard held, as `ctrl+v` turns it into a block. An image has
+ * already been written to `~/.weaver/artifacts/<session>/` by the time this
+ * comes back — the renderer has no filesystem — so `uri` is the stored
+ * file's absolute path, the same shape a media block's own `uri` takes. Text
+ * arrives as it was copied; null, the paste method's other answer, means
+ * the clipboard held nothing pasteable.
+ */
+export type ClipboardPaste =
+  | { kind: "image"; uri: string }
+  | { kind: "text"; text: string };
+
 export interface ChatSessionSummary {
   id: string;
   name: string;
@@ -205,6 +217,12 @@ export interface ExportResult {
  * open-ended event stream.
  */
 export interface WeaverApi {
+  clipboard: {
+    /** The clipboard as something to insert into `sessionId`: an image
+     *  written to that session's artifacts directory, text as copied, or
+     *  null when there is neither. */
+    paste(sessionId: string): Promise<ClipboardPaste | null>;
+  };
   chat: {
     loadGraph(session?: string): Promise<LoadGraphResult>;
     deleteChatBlock(graphId: string, id: string): Promise<MutationResult>;

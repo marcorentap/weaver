@@ -22,6 +22,14 @@ redo. Swallowing it in `before-input-event` cannot fix this, because the
 `preventDefault` there also eats the page's own keydown, so the item is removed
 instead.
 
+The Edit menu's paste item stays, but on Linux and Windows it is built with
+`registerAccelerator: false`: the chat page binds `ctrl+v` to pasting the
+clipboard as a block, and a registered accelerator would take the key before the
+page's keydown saw it, exactly as reload did. The item still pastes when clicked,
+and Chromium's own editing commands still paste the key into a text field, which
+is where the keymap declines to act anyway. macOS keeps the accelerator
+registered, since without it Cmd+V pastes nowhere at all.
+
 `before-input-event` is used for something else: keys main has to take before
 the page sees them. `SWALLOWED_KEYS` in `shared/keys.ts` is that list (today
 just `ctrl+w`, the pane-splitting leader), and only the first press of a held
@@ -60,6 +68,7 @@ app is the per-run event channel.
 | Group       | Methods                                                                                                                                                                                                        |
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat`      | `loadGraph`, `saveGraph`, `createChatBlock`, `createChatSession`, `renameChatSession`, `duplicateChatSession`, `deleteChatSession`, `updateBlockField`, `updateBlockLabel`, `moveChatBlock`, `deleteChatBlock` |
+| `clipboard` | `paste`                                                                                                                                                                                                        |
 | `agent`     | `check`, `providerUsage`, `run:start`, `run:cancel`, `run:answer`                                                                                                                                              |
 | `settings`  | `get`, `set`                                                                                                                                                                                                   |
 | `plugins`   | `list`, `validate`                                                                                                                                                                                             |
@@ -146,6 +155,10 @@ renderer asks for it, which covers the moment before autosave writes the
 reference. `run-agent.ts` registers URIs from `display_media` and from any
 inline `![...](file://...)` markdown image the model writes itself, since
 without that an image written inline would 403 and silently fail to render.
+`ipc/clipboard.ts` does the same for an image pasted with `ctrl+v`: it writes the
+file to `~/.weaver/artifacts/<session id>/<uuid>.png` — outside the project, so
+the store-reference rule cannot cover the gap — and registers the path before
+the renderer has even been told it.
 
 ## Agent resources
 

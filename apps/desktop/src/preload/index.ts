@@ -5,6 +5,7 @@ import type {
 } from "../shared/agent-events.js";
 import type {
   CheckResult,
+  ClipboardPaste,
   CreateSessionResult,
   ExportResult,
   HindsightRetainResult,
@@ -29,6 +30,13 @@ import type { Position } from "@repo/core";
  * browser bundle.
  */
 const api: WeaverApi = {
+  clipboard: {
+    paste: (sessionId) =>
+      ipcRenderer.invoke(
+        "clipboard:paste",
+        sessionId,
+      ) as Promise<ClipboardPaste | null>,
+  },
   chat: {
     loadGraph: (session) =>
       ipcRenderer.invoke("chat:loadGraph", session) as Promise<LoadGraphResult>,
