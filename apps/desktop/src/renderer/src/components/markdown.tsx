@@ -8,6 +8,7 @@ import remarkMath from "remark-math";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import { mediaSrc, parseMediaUri } from "@/blocks/media";
+import { escapeCurrencyDollars } from "@/lib/markdown-source";
 import { useSettings } from "@/lib/settings";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +16,9 @@ import { cn } from "@/lib/utils";
  * Module-level so the pipeline is not rebuilt on every render. `remark-breaks`
  * turns a bare newline into `<br>`, matching a chat message's own line breaks
  * instead of CommonMark's "needs two"; `remark-math` picks `$...$` and
- * `$$...$$` out as math nodes for `rehype-katex` to render below.
+ * `$$...$$` out as math nodes for `rehype-katex` to render below. Money uses
+ * the same dollar sign, so the source is run through
+ * `escapeCurrencyDollars` first, or a price would come out set as a formula.
  */
 const REMARK_PLUGINS = [remarkGfm, remarkBreaks, remarkMath];
 
@@ -141,7 +144,7 @@ export function MarkdownText({
         rehypePlugins={REHYPE_PLUGINS}
         urlTransform={urlTransform}
       >
-        {text}
+        {escapeCurrencyDollars(text)}
       </Markdown>
     </div>
   );
