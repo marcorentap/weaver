@@ -90,11 +90,14 @@ conversation belongs to the conversation, not to whatever directory the project
 happens to be, and the original can move or change under a block that merely
 pointed at it.
 
-Pasting is `clipboard:paste`: main reads the clipboard itself, writes an image
-as PNG (`NativeImage.toPNG()` is the one encoding every platform produces, so
-the extension is known rather than guessed from e.g. macOS's TIFF format), and
-hands back either the stored path or the clipboard's text, which the renderer
-writes as a `text` block instead.
+Pasting is `clipboard:paste`: main reads the clipboard itself and hands back
+either the stored path or the clipboard's text, which the renderer writes as a
+`text` block instead. Electron 44's clipboard is MIME-based and asynchronous
+(`read()`/`readText()`, replacing the `readImage()` this first used), so an
+image is the `image/png` entry when the clipboard offers one and otherwise the
+first `image/*` entry — kept under the extension that type implies (a copied
+GIF stays a GIF), or re-encoded to PNG when the type is one the media kind has
+no viewer for, macOS's TIFF being the case that matters.
 
 Dropping is not the clipboard, and a dropped `File` is not a path the renderer
 can read: `artifacts.pathForFile` is the preload's `webUtils.getPathForFile`,
@@ -203,8 +206,8 @@ reference. `run-agent.ts` registers URIs from `display_media` and from any
 inline `![...](file://...)` markdown image the model writes itself, since
 without that an image written inline would 403 and silently fail to render.
 `ipc/clipboard.ts` does the same for an image pasted with `ctrl+v`: it writes the
-file to `~/.weaver/artifacts/<session id>/<uuid>.png` — outside the project, so
-the store-reference rule cannot cover the gap — and registers the path before
+file to `~/.weaver/artifacts/<session id>/<uuid>.<ext>` — outside the project,
+so the store-reference rule cannot cover the gap — and registers the path before
 the renderer has even been told it.
 
 ## Agent resources

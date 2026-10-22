@@ -110,6 +110,30 @@ function blockFromInput(input: BlockInput): Block {
   });
 }
 
+/** The block a clipboard paste becomes. Kept out of the component because
+ *  minting an id and stamping the creation time are side effects, and a
+ *  helper defined in render is one the purity rules have to treat as
+ *  reachable from it. */
+function pastedInput(pasted: ClipboardPaste): BlockInput {
+  const id = crypto.randomUUID();
+  const createdAt = Date.now();
+  return pasted.kind === "image"
+    ? {
+        id,
+        kind: MEDIA_KIND,
+        label: "pasted image",
+        createdAt,
+        data: { uri: pasted.uri },
+      }
+    : {
+        id,
+        kind: TEXT_KIND,
+        label: "pasted text",
+        createdAt,
+        data: { text: pasted.text },
+      };
+}
+
 function flatten(
   nodes: ChatNode[],
   expanded: ReadonlySet<BlockId>,
@@ -1073,22 +1097,7 @@ function ChatView({
       setError("nothing on the clipboard to paste");
       return;
     }
-    const input: BlockInput =
-      pasted.kind === "image"
-        ? {
-            id: crypto.randomUUID(),
-            kind: MEDIA_KIND,
-            label: "pasted image",
-            createdAt: Date.now(),
-            data: { uri: pasted.uri },
-          }
-        : {
-            id: crypto.randomUUID(),
-            kind: TEXT_KIND,
-            label: "pasted text",
-            createdAt: Date.now(),
-            data: { text: pasted.text },
-          };
+    const input = pastedInput(pasted);
     const result = await window.api.chat.createChatBlock(session.id, input, at);
     if (result.error) {
       setError(result.error);
