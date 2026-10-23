@@ -29,12 +29,20 @@ import type {
   SnapshotContext,
 } from "./kind";
 import { defineKind, kindRegistry } from "./kind";
-import type { ContextImage, ContextMessage } from "./messages";
+import type {
+  ContextImage,
+  ContextMessage,
+  ContextRole,
+  ContextToolCall,
+  WirePart,
+} from "./messages";
 import {
   messagesAbove,
   messagesOfBlock,
   messagesOfBlocks,
   messagesOfGraph,
+  transcriptAbove,
+  transcriptOfBlocks,
 } from "./messages";
 import type { GroupState, TextState } from "./kinds/text";
 import {
@@ -65,6 +73,8 @@ export type {
   CallbackSpec,
   ContextImage,
   ContextMessage,
+  ContextRole,
+  ContextToolCall,
   EnvState,
   GroupState,
   HookContext,
@@ -74,6 +84,7 @@ export type {
   Schedule,
   SnapshotContext,
   TextState,
+  WirePart,
 };
 export {
   assertTree,
@@ -112,5 +123,7 @@ export {
   textKind,
   textState,
   topLevelBlockIds,
+  transcriptAbove,
+  transcriptOfBlocks,
   WEAVER_PWD,
 };

@@ -15,11 +15,16 @@ import {
 import {
   WEAVER_PWD,
   type BlockData,
+  type ContextImage,
   type ContextMessage,
   type KindRegistry,
 } from "@repo/core";
 import type { PluginTool } from "@repo/plugins";
-import { MEDIA_KIND, parseMediaUri } from "@plugins/rich-media";
+import {
+  MEDIA_KIND,
+  parseMediaUri,
+  resolveMediaUri,
+} from "@plugins/rich-media";
 import { ASK_USER_TOOL } from "@plugins/user-input";
 import {
   ALLOWED_TOOLS,
@@ -35,7 +40,12 @@ import {
   readSource,
   type ReadImage,
 } from "./read-source.js";
-import { spliceContext, weaveContext } from "./context-wire.js";
+import {
+  NO_TOOL_OUTPUT,
+  SEE_ATTACHED_IMAGE,
+  spliceContext,
+  weaveContext,
+} from "./context-wire.js";
 import { modelTakesImages } from "./model-vision.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
@@ -231,6 +241,12 @@ const contentParts = z.object({
         text: z.string().optional(),
         thinking: z.string().optional(),
         mimeType: z.string().optional(),
+        // A `toolCall` part's own fields. Only its id is read, and only to
+        // learn which assistant message asked for a call (see
+        // `turnOfCall`); the arguments are read from the call's own event,
+        // where they arrive already parsed.
+        id: z.string().optional(),
+        name: z.string().optional(),
       }),
     )
     .optional(),
@@ -238,20 +254,69 @@ const contentParts = z.object({
   errorMessage: z.string().optional(),
 });
 
-/** Text of a tool result, joined. Image content is named rather than
- *  inlined because the bytes are already on disk and the browser has the
- *  path. */
+/** Text of a tool result, exactly as the provider will read it back.
+ *
+ * This is the `tool` message's `content` and nothing else, so the rule is
+ * pi's own (`convertMessages` in its openai-completions API): the text parts
+ * joined by a newline, or `(see attached image)` when the call produced
+ * only pictures, or `(no tool output)` when it produced nothing. Image bytes
+ * are not part of this string on the wire either — pi attaches them as a
+ * user message after the tool result — so naming them here would put words
+ * in the model's mouth that the run never sent, and a later run replaying
+ * this block would diverge from the run at exactly that message. */
 function resultText(result: unknown): string {
   const parsed = contentParts.safeParse(result);
-  if (!parsed.success) return "";
-  return (parsed.data.content ?? [])
-    .map((part) => {
-      if (part.type === "text") return part.text ?? "";
-      if (part.type === "image") return `[image ${part.mimeType ?? ""}]`;
-      return "";
-    })
-    .filter((text) => text.length > 0)
+  if (!parsed.success) return NO_TOOL_OUTPUT;
+  const parts = parsed.data.content ?? [];
+  const text = parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text ?? "")
+    .filter((part) => part.length > 0)
     .join("\n");
+  if (text.length > 0) return text;
+  return parts.some((part) => part.type === "image")
+    ? SEE_ATTACHED_IMAGE
+    : NO_TOOL_OUTPUT;
+}
+
+/**
+ * The pictures a tool result carried, as URIs, in wire order.
+ *
+ * A tool that hands the model a file records the file's address in its
+ * `details` rather than the bytes: the bytes are on disk, the request builder
+ * reads them there, and a graph that stored base64 would bloat every session
+ * with copies of files that already exist. The wire puts those pictures in a
+ * `user` turn after the `tool` message, so the block has to know they were
+ * there or a replay loses that turn.
+ *
+ * Read defensively, like everything else crossing the SDK boundary: a result
+ * with no `details`, or details in a shape this build does not know, means
+ * the call showed no picture.
+ */
+function resultImages(result: unknown): ContextImage[] {
+  const parsed = z
+    .object({
+      details: z
+        .object({
+          image: z.object({ uri: z.string(), mimeType: z.string() }).optional(),
+        })
+        .optional(),
+    })
+    .safeParse(result);
+  if (!parsed.success) return [];
+  const image = parsed.data.details?.image;
+  return image ? [image] : [];
+}
+
+/** The ids of the tool calls one finished assistant message asked for. They
+ *  are the wire's own names for the calls, and the only thing in the
+ *  transcript that says which calls went out in the same message. */
+function messageToolCallIds(message: unknown): string[] {
+  const parsed = contentParts.safeParse(message);
+  if (!parsed.success || parsed.data.role !== "assistant") return [];
+  return (parsed.data.content ?? []).flatMap((part) =>
+    part.type === "toolCall" && part.id ? [part.id] : [],
+  );
 }
 
 /**
@@ -264,10 +329,16 @@ function resultText(result: unknown): string {
 function messageText(message: unknown): string {
   const parsed = contentParts.safeParse(message);
   if (!parsed.success || parsed.data.role !== "assistant") return "";
-  return (parsed.data.content ?? [])
-    .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
-    .filter((text) => text.trim().length > 0)
-    .join("\n\n");
+  return (
+    (parsed.data.content ?? [])
+      .map((part) => (part.type === "text" ? (part.text ?? "") : ""))
+      .filter((text) => text.trim().length > 0)
+      // The parts of one assistant message are contiguous text; the wire joins
+      // them with nothing at all (`assistantText` in pi's request builder), so
+      // anything else here would come back from the graph as a different
+      // string than the one the model was sent.
+      .join("")
+  );
 }
 
 /** The model's reasoning from a finished message, on the same terms as
@@ -277,10 +348,16 @@ function messageText(message: unknown): string {
 function messageThinking(message: unknown): string {
   const parsed = contentParts.safeParse(message);
   if (!parsed.success || parsed.data.role !== "assistant") return "";
-  return (parsed.data.content ?? [])
-    .map((part) => (part.type === "thinking" ? (part.thinking ?? "") : ""))
-    .filter((text) => text.trim().length > 0)
-    .join("\n\n");
+  return (
+    (parsed.data.content ?? [])
+      .map((part) => (part.type === "thinking" ? (part.thinking ?? "") : ""))
+      .filter((text) => text.trim().length > 0)
+      // pi joins the thinking blocks of one assistant message with a newline
+      // before sending them as `reasoning_content`, so the graph has to hold
+      // the same join (see `joinReasoning` in `@repo/core`) — a blank line
+      // here would be a different `reasoning_content` on replay.
+      .join("\n")
+  );
 }
 
 /** The finish reasons that count as a normal end of a turn. Anything a
@@ -522,6 +599,11 @@ export async function runAgent(
     };
 
     const anchorImages = body.promptImages ?? [];
+    // The graph a run reads and writes, named by the renderer, so that every
+    // run over one transcript asks for the same cached host (see
+    // `cacheKeyFor` in `context-wire.ts`). The endpoint travels beside it so
+    // the key is only sent to the provider that documents the field.
+    const cacheKey = { key: body.cacheKey, baseUrl: body.endpoint };
     const wantsImages =
       anchorImages.length > 0 ||
       body.context.some((message) => (message.images?.length ?? 0) > 0);
@@ -560,7 +642,22 @@ export async function runAgent(
           // summarization defaults) overrides the hardcoded default; when
           // the request omits it, today's behavior is kept.
           maxTokens: body.maxTokens ?? 8192,
-          compat: tuning.compat,
+          // A model reached through an OpenRouter Anthropic route takes
+          // Anthropic-style `cache_control` breakpoints, and pi only places
+          // them when it can tell the provider is OpenRouter from the
+          // registered provider id. Ours is always `weaver`, so that
+          // detection never fires and the breakpoints are never placed —
+          // the request goes out with no marker at all and every turn bills
+          // its whole prefix as fresh input. Naming the convention here is
+          // what turns caching back on for the models that need an explicit
+          // marker, and does nothing for the ones that cache automatically.
+          compat: {
+            ...tuning.compat,
+            ...(body.providerId === "openrouter" &&
+            body.model.startsWith("anthropic/")
+              ? { cacheControlFormat: "anthropic" as const }
+              : {}),
+          },
           samplingParams: tuning.samplingParams,
         },
       ],
@@ -626,6 +723,7 @@ export async function runAgent(
           vision,
           cwd,
           anchorImages,
+          cacheKey,
         ),
       );
       try {
@@ -692,7 +790,7 @@ export async function runAgent(
         }),
         label: Type.String({ description: "Short label for the block" }),
       }),
-      execute: async (_toolCallId, params) => {
+      execute: async (toolCallId, params) => {
         const answer = (text: string) => ({
           content: [{ type: "text" as const, text }],
           details: {},
@@ -705,7 +803,25 @@ export async function runAgent(
         };
         const kind = ctx.kinds[MEDIA_KIND];
         if (!kind) throw new Error("media kind is not registered");
-        const state = { uri: params.uri };
+        // `attached` records that this block is what a `display_media` call
+        // produced, as opposed to a file someone pasted in or pointed at. It
+        // is the difference between a block that should replay as the call
+        // it came from and one that is simply material — and replaying the
+        // call is what keeps a later run's request a prefix of this one (see
+        // the media kind's `wire`). `turn` says which assistant message asked
+        // for it, so a call made alongside another in one message replays
+        // inside that message rather than as one of its own.
+        const turn = pendingArgs.get(toolCallId)?.turn;
+        // The call's arguments as they went out, for the same reason the turn
+        // is kept: the block replays as the call, and a key the model did not
+        // send is a call it never made.
+        const args = pendingArgs.get(toolCallId)?.args;
+        const state = {
+          uri: params.uri,
+          attached: true,
+          ...(turn === undefined ? {} : { turn }),
+          ...(args === undefined ? {} : { args }),
+        };
         try {
           // Validated here so the model is told what it got wrong while it
           // can still fix it, instead of the renderer rejecting the block
@@ -893,6 +1009,11 @@ export async function runAgent(
               parentToolId === undefined
                 ? undefined
                 : (messages) => spawnSubagent(messages, parentToolId, signal),
+            // The call as the wire carried it, for a tool whose block has to
+            // replay as this call rather than as a reading of its own state.
+            call: {
+              args: pendingArgs.get(toolCallId)?.args ?? JSON.stringify(args),
+            },
           });
           return {
             content: [{ type: "text" as const, text: result.content }],
@@ -906,6 +1027,17 @@ export async function runAgent(
     // branch, so both kinds of run and the media they attach agree on it.
 
     const settingsManager = createAgentSettings(cwd);
+    // Compaction off, deliberately, and this is the single most important
+    // line in the file for prompt caching. pi compacts by summarizing the
+    // conversation and replacing its history with the summary, which
+    // rewrites every token after the system prompt. A run that compacts
+    // therefore pays for its whole context again on the next turn, and so
+    // does every later run that replays the graph — which is all of them.
+    // Weaver already has a better answer to a context that has grown too
+    // large: the graph is editable, so a person deletes or summarizes what
+    // they no longer want, and that is a decision made once rather than a
+    // prefix thrown away in the middle of a run.
+    settingsManager.setCompactionEnabled(false);
     const resourceLoader = createAgentResourceLoader({
       cwd,
       settingsManager,
@@ -980,6 +1112,11 @@ export async function runAgent(
         const image = await readImage(params.path, cwd).catch(() => null);
         if (image) {
           const attached = image.data !== null && (await takesImages());
+          // The picture's own address, so the tool block can replay the
+          // `user` turn the wire put after this result. Null for a path that
+          // cannot be resolved — then the file cannot be re-read on replay
+          // either, and a URI pointing nowhere would be worse than none.
+          const uri = resolveMediaUri(params.path, cwd);
           return {
             content: [
               {
@@ -996,7 +1133,10 @@ export async function runAgent(
                   ]
                 : []),
             ],
-            details: {},
+            details:
+              attached && uri
+                ? { image: { uri, mimeType: image.mimeType } }
+                : {},
           };
         }
         let result;
@@ -1171,6 +1311,7 @@ export async function runAgent(
         vision,
         cwd,
         anchorImages,
+        cacheKey,
       );
     };
 
@@ -1179,8 +1320,19 @@ export async function runAgent(
     // wire id the `tool_start`/`tool_delta`/`tool` events share, a per-run
     // counter that is unique without depending on anyone's id scheme. A
     // tool block shows what was asked as well as what came back.
-    const pendingArgs = new Map<string, { id: string; args: string }>();
+    const pendingArgs = new Map<
+      string,
+      { id: string; args: string; turn?: string }
+    >();
     let nextToolId = 0;
+    // Which assistant message of this run asked for each tool call, keyed by
+    // the call's wire id. A param of the graph's own record, not of the
+    // model's: the block stores the answer so that a later run replaying this
+    // transcript can tell one message with three calls from three messages
+    // with one each — a difference the graph's order cannot show and the
+    // provider's cache cannot forgive. See `WirePart.toolCall.turn`.
+    const turnOfCall = new Map<string, string>();
+    let nextTurn = 0;
     // The SDK hands a streaming tool a full snapshot of its partial result
     // on every update, so the last one seen per call is kept here and
     // `tool_delta` ships only the growth.
@@ -1208,6 +1360,7 @@ export async function runAgent(
         const entry = {
           id: String(++nextToolId),
           args: JSON.stringify(sessionEvent.args ?? {}),
+          turn: turnOfCall.get(sessionEvent.toolCallId),
         };
         pendingArgs.set(sessionEvent.toolCallId, entry);
         // A successful `display_media`/`ask_user` already emits its own
@@ -1225,6 +1378,7 @@ export async function runAgent(
           id: entry.id,
           name: sessionEvent.toolName,
           args: entry.args,
+          ...(entry.turn === undefined ? {} : { turn: entry.turn }),
         });
         return;
       }
@@ -1256,6 +1410,16 @@ export async function runAgent(
         if (runFailure !== null) {
           // An errored turn has nothing to read, and may still be retried.
           return;
+        }
+        // A message that asked for tools is a turn of its own even when it
+        // said nothing (see `turnOfCall`). Numbering every such message, not
+        // only the ones whose calls run, would be harmless but for the retry
+        // above, where a failed turn's calls never execute: numbering only
+        // what reaches here keeps the numbers in transcript order.
+        const callIds = messageToolCallIds(sessionEvent.message);
+        if (callIds.length > 0) {
+          const turn = String(++nextTurn);
+          for (const id of callIds) turnOfCall.set(id, turn);
         }
         const thinking = messageThinking(sessionEvent.message);
         if (thinking) emit({ type: "thinking", text: thinking });
@@ -1303,6 +1467,9 @@ export async function runAgent(
           return;
         if (sessionEvent.toolName === ASK_USER_TOOL && !sessionEvent.isError)
           return;
+        const images = sessionEvent.isError
+          ? []
+          : resultImages(sessionEvent.result);
         emit({
           type: "tool",
           id: pending?.id ?? String(++nextToolId),
@@ -1310,7 +1477,10 @@ export async function runAgent(
           args: pending?.args ?? "",
           output: resultText(sessionEvent.result),
           ok: !sessionEvent.isError,
+          ...(pending?.turn === undefined ? {} : { turn: pending.turn }),
+          ...(images.length > 0 ? { images } : {}),
         });
+        turnOfCall.delete(sessionEvent.toolCallId);
       }
     });
 

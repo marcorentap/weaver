@@ -30,6 +30,14 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
  */
 const nestScope = { nest: z.string().optional() };
 
+/** One image a turn carries beside its text: the URI the run's own process
+ *  reads (http(s)://, file://, or a scheme-less path under the run's merged
+ *  `WEAVER_PWD`) and the mime type the block recognized it by. */
+export const contextImage = z.object({
+  uri: z.string(),
+  mimeType: z.string(),
+});
+
 /**
  * What one step of an agent run looks like on the wire.
  *
@@ -61,12 +69,17 @@ export const agentEvent = z.discriminatedUnion("type", [
   }),
   /** A tool call started. Opens the tool block so the call shows up while
    *  it runs, and gives the `tool_delta`/`tool` events that follow an `id`
-   *  to land in the same block with. */
+   *  to land in the same block with. `turn` is the assistant message that
+   *  asked for the call, as the run names it: opaque, stored on the block, and
+   *  read only when the graph is replayed for a later run — two calls that
+   *  share a turn were one message's `tool_calls`, and two that do not were
+   *  two messages. See `WirePart` in `@repo/core`. */
   z.object({
     type: z.literal("tool_start"),
     id: z.string(),
     name: z.string(),
     args: z.string(),
+    turn: z.string().optional(),
     ...nestScope,
   }),
   /** One incremental chunk of a running tool's output, in execution order.
@@ -79,7 +92,9 @@ export const agentEvent = z.discriminatedUnion("type", [
     text: z.string(),
     ...nestScope,
   }),
-  /** A finished tool call, with whatever it printed. */
+  /** A finished tool call, with whatever it printed. `turn` is as on
+   *  `tool_start`, and is what a call whose start was skipped still needs in
+   *  order to be replayed as part of the right assistant message. */
   z.object({
     type: z.literal("tool"),
     id: z.string(),
@@ -87,6 +102,12 @@ export const agentEvent = z.discriminatedUnion("type", [
     args: z.string(),
     output: z.string(),
     ok: z.boolean(),
+    turn: z.string().optional(),
+    /** Pictures the result carried, by URI — a `read` of an image on a model
+     *  that takes one. The wire sends them as a `user` turn after the result
+     *  rather than inside it, and the block keeps them so that a later run
+     *  can put that turn back. See `WirePart` in `@repo/core`. */
+    images: z.array(contextImage).optional(),
     ...nestScope,
   }),
   /** A media block the `display_media` tool created. `data` is validated
@@ -123,24 +144,35 @@ export const agentEvent = z.discriminatedUnion("type", [
 
 export type AgentEvent = z.infer<typeof agentEvent>;
 
-/** One image a turn carries beside its text: the URI the run's own process
- *  reads (http(s)://, file://, or a scheme-less path under the run's merged
- *  `WEAVER_PWD`) and the mime type the block recognized it by. */
-export const contextImage = z.object({
-  uri: z.string(),
-  mimeType: z.string(),
-});
-
 /** One turn of the graph context a run sends. See `ContextMessage` in
  *  `@repo/core` for how a block becomes one. */
 export const contextMessage = z.object({
-  role: z.enum(["user", "assistant", "developer"]),
+  role: z.enum(["user", "assistant", "developer", "tool"]),
   content: z.string(),
   /** Pictures the turn carries, for a run whose model takes them. The URI
    *  travels, never the bytes: the renderer has no filesystem, and the main
    *  process is the one that can read a file and build a data URL. Omitted
    *  when the turn has none to show. */
   images: z.array(contextImage).optional(),
+  /** The calls an `assistant` turn made, for a turn that came off a wire:
+   *  the provider's transcript is not prose, and replaying it as prose is
+   *  what kept a run's prefix from ever matching the run before it. See
+   *  `ContextToolCall` in `@repo/core`. */
+  toolCalls: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        args: z.string(),
+      }),
+    )
+    .optional(),
+  /** Which call a `tool` turn answers, matching a `toolCalls[].id` on the
+   *  assistant turn before it. */
+  toolCallId: z.string().optional(),
+  /** The reasoning a model produced before an `assistant` turn's text, where
+   *  the graph kept it. */
+  reasoning: z.string().optional(),
 });
 
 /** Request body of the `agent:run:start` IPC call. */
@@ -159,6 +191,13 @@ export const agentRunRequest = z.object({
    *  as the run's own `user` turn, after everything in `context`, so the
    *  block being run is always the thing being answered. */
   prompt: z.string(),
+  /** Which transcript this run belongs to, named by the renderer (the root
+   *  block of the graph it reads). Only ever sent to OpenAI, whose prompt
+   *  cache is keyed by content but routed by this: without it a long prefix
+   *  can be cached on one host and asked for on another, and the turn bills
+   *  in full for no visible reason. Omitted for a run with no session of its
+   *  own, such as a summarization. */
+  cacheKey: z.string().optional(),
   /** Pictures the anchoring block itself holds — a run started on an image
    *  block, with no text of its own but the description in `prompt`. They
    *  belong to the ask rather than to the material above it, so they ride on

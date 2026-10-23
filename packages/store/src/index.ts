@@ -25,6 +25,7 @@ const blockRowSchema = z.object({
   children_id: z.string().nullable(),
   data: z.string(),
   hidden: z.number().int(),
+  asked: z.number().int(),
 });
 
 const graphRowSchema = z.object({
@@ -71,6 +72,10 @@ export type BlockInput = {
   next?: BlockId | null;
   children?: BlockId | null;
   data?: BlockData;
+  /** Whether a run was ever anchored on this block with its own document as
+   *  the ask, which makes the block a `user` turn wherever it is read. See
+   *  `Block.asked` in `@repo/core`. */
+  asked?: boolean;
   /** Whether the block is hidden (kept in the graph, left out of the
    *  renderer and of agent context). Absent means visible, same as `false`. */
   hidden?: boolean;
@@ -147,6 +152,13 @@ export function openStore(options: StoreOptions = {}): Store {
         db.exec(
           "ALTER TABLE block ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
         ),
+      // Version 7 added `block.asked`; rows from before read as never asked,
+      // which is exactly what they are — no run in an older build recorded
+      // one, and reading them as asked would invent a user turn nobody sent.
+      7: () =>
+        db.exec(
+          "ALTER TABLE block ADD COLUMN asked INTEGER NOT NULL DEFAULT 0",
+        ),
     };
     if (version > SCHEMA_VERSION) {
       throw new Error(
@@ -174,21 +186,23 @@ export function openStore(options: StoreOptions = {}): Store {
   const insertGraph = db.prepare(
     "INSERT INTO graph (id, name, created_at, modified_at) VALUES (?, ?, ?, ?)",
   );
-  const touchGraph = db.prepare("UPDATE graph SET modified_at = ? WHERE id = ?");
+  const touchGraph = db.prepare(
+    "UPDATE graph SET modified_at = ? WHERE id = ?",
+  );
   const renameGraphStmt = db.prepare(
     "UPDATE graph SET name = ?, modified_at = ? WHERE id = ?",
   );
   const deleteGraphStmt = db.prepare("DELETE FROM graph WHERE id = ?");
 
   const selectBlocks = db.prepare(`
-    SELECT id, kind, label, created_at, modified_at, next_id, children_id, data, hidden
+    SELECT id, kind, label, created_at, modified_at, next_id, children_id, data, hidden, asked
     FROM block WHERE graph_id = ?
   `);
   const selectBlockIds = db.prepare("SELECT id FROM block WHERE graph_id = ?");
   const upsertBlock = db.prepare(`
     INSERT INTO block
-      (id, graph_id, kind, label, created_at, modified_at, next_id, children_id, data, hidden)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, graph_id, kind, label, created_at, modified_at, next_id, children_id, data, hidden, asked)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       kind = excluded.kind,
       label = excluded.label,
@@ -198,6 +212,7 @@ export function openStore(options: StoreOptions = {}): Store {
       children_id = excluded.children_id,
       data = excluded.data,
       hidden = excluded.hidden,
+      asked = excluded.asked,
       revision = block.revision + 1
   `);
   const deleteBlockStmt = db.prepare("DELETE FROM block WHERE id = ?");
@@ -222,6 +237,7 @@ export function openStore(options: StoreOptions = {}): Store {
         children: row.children_id,
         data: blockDataSchema.parse(JSON.parse(row.data)),
         hidden: row.hidden === 1,
+        asked: row.asked === 1,
       };
     }
     return { blocks, root: rootOf(blocks) };
@@ -304,6 +320,7 @@ export function openStore(options: StoreOptions = {}): Store {
             input.children ?? null,
             JSON.stringify(input.data ?? {}),
             input.hidden ? 1 : 0,
+            input.asked ? 1 : 0,
           );
         }
         touchGraph.run(now, graphId);

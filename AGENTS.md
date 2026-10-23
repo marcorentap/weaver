@@ -55,11 +55,16 @@ and running the app.
 
 Everything lives in `packages/core`.
 
-- `Block` = `{ id, kind, label, createdAt, modifiedAt, next, children, data, hidden? }`.
+- `Block` = `{ id, kind, label, createdAt, modifiedAt, next, children, data, hidden?, asked? }`.
   The graph is a binary tree used as a linked list of linked lists: `next` is
   the following sibling, `children` the first nested block. **Order is stored,
   never derived from timestamps.** `hidden` excludes a subtree from rendering,
-  snapshots, and merged environment, without deleting it.
+  snapshots, and merged environment, without deleting it. `asked` records that
+  a run was anchored on this block with its own document as the ask, which is
+  the one thing the kind cannot say: a run's ask is always a `user` message,
+  so a note or a reply someone ran on reads as a user turn afterward instead
+  of as `developer` material — otherwise a replay of that graph is a message
+  shorter than the request that produced it.
 - Tree operations (`insertBlock`, `moveBlock`, `removeBlock`, `positionOf`,
   `assertTree`, …) are pure `graph → graph` functions. Use them; never rewrite
   links by hand. `assertTree` is the invariant: one root, no loops, nothing
@@ -92,11 +97,33 @@ Everything lives in `packages/core`.
   comes back as an image content part when the model takes one, and as a line
   naming the file when it does not — never as the file's bytes read as text.
   Every run's
-  material goes through that same path — `messagesAbove` (the graph above a
+  material goes through that same path — `transcriptAbove` (the graph above a
   block), `messagesOfBlocks` (a summarization's targets), `messagesOfGraph`
   (the whole visible graph, for naming a session) — so a run over an explicit
   set of blocks reads its material with the roles the blocks already hold,
-  never as a flattened string. `@file:` and
+  never as a flattened string. `transcriptAbove` is `messagesAbove` with the
+  blocks that came off a wire put back in the shape they travelled in: a
+  `tool` block is not a `developer` paragraph about a call but the assistant
+  turn's `tool_calls` entry (`context-wire.ts` reads it as `wire`) answered by
+  a `tool` message quoting `call_n`, and an assistant turn keeps its
+  `reasoning`. That is what makes a new run's request a prefix of the run
+  before it, which is the only condition under which a provider's prefix cache
+  can hit at all; `messagesAbove` stays the document projection, for a block
+  read on its own. Call ids are minted per serialization
+  (`transcriptOfBlocks`) and pi's own are renamed to the same scheme
+  (`canonicalToolCallIds`) so the two sides agree. Two things a graph's order
+  cannot say are recorded on the block instead: `turn` names the assistant
+  message a call came from (a run names it from the message's own `tool_calls`
+  and the block keeps it), because one message with three calls and three
+  messages with one each look identical in the graph but are not the same
+  request, and reasoning is rejoined with a newline exactly as pi joins a
+  message's thinking blocks. `canonicalMessages` is the one shape both
+  directions write, applied last: a message's `content` is a string unless
+  something in it is not text, call ids are canonical, arguments are re-encoded
+  with sorted keys, and a conversation that carries reasoning at all gives
+  every assistant message a `reasoning_content` (empty where none was
+  recorded), which is what an endpoint that requires the field expects.
+  `@file:` and
   `@skill:` references a user message attaches are not sent with the run at
   all: main resolves them (`main/lib/links/material.ts`) and the renderer
   writes each one into the graph as a `text` block of its own, just above
@@ -112,7 +139,10 @@ Everything lives in `packages/core`.
   content parts when the model takes image input; omit for a kind with no
   picture), `turns` (the block as conversation, for a kind
   whose one block spans more than one speaker; omit for the ordinary single
-  turn of `role` + `snapshot`), `resume` (whether and how a run stopped on
+  turn of `role` + `snapshot`), `wire` (the block's form on the wire, where a
+  run should replay what happened instead of describing it: a tool call, with
+  the pictures its result carried, or reasoning that rides on the next
+  assistant turn; omit for a kind that never had one), `resume` (whether and how a run stopped on
   one of its blocks starts again; omit for a kind no run can be paused on),
   `hooks` (named async state→state functions),
   `callbacks` (declarative references to another block's hook), `schedule`
@@ -160,6 +190,29 @@ summarization) or creates a full pi session with our custom tools
   never on the first failed attempt.
 - `display_media` deliberately only turns a URI into a media block, so the model
   can't hand-write a kind's own fields.
+- Prompt caching is the reason the serialization is shaped the way it is, and
+  three things keep it working. Compaction is off
+  (`settingsManager.setCompactionEnabled(false)` in `run-agent.ts`): pi
+  compacts by summarizing a conversation and replacing its history, which
+  rewrites every token after the system prompt, so a run that compacts pays
+  for its whole context again and so does every later run replaying it. The
+  graph is the answer to a context that grew too large — a person deletes or
+  summarizes what they no longer want, once. `transcriptAbove` is what makes
+  a new run's request a prefix of the last one's; anything recorded as prose
+  instead of as the wire shape it came from breaks the prefix from that point
+  on. And the provider has to be told to cache: pi places Anthropic
+  `cache_control` breakpoints only when it can tell the provider is OpenRouter
+  from the registered id, and ours is always `weaver`, so `run-agent.ts` names
+  `compat.cacheControlFormat` itself for an OpenRouter Anthropic route;
+  OpenAI's `prompt_cache_key` is routed from the renderer's `cacheKey` (the
+  graph's root block) because a pi session id is new every run and would
+  scatter one conversation across hosts by design. `context-wire.ts` sends
+  that key only to the endpoint that documents the field. Two turns exist on
+  the wire that no block is, and both are rebuilt by `context-wire.ts`: the
+  pictures a tool result carried, which the wire puts in a `user` turn after
+  the `tool` message (one per run of consecutive results, as pi builds it),
+  and the ask itself, which is a `user` turn whatever kind the anchored block
+  belongs to (`block.asked`).
 - A tool can start another run inside its own call:
   `ctx.spawnAgent(messages)` (see `ToolRunContext`) runs a nested agent on
   the messages it is given, inheriting the spawning run's request (endpoint,

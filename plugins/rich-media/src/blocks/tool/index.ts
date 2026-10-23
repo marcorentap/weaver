@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ContextImage } from "@repo/core";
 import { defineKind } from "@repo/core";
 import { languageForPath } from "../../languages.ts";
 
@@ -22,6 +23,32 @@ export const toolState = z.object({
   /** False when the tool reported an error, which makes `output` the failure
    *  rather than a result. */
   ok: z.boolean(),
+  /**
+   * The assistant message of the run that made this call, as that run named
+   * it; omitted for a block written before this was recorded, and for a call
+   * whose run could not say.
+   *
+   * Two calls in a row in the graph look the same whether the model asked for
+   * both in one message or asked for one, read the result, and asked for the
+   * next. Only the run saw which, and the difference is the difference between
+   * a replayed request matching the one that was sent and matching nothing
+   * from that call on. It is opaque: nothing reads its value but the grouping,
+   * and it never reaches a provider. See `WirePart` in `@repo/core`.
+   */
+  turn: z.string().optional(),
+  /**
+   * The pictures this call's result carried, by URI, in the order the wire
+   * put them after the result.
+   *
+   * A tool that reads a picture hands the model the file itself, and the wire
+   * carries those bytes as a `user` turn after the `tool` message rather than
+   * inside it. Keeping the URIs — not the bytes, which stay on disk where
+   * they were — is what lets a replay put that turn back. Absent for every
+   * call that showed nothing, and for a block saved before it was kept.
+   */
+  images: z
+    .array(z.object({ uri: z.string(), mimeType: z.string() }))
+    .optional(),
 });
 export type ToolState = z.infer<typeof toolState>;
 
@@ -66,5 +93,22 @@ export const toolKind = defineKind({
       ? `${call}\n${state.output}`
       : `${call} error:\n${state.output}`;
   },
+  // The call as the provider saw it: an assistant message's `tool_calls`
+  // entry, answered by a `tool` message. `args` travels as the string it
+  // already is — it was captured from the wire, and re-encoding an object
+  // would not guarantee the same bytes, which is what a cache matches on.
+  // The result is `output` alone, without the `ok` marker or the call line:
+  // the wire's tool message is what the tool printed, and a failure is
+  // already inside that text.
+  wire: (state) => ({
+    wire: "toolCall",
+    name: state.name,
+    args: state.args,
+    result: state.output,
+    ...(state.turn === undefined ? {} : { turn: state.turn }),
+    ...(state.images?.length
+      ? { images: state.images.map((image): ContextImage => image) }
+      : {}),
+  }),
   defaults: { name: "", args: "", output: "", ok: true },
 });

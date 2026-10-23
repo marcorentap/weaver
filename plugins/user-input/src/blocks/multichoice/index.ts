@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ContextMessage } from "@repo/core";
 import { defineKind } from "@repo/core";
+import { ASK_USER_TOOL } from "../../tools/ask-user/index.ts";
 
 /**
  * A multiple-choice question the agent raised and the user answers in place,
@@ -50,6 +51,17 @@ export const multichoiceState = z.object({
    * hold is theirs to show, and only a run parked on one asks for the flag.
    */
   answered: z.boolean().default(false),
+  /**
+   * The arguments of the `ask_user` call that raised this question, as the
+   * request carried them; absent for a block written before they were kept,
+   * and for a question raised without a call behind it.
+   *
+   * Opacity is the point: the state below is the tool's reading of these
+   * arguments, scrubbed and defaulted, and a replay built from it is a call
+   * the model never made — which is a prompt cache lost from that call
+   * onward. Nothing reads this field but `wire`.
+   */
+  args: z.string().optional(),
 });
 export type MultichoiceState = z.infer<typeof multichoiceState>;
 
@@ -145,6 +157,51 @@ export const multichoiceKind = defineKind({
   snapshot: multichoiceSnapshot,
   turns: multichoiceTurns,
   resume: multichoiceResume,
+  // The question as the call that raised it, once it has been answered. A
+  // run that asked this question did it through `ask_user` — the assistant
+  // turn on the wire was a `tool_calls` entry, not a question spoken in
+  // prose — so a later request that reads this block as its document or as
+  // two turns describes something the provider never saw, and its prefix
+  // stops matching right here.
+  //
+  // Unanswered, there is no call to replay: the run that raised the
+  // question stopped inside it and sent nothing after, so what the block
+  // holds is a question the model that asked it should find on re-reading,
+  // which is what `turns` says better than a call whose result nobody has
+  // yet given it. Returning null is also what makes the block fall back to
+  // `turns` in `transcriptOfBlocks` — a kind may have both, and the wire is
+  // the more specific answer only when it has one.
+  //
+  // The arguments are the call's own, kept verbatim by `ask_user` (see
+  // `args` above), because the block's state is the tool's reading of those
+  // arguments and not the arguments themselves: the tool trims and
+  // deduplicates the options and drops blank ones, so a model that sent
+  // `["a", "a", ""]` produced a call the state cannot describe. Falling back
+  // on a reconstruction from the state keeps a block written before `args`
+  // existed replaying as something, which is better than nothing; it is not
+  // better than the call. Nothing here invents a field — the note and the
+  // `selected` picks are not the tool's parameters, they are the answer, and
+  // the answer travels as the call's result rather than as its arguments.
+  //
+  // The result is what the tool call came back with, which is not the answer
+  // alone: `ask_user` (see its `execute`) hands the model the answer under
+  // the line that says who is speaking, and the `tool` message on the wire is
+  // that whole string. Replaying only the bullets would leave the call
+  // answered with words nobody sent, and a request whose prefix stops
+  // matching at exactly this call. `answered` is why there is a result at all
+  // here — it is the single condition under which `multichoiceResume` returns
+  // text, which is what the walked run was released with.
+  wire: (state) => {
+    if (!state.answered) return null;
+    return {
+      wire: "toolCall",
+      name: ASK_USER_TOOL,
+      args:
+        state.args ??
+        JSON.stringify({ prompt: state.prompt, options: state.options }),
+      result: `the user answered:\n${multichoiceResume(state) ?? ""}`,
+    };
+  },
   defaults: {
     prompt: "",
     options: [],

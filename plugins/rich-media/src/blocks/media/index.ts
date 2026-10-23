@@ -200,6 +200,39 @@ export const mediaState = z.object({
         parseMediaUri(uri) !== null || (uri.length > 0 && !uri.includes("://")),
       { message: MEDIA_SCHEME_HINT },
     ),
+  /**
+   * Whether this block is what a `display_media` tool call produced, as
+   * opposed to a file a person pasted or pointed at. The difference is not
+   * in the file but in the block's past: a block the model asked for was a
+   * tool call on the wire, and a block someone attached never was, so only
+   * the former may replay as one (see `wire` below).
+   *
+   * Optional because every media block already saved in a session was
+   * written before this field existed. Those must keep parsing, and a
+   * missing flag has to mean exactly one thing — no call made this block —
+   * so that they keep reading as the material they are instead of
+   * pretending to be a call nobody can find in the transcript.
+   */
+  attached: z.boolean().optional(),
+  /**
+   * The assistant message of the run that made the call this block records,
+   * for a block a call produced. It says which calls belonged to one message
+   * — a model that asked for this picture and a `read` in the same turn sent
+   * one assistant message with two `tool_calls`, not two messages — and that
+   * grouping is part of what a replayed request has to reproduce. Opaque, and
+   * absent for the same reason `attached` is: a media block already saved
+   * was written before anyone recorded it, and a block nobody called has no
+   * message to belong to. See `WirePart` in `@repo/core`.
+   */
+  turn: z.string().optional(),
+  /**
+   * The arguments of the `display_media` call that produced this block, as
+   * the request carried them. Same reason as `turn` and `attached`: the
+   * block's own fields are a reading of that call, and a reading that gains
+   * or loses a key is a call the model never made. Absent for a block nobody
+   * called, and for one saved before it was kept.
+   */
+  args: z.string().optional(),
 });
 export type MediaState = z.infer<typeof mediaState>;
 
@@ -220,5 +253,35 @@ export const mediaKind = defineKind({
     const image = attachableImage(state.uri);
     return image ? [image] : [];
   },
+  // The call, for a block a call produced: on the wire this block was an
+  // assistant turn's `tool_calls` entry, answered by a `tool` message, so
+  // replaying it as prose instead is a request whose prefix stops matching
+  // the run that wrote it at that very block. Returning null for anything
+  // else is what keeps a pasted image or a linked file out of that past —
+  // nobody called a tool to produce it, so there is no call to reproduce,
+  // and the document `snapshot` writes is the whole of what it says.
+  //
+  // `ctx.block.label` is the call's `label` argument: `display_media` writes
+  // the model's own label straight onto the block it emits, so the block is
+  // the record of that argument and nothing else needs to have kept it.
+  //
+  // The result text is coupled to `display_media`'s reply, in `execute` in
+  // `apps/desktop/src/main/lib/run-agent.ts` (`added a media block for
+  // ${params.uri}`): a replayed transcript is only a prefix of the request
+  // the run actually sent if the `tool` message reads the same words, so
+  // changing the tool's wording and this one apart turns every media block
+  // into a cache miss from that call onward.
+  wire: (state, ctx) =>
+    state.attached
+      ? {
+          wire: "toolCall",
+          name: "display_media",
+          args:
+            state.args ??
+            JSON.stringify({ uri: state.uri, label: ctx.block.label }),
+          result: `added a media block for ${state.uri}`,
+          ...(state.turn === undefined ? {} : { turn: state.turn }),
+        }
+      : null,
   defaults: { uri: "file:///" },
 });

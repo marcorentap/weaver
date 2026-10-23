@@ -99,6 +99,19 @@ export type ToolRunContext = {
    * recurse.
    */
   spawnAgent?: (messages: ContextMessage[]) => Promise<string>;
+  /**
+   * The call this tool is executing, as it came off the wire: `args` is the
+   * JSON string the model sent, exactly as the request carried it.
+   *
+   * A tool that materializes a block for its own call needs this, because
+   * only the call itself knows what the arguments were. Rebuilding them from
+   * the block is lossy in a way that costs a prompt cache: a tool that
+   * trims, deduplicates, or defaults an optional parameter would replay a
+   * call the model never made, and everything after it in the conversation
+   * would stop matching the request that produced it. Optional on the same
+   * terms as the rest — a bare tool host has no wire to quote.
+   */
+  call?: { args: string };
 };
 
 /**

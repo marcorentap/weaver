@@ -15,7 +15,6 @@ import {
   insertBlock,
   lastChildId,
   mergedEnvironment,
-  messagesAbove,
   messagesOfBlock,
   messagesOfBlocks,
   messagesOfGraph,
@@ -24,6 +23,7 @@ import {
   removeBlock,
   snapshotBlock,
   TEXT_KIND,
+  transcriptAbove,
 } from "@repo/core";
 // Type-only: `@repo/store` reaches for node:sqlite, so a value import here
 // would drag the whole persistence layer into the renderer bundle.
@@ -724,7 +724,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
         true,
       );
     };
-    const patchTool = (id: BlockId, output: string, ok?: boolean) => {
+    const patchTool = (
+      id: BlockId,
+      output: string,
+      ok?: boolean,
+      images?: ContextImage[],
+    ) => {
       const current = snapshot.graph.blocks[id];
       if (!current) return; // Deleted mid-stream.
       commit(
@@ -738,6 +743,10 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
                 ...current.data,
                 output,
                 ...(ok === undefined ? {} : { ok }),
+                // The pictures the result carried, recorded for the replay
+                // that has to put the wire's trailing user turn back. See
+                // `WirePart` in `@repo/core`.
+                ...(images?.length ? { images } : {}),
               },
               modifiedAt: Date.now(),
             },
@@ -841,18 +850,61 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       // prompt. Its earlier turns go ahead of it rather than inside the
       // document, so what the model reads is the exchange the block holds
       // and not one message with a question and an answer run together.
-      const above = messagesAbove(snapshot.graph, id, kinds);
-      const own = messagesOfBlock(snapshot.graph, id, kinds);
-      const anchor = kinds[block.kind]?.turns ? own : [];
-      const last = anchor[anchor.length - 1];
+      // As the transcript it came from, not as a document: an assistant turn
+      // keeps the tool calls it made and each answer stays a `tool` message
+      // quoting the call. A provider caches a request by prefix, so a run
+      // that re-reads its own history as prose pays for all of it again.
+      const above = transcriptAbove(snapshot.graph, id, kinds);
+      // The block's own turns, exactly as the graph above it reads them —
+      // unlabelled under a user or assistant role, where a snapshot taken as
+      // a document would say `user: …` first. The prompt has to be one of
+      // these turns rather than a second reading of the same block: the run
+      // that writes this block sends it as a user turn, and every later run
+      // replays it from the graph, so two readings of it are two different
+      // token sequences and the later run's prefix stops matching at the
+      // first message it sends.
+      let own = messagesOfBlock(snapshot.graph, id, kinds);
+      const endsOnUser = own[own.length - 1]?.role === "user";
+      // A run's ask is a user turn whatever the block is. Falling back on the
+      // document — a media block, a note, a reply someone re-ran — sends as
+      // a person's question something the graph would otherwise read as
+      // developer material or as an assistant turn, so the block is marked
+      // as asked and its whole past is read the way the wire read it. Done
+      // before the request is built, because the mark is part of what the
+      // request says: `above` and `own` below are both read from the graph as
+      // it stands afterwards, and a later run replays the same block the same
+      // way. See `Block.asked`.
+      if (!take && !endsOnUser) {
+        const current = snapshot.graph.blocks[id];
+        if (current && !current.asked) {
+          pushUndo();
+          commit(
+            {
+              ...snapshot.graph,
+              blocks: {
+                ...snapshot.graph.blocks,
+                [id]: { ...current, asked: true, modifiedAt: Date.now() },
+              },
+            },
+            true,
+          );
+          own = messagesOfBlock(snapshot.graph, id, kinds);
+        }
+      }
       // A block whose turns do not end on the user's own — a question nobody
       // has answered yet, which holds the question and nothing after it —
       // has no turn a request can be prompted with. It falls back to the
-      // document, which at least reads as the thing being asked about.
+      // document, which at least reads as the thing being asked about — and
+      // now reads as the user turn it is sent as, since the mark above makes
+      // the block's own reading of itself agree with the prompt.
+      const last = own[own.length - 1];
       if (last && last.role === "user") {
         prompt = last.content;
         promptImages = last.images ?? [];
-        context = [...above, ...anchor.slice(0, -1)];
+        // `above` was read before the block became an ask; the block's own
+        // earlier turns still go ahead of the prompt, and the prompt stays
+        // the last of them, so the two readings agree.
+        context = [...above, ...own.slice(0, -1)];
       } else {
         prompt = snapshotBlock(snapshot.graph, id, kinds);
         promptImages = own.flatMap((turn) => turn.images ?? []);
@@ -881,6 +933,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           context,
           prompt,
           ...(promptImages.length > 0 ? { promptImages } : {}),
+          // The session this run belongs to, as a cache key for the one
+          // provider that routes by one. The root block names the transcript
+          // and does not change as runs append below it, so every run over
+          // this graph asks the same host for the prefix they share. Falls
+          // back on the block itself for a graph with no root yet.
+          cacheKey: snapshot.graph.root ?? id,
           tools,
           providerId,
           providerSettings,
@@ -955,7 +1013,13 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
               resetStreaming(scope);
               const blockId = append(
                 TOOL_KIND,
-                { name: event.name, args: event.args, output: "", ok: true },
+                {
+                  name: event.name,
+                  args: event.args,
+                  output: "",
+                  ok: true,
+                  ...(event.turn === undefined ? {} : { turn: event.turn }),
+                },
                 event.name,
                 undefined,
                 scope,
@@ -986,7 +1050,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
                 toolBlocks.delete(event.id);
                 // Authoritative: whatever the deltas said, this is what the
                 // call finished with.
-                patchTool(blockId, event.output, event.ok);
+                patchTool(blockId, event.output, event.ok, event.images);
               } else {
                 // No `tool_start` preceded this (a call whose start was
                 // skipped, or a remote that never streams), so append the
@@ -998,6 +1062,8 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
                     args: event.args,
                     output: event.output,
                     ok: event.ok,
+                    ...(event.turn === undefined ? {} : { turn: event.turn }),
+                    ...(event.images?.length ? { images: event.images } : {}),
                   },
                   event.name,
                   undefined,

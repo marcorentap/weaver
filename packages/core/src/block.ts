@@ -36,6 +36,25 @@ export type Block<D extends BlockData = BlockData> = {
    * never hidden.
    */
   hidden?: boolean;
+  /**
+   * Whether a run was ever anchored on this block with its own document as
+   * the ask, rather than with a user turn of its own.
+   *
+   * A run's ask is always a `user` message, whatever kind of block it came
+   * from: anchor a media block, a note, or a reply and the model is asked
+   * about its text, as a person asking. The graph cannot otherwise tell that
+   * apart from the same block sitting in the material above a run, where a
+   * note reads as `developer` material and a reply as an `assistant` turn.
+   * Without the mark, replaying the graph produces a `developer` line where
+   * the run sent a user turn — the prefix stops matching at that very
+   * message, and a provider's cache is lost for everything after it. So the
+   * run that asked records it here, and `roleOf` reads the block as the
+   * user turn it was on that wire.
+   *
+   * Absent is the same as `false`, which is every block that was never asked
+   * with, and every block written before this was recorded.
+   */
+  asked?: boolean;
 };
 
 /** Every block, plus the head of the top-level chain. */

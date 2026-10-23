@@ -57,6 +57,10 @@ export const askUserTool: PluginTool = {
     // A fixed, short name for the block — never the question, which can be
     // long and read as body text in the graph.
     const label = "ask user";
+    // The call's own arguments, so the block can replay as the request the
+    // model actually sent rather than as the tool's scrubbed reading of it
+    // (see `args` on the kind). Absent in a host that knows nothing of the
+    // wire, which is the same host that cannot replay anything anyway.
     const question = {
       prompt,
       options,
@@ -64,6 +68,7 @@ export const askUserTool: PluginTool = {
       other: "",
       note: "",
       answered: false,
+      ...(ctx.call === undefined ? {} : { args: ctx.call.args }),
     };
     // The ordinary path: the block lands and this call stays inside `execute`
     // until the user submits an answer to it, which the harness passes back

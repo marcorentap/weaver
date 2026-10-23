@@ -1,6 +1,6 @@
 import type { ZodType } from "zod";
 import type { Block, BlockData, BlockGraph, BlockId } from "./block";
-import type { ContextImage, ContextMessage } from "./messages";
+import type { ContextImage, ContextMessage, WirePart } from "./messages";
 
 /**
  * Which side of a conversation a block's content belongs to when a run
@@ -146,6 +146,12 @@ export type BlockKind = {
    */
   turns: ((data: BlockData, ctx: SnapshotContext) => ContextMessage[]) | null;
   /**
+   * The block's form on the wire, where it had one, or null for a kind whose
+   * blocks were never part of a provider request. See `WirePart` and
+   * `defineKind.wire`.
+   */
+  wire: ((data: BlockData, ctx: SnapshotContext) => WirePart | null) | null;
+  /**
    * The text a run waiting on this block resumes with, read out of the
    * block's own state, or null while the block holds no answer yet. Null as
    * a whole when the kind declares none, which is every kind that no run can
@@ -245,6 +251,27 @@ export function defineKind<S>(def: {
    */
   turns?: (state: S, ctx: SnapshotContext) => readonly ContextMessage[];
   /**
+   * The block's form on the wire, for a kind whose blocks came off one and
+   * should be replayable as what they were. Omit for the ordinary kind: a
+   * document someone wrote, or material the harness derived, never had a
+   * provider-transcript shape to reproduce.
+   *
+   * The difference from a snapshot is not detail but kind. A snapshot is the
+   * block as a document — prose that says what happened, which is all a
+   * preview, a summary, or a model reading a file needs. A wire part is the
+   * block as it travelled: a tool call was an `assistant` message's
+   * `tool_calls` entry answered by a `tool` message quoting its id, and an
+   * assistant message may carry its reasoning. A provider caches a request by
+   * prefix, so a graph re-rendered as prose cannot be a cache hit for the
+   * request the run actually sent; only a graph re-rendered as the transcript
+   * it came from can.
+   *
+   * Like `turns`, a wire part replaces the ordinary one-turn reading: a block
+   * whose kind has one is replayed, not reserialized. See `WirePart` for the
+   * two shapes, and `transcriptOfBlocks` for how they are assembled.
+   */
+  wire?: (state: S, ctx: SnapshotContext) => WirePart | null;
+  /**
    * Whether a run can stop on a block of this kind and be started again by
    * the person answering it, and with what. Give the value the run resumes
    * with, read out of the block's state, or null while the state holds no
@@ -290,6 +317,7 @@ export function defineKind<S>(def: {
   const turns = def.turns;
   const resume = def.resume;
   const images = def.images;
+  const wire = def.wire;
   return {
     kind: def.kind,
     role: def.role ?? "developer",
@@ -305,6 +333,7 @@ export function defineKind<S>(def: {
     turns: turns
       ? (data, ctx) => [...turns(def.schema.parse(data), ctx)]
       : null,
+    wire: wire ? (data, ctx) => wire(def.schema.parse(data), ctx) : null,
     resume: resume ? (data) => resume(def.schema.parse(data)) : null,
     hooks: Object.keys(hooks),
     callbacks: def.callbacks ?? [],
