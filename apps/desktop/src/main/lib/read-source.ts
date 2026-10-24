@@ -216,23 +216,76 @@ export function formatReadResult(result: ReadSourceResult): string {
   return `${header}${result.content}`;
 }
 
+/** The longest prefix of `text` that fits in `max` UTF-8 bytes, without
+ *  splitting a character. Cutting bytes can land inside a multi-byte
+ *  character, whose decoded remnant is a replacement character, so that is
+ *  dropped rather than returned as part of the content. */
+function clipToBytes(text: string, max: number): string {
+  const buf = Buffer.from(text, "utf8");
+  if (buf.length <= max) return text;
+  return buf
+    .subarray(0, max)
+    .toString("utf8")
+    .replace(/\uFFFD+$/, "");
+}
+
 /** `offset`/`limit` windowed onto `lines`, shared by file content and
  *  directory listings alike: a listing is just lines with no bytes behind
- *  them. */
+ *  them.
+ *
+ *  A line is not a unit of size, so the window is bounded by `MAX_BYTES` as
+ *  well as by `limit`. One minified file is a single line, and a page served
+ *  as HTML has newlines almost nowhere: a `limit` of half a million lines
+ *  asked for in good faith is how one read once pulled half a million tokens
+ *  into a run's context. Lines are taken until the next one would cross the
+ *  cap; if the very first line crosses it alone, it is cut at a byte
+ *  boundary, since returning nothing for the line the window starts on would
+ *  be worse than a partial line. Either cut sets `truncated`, so the header
+ *  says content was left off rather than claiming this is the whole window. */
 function windowLines(
   lines: string[],
   offset: number | undefined,
   limit: number | undefined,
 ): ReadSourceResult {
   const startLine = Math.max(offset ?? 1, 1);
-  const endLine =
+  if (startLine > lines.length) {
+    return {
+      content: "",
+      truncated: true,
+      startLine,
+      endLine: lines.length,
+      totalLines: lines.length,
+    };
+  }
+  const requestedEnd =
     limit !== undefined
       ? Math.min(startLine - 1 + limit, lines.length)
       : lines.length;
-  const windowed = lines.slice(startLine - 1, endLine);
+  const kept: string[] = [];
+  let bytes = 0;
+  let endLine = startLine - 1;
+  let clipped = false;
+  for (let i = startLine - 1; i < requestedEnd; i++) {
+    const line = lines[i];
+    // Unreachable: `requestedEnd` is clamped to `lines.length`. Spelled out
+    // so the type checker sees a defined line without an assertion.
+    if (line === undefined) break;
+    const lineBytes = Buffer.byteLength(line, "utf8") + (kept.length ? 1 : 0);
+    if (bytes + lineBytes > MAX_BYTES) {
+      if (kept.length === 0) {
+        kept.push(clipToBytes(line, MAX_BYTES));
+        endLine = i + 1;
+      }
+      clipped = true;
+      break;
+    }
+    kept.push(line);
+    bytes += lineBytes;
+    endLine = i + 1;
+  }
   return {
-    content: windowed.join("\n"),
-    truncated: startLine > 1 || endLine < lines.length,
+    content: kept.join("\n"),
+    truncated: startLine > 1 || clipped || endLine < lines.length,
     startLine,
     endLine,
     totalLines: lines.length,
