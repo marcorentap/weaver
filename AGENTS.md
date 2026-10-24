@@ -13,7 +13,8 @@ Electron + React 19 + TypeScript, pnpm/turbo monorepo, MIT.
 apps/desktop/src/
   main/            Electron main process (owns disk, SQLite, subprocesses)
     index.ts       entry; windows, protocol registration
-    agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
+    agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT);
+                   skills/ and agents/ — what the app itself teaches and ships
     ipc/           one file per IPC group: agent, agents, artifacts, chat, clipboard, export, links, media-protocol, plugins, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
                    read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
@@ -179,11 +180,14 @@ the pickers), `INSTRUCTION.md` (appended to the system prompt under the
 agent's name), `tools/` (TypeScript files or directories default-exporting a
 `PluginTool`, bundled with esbuild per run) and `skills/` (ordinary
 `SKILL.md` directories). Agents live in `~/.weaver/agents/<name>/` and
-`<project>/.weaver/agents/<name>/`; the two shelves are merged with the
-project's copy winning a shared name. Discovery is
-`plugins/weaver-agents/src/agents.ts` (`listAgents`/`resolveAgent`), which
-`main/lib/agents.ts` re-exports and `run-agent.ts` uses to mount the tools and
-extend the loader's skill paths.
+`<project>/.weaver/agents/<name>/`, over a third shelf the app ships in
+`main/agent/agents/`; the shelves are merged with the most specific copy
+winning a shared name, so a user's agent shadows a bundled one. Discovery is
+`plugins/weaver-agents/src/agents.ts` (`listAgents`/`resolveAgent`, which take
+the bundled directory as an argument because that package does not know where
+the app keeps its files), wrapped by `main/lib/agents.ts` with
+`BUNDLED_AGENTS_DIR`; `run-agent.ts` uses them to mount the tools and extend
+the loader's skill paths.
 
 - A message attaches one with `@agents:<name>`: the link provider is
   `main/lib/links/agents.ts`, and its material block is the agent's
@@ -197,6 +201,13 @@ extend the loader's skill paths.
   the main bundle) and are the least specific skill source, so a user's or
   project's same-named skill still wins. `weaver-agents` there teaches how to
   write an agent.
+- Agents that ship with the app live in `main/agent/agents/` (`explorer`,
+  `reviewer`, `archivist`), copied next to the main bundle the same way and
+  the least specific agent shelf. They carry instructions and skills but no
+  `tools/`: an agent's tool files are bundled with esbuild per run, and esbuild
+  cannot read a path inside a packaged app's asar archive, so a bundled tool
+  would mount nothing in a release build. Add an agent there only if its
+  behavior lives in its `INSTRUCTION.md`.
 
 ## Agent runs
 

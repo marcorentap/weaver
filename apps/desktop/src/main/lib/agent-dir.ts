@@ -51,6 +51,24 @@ export const AGENTS_DIR_NAME = ".agents";
  */
 export const BUNDLED_SKILLS_DIR = join(import.meta.dirname, "skills");
 
+/**
+ * Agents that ship with the app rather than with the user or the project.
+ *
+ * A bundled agent is a run configuration worth having on a fresh install —
+ * before anyone has written an INSTRUCTION.md of their own — and is the least
+ * specific shelf: a user's or project's agent of the same name wins, so a
+ * bundled agent is a starting point to shadow rather than a fixture. Copied
+ * next to the bundled main process the same way `BUNDLED_SKILLS_DIR` is.
+ *
+ * They ship instructions and skills but no `tools/`, because an agent's tool
+ * files are bundled with esbuild at run time and esbuild reads paths with its
+ * own native file layer, which cannot open a path inside a packaged app's
+ * asar archive. A bundled agent that shipped tools would silently mount
+ * nothing in a release build, which is worse than an agent that never had
+ * them: the model would be told about a tool it cannot call.
+ */
+export const BUNDLED_AGENTS_DIR = join(import.meta.dirname, "agents");
+
 /** `<cwd>/.agents`: the project half of the convention. */
 export function projectAgentsDir(cwd: string): string {
   return join(cwd, AGENTS_DIR_NAME);

@@ -74,8 +74,9 @@ export interface AgentSummary {
   name: string;
   /** `DESCRIPTION.md`, trimmed; empty when the agent has none. */
   description: string;
-  /** Which shelf it came from; a project agent wins a shared name. */
-  source: "project" | "global";
+  /** Which shelf it came from; the most specific wins a shared name, so a
+   *  project agent shadows the user's, and the user's shadows the app's. */
+  source: "project" | "global" | "bundled";
 }
 
 /**

@@ -2,14 +2,30 @@ import { join } from "node:path";
 import { app } from "electron";
 import type { PluginTool } from "@repo/plugins";
 import {
-  listAgents,
-  resolveAgent,
+  listAgents as listShelvedAgents,
+  resolveAgent as resolveShelvedAgent,
   type AgentSummary,
   type WeaverAgent,
 } from "@plugins/weaver-agents";
+import { BUNDLED_AGENTS_DIR } from "./agent-dir.js";
 import type { BuildResult } from "esbuild";
 
-export { listAgents, resolveAgent };
+/**
+ * The agent shelves a run can use: the project's, the user's, and the set the
+ * app ships. The two wrappers exist so every caller — the `@agents:` provider,
+ * the IPC list, the run engine's tool scope, link materialization — names a
+ * root and gets the same three shelves, and none of them can quietly scan a
+ * different set than the others. Only main knows where the app keeps its own
+ * files, which is why the directory is handed to a package that does not.
+ */
+export function listAgents(root: string): AgentSummary[] {
+  return listShelvedAgents(root, BUNDLED_AGENTS_DIR);
+}
+
+export function resolveAgent(name: string, root: string): WeaverAgent | null {
+  return resolveShelvedAgent(name, root, BUNDLED_AGENTS_DIR);
+}
+
 export type { AgentSummary, WeaverAgent };
 
 /**

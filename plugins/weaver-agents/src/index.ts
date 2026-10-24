@@ -7,8 +7,9 @@ import { definePlugin } from "@repo/plugins";
  * to steer the run with, `tools/` for its TypeScript tools and `skills/` for
  * the `SKILL.md` files it loads. The user keeps theirs in
  * `~/.weaver/agents/<name>/`, a project keeps its own in
- * `<project>/.weaver/agents/<name>/`, and the app merges the two shelves, the
- * project's copy winning a name it shares.
+ * `<project>/.weaver/agents/<name>/`, and the app ships a third shelf of its
+ * own. They are merged, the most specific copy winning a name it shares —
+ * the project's over the user's, the user's over a bundled one.
  *
  * Nothing about an agent is a block kind or a tool in the plugin contract's
  * sense: an agent changes *how* a run is configured (its system prompt, its

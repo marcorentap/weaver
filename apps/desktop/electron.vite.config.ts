@@ -60,6 +60,17 @@ export default defineConfig({
             // same trick the system-prompt copy above uses with `true`.
             rename: { stripBase: 4 },
           },
+          // The agents the app ships — a shelf a person can shadow by
+          // writing one of their own with the same name. Discovered by
+          // `BUNDLED_AGENTS_DIR` in `main/lib/agent-dir.ts`, so they land as
+          // `agents/<agent>/…` beside the bundled main process. Same
+          // `stripBase` arithmetic as the skills copy above.
+          // `src/main/agent/agents` is the shelf, so it flattens to `<agent>/…`.
+          {
+            src: resolve("src/main/agent/agents/**/*"),
+            dest: "agents",
+            rename: { stripBase: 4 },
+          },
           // Symbol indexing (src/main/lib/symbol-index.ts) loads these at
           // run time with `readFileSync(import.meta.dirname/wasm, ...)`, so
           // they must land next to the bundled `out/main/index.js` under a

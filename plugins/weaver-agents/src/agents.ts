@@ -9,15 +9,16 @@ import { join } from "node:path";
  * own file is what lets an agent be edited piecemeal — a skill copied in, one
  * tool rewritten — without anything ever reassembling a manifest.
  *
- * Agents live in two places, the same two tiers every other agent resource
- * has. `~/.weaver/agents/<name>/` is the user's own shelf and
- * `<project>/.weaver/agents/<name>/` is the project's, and the two are
- * *merged* rather than one replacing the other: an agent only the user has is
- * still offered inside the project, and a project agent of the same name is
- * the one that wins. `.weaver` — not `.agents` — because an agent is weaver's
- * own construct: it binds pi's tools and skills to weaver's run, which no
- * other harness would know what to do with, exactly as plugins and the store
- * already live under `.weaver`.
+ * Agents live on shelves, the same tiers every other agent resource has.
+ * `~/.weaver/agents/<name>/` is the user's own shelf and
+ * `<project>/.weaver/agents/<name>/` is the project's, and they are *merged*
+ * rather than one replacing the other: an agent only the user has is still
+ * offered inside the project, and a project agent of the same name is the one
+ * that wins. Under both sits a shelf the app ships, so a fresh install has
+ * something to pick before anyone has written an agent of their own. `.weaver`
+ * — not `.agents` — because an agent is weaver's own construct: it binds pi's
+ * tools and skills to weaver's run, which no other harness would know what to
+ * do with, exactly as plugins and the store already live under `.weaver`.
  */
 export const DESCRIPTION_FILE = "DESCRIPTION.md";
 export const INSTRUCTION_FILE = "INSTRUCTION.md";
@@ -35,19 +36,39 @@ export function projectAgentsDir(root: string): string {
   return join(root, ".weaver", AGENTS_DIR_NAME);
 }
 
+/** A shelf of agents and the tier it belongs to. */
+type Shelf = { dir: string; source: AgentSource };
+
 /**
- * Every directory agents are discovered from, most specific first. The order
- * is the precedence: the first directory that holds a name owns it, so a
- * project's agent shadows the user's copy of the same name and every other
- * agent — from either tier — is still there.
+ * Every shelf agents are discovered from, most specific first. The order is
+ * the precedence: the first shelf that holds a name owns it, so a project's
+ * agent shadows the user's copy of the same name and every other agent —
+ * from any shelf — is still there.
+ *
+ * The bundled shelf is last and only when the app hands one over: an agent
+ * that ships with weaver is a starting point a person can shadow by making
+ * one of their own with the same name, which is exactly what a user's or
+ * project's agent does to a bundled one. It is passed in rather than
+ * computed here because this package does not know where the app put its own
+ * files, and an agent on a shelf is a directory of text either way.
  */
-export function agentSearchDirs(root: string): string[] {
-  return [projectAgentsDir(root), globalAgentsDir()];
+function shelves(root: string, bundledDir?: string): Shelf[] {
+  const list: Shelf[] = [
+    { dir: projectAgentsDir(root), source: "project" },
+    { dir: globalAgentsDir(), source: "global" },
+  ];
+  if (bundledDir) list.push({ dir: bundledDir, source: "bundled" });
+  return list;
 }
 
-/** Which tier an agent came from, so a list can say whether running the
- *  project's copy or the user's own. */
-export type AgentSource = "project" | "global";
+/** The directories of `shelves`, for a caller that only wants the paths. */
+export function agentSearchDirs(root: string, bundledDir?: string): string[] {
+  return shelves(root, bundledDir).map((shelf) => shelf.dir);
+}
+
+/** Which tier an agent came from, so a list can say whether it is running the
+ *  project's copy, the user's own, or one the app ships. */
+export type AgentSource = "project" | "global" | "bundled";
 
 /** What a menu needs: a name to pick and a line to recognize it by. */
 export type AgentSummary = {
@@ -150,41 +171,42 @@ function agentSkillDirs(dir: string): string[] {
 }
 
 /**
- * Every agent the project can run, merged across both shelves with the
- * project's copy winning a shared name. Sorted by name so the completion
- * menu and the inference dialog read the same way regardless of the order
- * the filesystem happened to hand directories back.
+ * Every agent the project can run, merged across the shelves with the most
+ * specific copy winning a shared name — the project's over the user's, the
+ * user's over one the app ships. Sorted by name so the completion menu and
+ * the inference dialog read the same way regardless of the order the
+ * filesystem happened to hand directories back.
  */
-export function listAgents(root: string): AgentSummary[] {
-  const cached = caches.get(root);
+export function listAgents(root: string, bundledDir?: string): AgentSummary[] {
+  const key = `${root}\u0000${bundledDir ?? ""}`;
+  const cached = caches.get(key);
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.agents;
 
   const agents: AgentSummary[] = [];
   const claimed = new Set<string>();
-  for (const [tier, dir] of agentSearchDirs(root).entries()) {
-    const source: AgentSource = tier === 0 ? "project" : "global";
+  for (const shelf of shelves(root, bundledDir)) {
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = readdirSync(shelf.dir, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const entry of entries) {
       if (!entry.isDirectory() || !isAgentDirName(entry.name)) continue;
       // `claimed` is what makes the merge a merge: a project agent shadows
-      // the global one of the same name without hiding any other agent.
+      // the user's agent of the same name without hiding any other agent.
       if (claimed.has(entry.name)) continue;
       claimed.add(entry.name);
-      const agentDir = join(dir, entry.name);
+      const agentDir = join(shelf.dir, entry.name);
       agents.push({
         name: entry.name,
         description: readDescription(agentDir),
-        source,
+        source: shelf.source,
       });
     }
   }
   agents.sort((a, b) => a.name.localeCompare(b.name));
-  caches.set(root, { at: Date.now(), agents });
+  caches.set(key, { at: Date.now(), agents });
   return agents;
 }
 
@@ -205,19 +227,23 @@ function isDirectory(path: string): boolean {
 
 /**
  * The agent called `name`, with everything a run mounts, or null when no
- * shelf holds it. Resolved from the project's shelf first for the same
+ * shelf holds it. Resolved from the most specific shelf first for the same
  * reason `listAgents` merges in that order: the project's copy is the one
- * that wins.
+ * that wins, then the user's, then the app's own.
  */
-export function resolveAgent(name: string, root: string): WeaverAgent | null {
+export function resolveAgent(
+  name: string,
+  root: string,
+  bundledDir?: string,
+): WeaverAgent | null {
   if (!SAFE_NAME.test(name)) return null;
-  for (const [tier, shelf] of agentSearchDirs(root).entries()) {
-    const dir = join(shelf, name);
+  for (const shelf of shelves(root, bundledDir)) {
+    const dir = join(shelf.dir, name);
     if (!isDirectory(dir)) continue;
     return {
       name,
       description: readDescription(dir),
-      source: tier === 0 ? "project" : "global",
+      source: shelf.source,
       dir,
       instructions: readInstructions(dir),
       skillDirs: agentSkillDirs(dir),

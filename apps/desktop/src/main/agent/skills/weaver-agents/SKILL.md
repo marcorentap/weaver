@@ -11,15 +11,22 @@ part is edited on its own.
 
 ## Where agents live
 
-Two shelves, merged:
+Three shelves, merged:
 
 - `~/.weaver/agents/<name>/` is the user's, available in every project.
 - `<project>/.weaver/agents/<name>/` is the project's.
+- The app ships one of its own — explorer, reviewer, archivist — beside the
+  bundled main process. It is not a directory you edit: a fresh install's
+  copy is inside the app, and an update replaces it.
 
-The project's copy wins when both hold the same name. Every other agent from
-either shelf is still offered. Do not duplicate an agent into the project to
-"make it available" there; put it in `~/.weaver/agents` and it is already
-available.
+The most specific shelf wins a shared name: the project's over the user's,
+and the user's over a bundled agent. Every other agent from every shelf is
+still offered. Do not duplicate an agent into the project to "make it
+available" there; put it in `~/.weaver/agents` and it is already available.
+
+To change a bundled agent, copy its directory into `~/.weaver/agents` under
+the same name and edit the copy. That shadows it from then on, and the edit
+survives an app update — which is why the shelf order is what it is.
 
 `<project>` is the run's own working directory: its merged `WEAVER_PWD`, or
 the app's project root when no environment block sets one.
@@ -40,6 +47,13 @@ the app's project root when no environment block sets one.
 
 Every part is optional, but an agent with no `INSTRUCTION.md` and no tools
 does nothing a plain run does not.
+
+Bundled agents carry no `tools/`, only instructions and sometimes skills. An
+agent's tool files are bundled with esbuild at run time, and esbuild cannot
+open a path inside a packaged app's asar archive, so a tool that shipped with
+the app would mount nothing in a release build while the model was still told
+it existed. That constraint does not apply to your own agents: they live on
+disk, outside the archive.
 
 ### DESCRIPTION.md
 
@@ -147,15 +161,16 @@ broken reference instead of a silently different behavior.
 ## Editing an agent
 
 1. Resolve the name to the directory a run would use: the project's copy
-   first, then `~/.weaver/agents`.
+   first, then `~/.weaver/agents`, then the app's bundled shelf. A bundled
+   agent is edited by copying it to `~/.weaver/agents` first.
 2. Edit the file that owns the behavior. Instructions go in `INSTRUCTION.md`,
    a new capability in `tools/`, reusable procedure in `skills/`.
 3. Rerun the message that invokes the agent. Edits are read per run; there is
    no restart and no build step.
 
-To check the merge, list both shelves: `ls ~/.weaver/agents` and
-`ls .weaver/agents` from the project root. If two agents share a name, the
-project's is the one that runs.
+To check the merge, list the shelves: `ls ~/.weaver/agents` and
+`ls .weaver/agents` from the project root, plus whatever the app ships. If two
+agents share a name, the more specific one is what runs.
 
 ## Common mistakes
 
@@ -164,6 +179,8 @@ project's is the one that runs.
   message.
 - Writing an agent with no `DESCRIPTION.md`. It still works, but both pickers
   show a blank line and the material block has nothing to say about it.
+- Editing a bundled agent in place. Its directory is inside the app; the edit
+  is lost on update and the file may be read-only. Copy it first.
 - Repeating the harness prompt in `INSTRUCTION.md`. It is appended, not a
   replacement, so restating it wastes context and dilutes the part that is
   specific.
