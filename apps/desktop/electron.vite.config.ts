@@ -28,6 +28,7 @@ export default defineConfig({
           "@plugins/agent-subagents",
           "@plugins/rich-media",
           "@plugins/user-input",
+          "@plugins/weaver-agents",
         ],
       }),
       // `agent/system-prompt.md` is read at run time via `readFileSync`, not
@@ -44,6 +45,20 @@ export default defineConfig({
             src: resolve("src/main/agent/system-prompt.md"),
             dest: "agent",
             rename: { stripBase: true },
+          },
+          // The skills the app itself teaches — currently how to write a
+          // weaver agent. Discovered by `BUNDLED_SKILLS_DIR` in
+          // `main/lib/agent-dir.ts`, so they land beside the bundled main
+          // process the way the system prompt does, and are the least
+          // specific source of skills a run loads.
+          {
+            src: resolve("src/main/agent/skills/**/*"),
+            dest: "skills",
+            // The copy target reproduces the source path under `dest`, so
+            // climbing out of `src/main/agent/skills` leaves exactly
+            // `skills/<skill>/SKILL.md`. Four segments is that prefix; the
+            // same trick the system-prompt copy above uses with `true`.
+            rename: { stripBase: 4 },
           },
           // Symbol indexing (src/main/lib/symbol-index.ts) loads these at
           // run time with `readFileSync(import.meta.dirname/wasm, ...)`, so

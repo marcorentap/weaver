@@ -14,7 +14,7 @@ apps/desktop/src/
   main/            Electron main process (owns disk, SQLite, subprocesses)
     index.ts       entry; windows, protocol registration
     agent/         system-prompt.md — the run instructions (read into WEAVER_SYSTEM_PROMPT)
-    ipc/           one file per IPC group: agent, artifacts, chat, clipboard, export, links, media-protocol, plugins, settings, hindsight
+    ipc/           one file per IPC group: agent, agents, artifacts, chat, clipboard, export, links, media-protocol, plugins, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
                    read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
                    context-wire.ts (graph → provider payload), model-modalities.ts (does the model
@@ -27,7 +27,7 @@ apps/desktop/src/
 packages/core      Block graph model + kind system (no app deps)
 packages/store     SQLite persistence (node:sqlite)
 packages/plugins   Plugin contract (definePlugin)
-plugins/*          bundled plugins: rich-media, user-input, agent-seerxng, agent-hindsight, agent-subagents
+plugins/*          bundled plugins: rich-media, user-input, agent-seerxng, agent-hindsight, agent-subagents, weaver-agents
 ```
 
 Dependency direction is one-way: `desktop → plugins → store/core → plugins package`.
@@ -170,6 +170,33 @@ validation pick it up from the registry.
   text when the harness can't materialize blocks. `ctx.wait` is the same shape
   for a question the tool cannot answer itself: it materializes a block and
   parks the run inside the tool call until that block's kind resumes it.
+
+## Agents
+
+An agent is a run configuration a person picks per message, not a plugin's
+kind or tool: a directory holding `DESCRIPTION.md` (what it is for, shown in
+the pickers), `INSTRUCTION.md` (appended to the system prompt under the
+agent's name), `tools/` (TypeScript files or directories default-exporting a
+`PluginTool`, bundled with esbuild per run) and `skills/` (ordinary
+`SKILL.md` directories). Agents live in `~/.weaver/agents/<name>/` and
+`<project>/.weaver/agents/<name>/`; the two shelves are merged with the
+project's copy winning a shared name. Discovery is
+`plugins/weaver-agents/src/agents.ts` (`listAgents`/`resolveAgent`), which
+`main/lib/agents.ts` re-exports and `run-agent.ts` uses to mount the tools and
+extend the loader's skill paths.
+
+- A message attaches one with `@agents:<name>`: the link provider is
+  `main/lib/links/agents.ts`, and its material block is the agent's
+  description, so the graph records the choice. The renderer reads the token
+  off the anchor's snapshot (`agentFor` in `live-graph.ts`) and sends it as
+  the request's `agent`; the custom inference dialog's Agent row does the
+  same explicitly, and an explicit choice wins over the message's.
+- The main process resolves the name against the run's own `WEAVER_PWD` and
+  fails the run on an unknown agent instead of falling back silently.
+- Skills that ship with the app live in `main/agent/skills/` (copied next to
+  the main bundle) and are the least specific skill source, so a user's or
+  project's same-named skill still wins. `weaver-agents` there teaches how to
+  write an agent.
 
 ## Agent runs
 

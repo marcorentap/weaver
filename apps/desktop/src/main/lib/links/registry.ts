@@ -2,6 +2,7 @@ import type {
   LinkOption,
   LinkTypeDescriptor,
 } from "../../../shared/ipc-contract.js";
+import { agentProvider } from "./agents.js";
 import { fileProvider } from "./file.js";
 import { skillProvider } from "./skill.js";
 import type { LinkProvider, LinkSearchContext } from "./types.js";
@@ -17,6 +18,7 @@ import type { LinkProvider, LinkSearchContext } from "./types.js";
 export const LINK_PROVIDERS: readonly LinkProvider[] = [
   fileProvider,
   skillProvider,
+  agentProvider,
 ];
 
 /** The descriptors half of the providers: everything the renderer needs to

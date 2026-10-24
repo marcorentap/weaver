@@ -29,6 +29,7 @@
     "@plugins/agent-subagents": "workspace:*",
     "@plugins/rich-media": "workspace:*",
     "@plugins/user-input": "workspace:*",
+    "@plugins/weaver-agents": "workspace:*",
     "@repo/core": "workspace:*",
     "@repo/plugins": "workspace:*",
     "@repo/store": "workspace:*",

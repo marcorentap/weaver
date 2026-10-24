@@ -180,6 +180,16 @@ export const agentRunRequest = z.object({
   endpoint: z.string(),
   apiKey: z.string(),
   model: z.string(),
+  /** The weaver agent to invoke the run as, by its directory name: its
+   *  `INSTRUCTION.md` is appended to the system prompt, its `tools/` are
+   *  mounted beside the plugins' own, and its `skills/` are added to the
+   *  loader's paths. The main process resolves the name against the run's
+   *  own working directory — `<cwd>/.weaver/agents/<name>` first, then
+   *  `~/.weaver/agents/<name>` — so it is the same shelf the renderer's
+   *  `@agents:` completion offered. A name nothing holds fails the run
+   *  rather than quietly falling back to the default agent. Omitted for a
+   *  run invoked as no particular agent. */
+  agent: z.string().optional(),
   /** The graph above the agent block, already serialized by the renderer,
    *  turn by turn. The main process has no view of the live graph, which
    *  lives in the renderer. Each message carries the role its block's kind

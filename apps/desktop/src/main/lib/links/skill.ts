@@ -1,7 +1,8 @@
+import { existsSync } from "node:fs";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
 import { fuzzyFilter } from "../../../shared/fuzzy.js";
 import type { LinkOption } from "../../../shared/ipc-contract.js";
-import { AGENT_DIR, resourceDirs } from "../agent-dir.js";
+import { AGENT_DIR, BUNDLED_SKILLS_DIR, resourceDirs } from "../agent-dir.js";
 import type { LinkProvider } from "./types.js";
 
 /**
@@ -36,7 +37,12 @@ function skillsFor(root: string): SkillSummary[] {
   const { skills } = loadSkills({
     cwd: root,
     agentDir: AGENT_DIR,
-    skillPaths: resourceDirs("skills", root),
+    // The app's own bundled skills come last, exactly where the run's own
+    // loader puts them, so the menu offers the same list the model reads.
+    skillPaths: [
+      ...resourceDirs("skills", root),
+      ...(existsSync(BUNDLED_SKILLS_DIR) ? [BUNDLED_SKILLS_DIR] : []),
+    ],
     includeDefaults: false,
   });
   const summaries = skills.map((skill) => ({

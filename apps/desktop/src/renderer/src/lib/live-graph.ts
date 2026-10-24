@@ -30,6 +30,7 @@ import {
 import type { BlockInput } from "@repo/store";
 import { kinds } from "@shared/blocks/kinds.js";
 import { ASSISTANT_KIND, TOOL_KIND } from "@plugins/rich-media";
+import { AGENTS_LINK_TYPE, parseReferences } from "@shared/references.js";
 import { streamInference } from "@/lib/inference";
 import type { ThinkingLevel } from "@shared/agent-events.js";
 
@@ -71,6 +72,33 @@ const SUMMARIZE_PROMPT = [
   "Reply with only the summary, no preamble.",
 ].join("\n");
 
+/**
+ * The agent a block's own text asks its run to be invoked as, from an
+ * `@agents:<name>` reference written in it, or undefined when it names none.
+ * A message is the only place a person picks an agent by writing, so the
+ * block being run is read as a document — the same text a snapshot shows —
+ * rather than through its turns: a `user` block that has been run and
+ * answered into another block still writes its reference in its own body.
+ * The run engine resolves the name against the shelves; a name nothing holds
+ * fails the run there, which is honest for a reference left over from a
+ * deleted agent. One reference is enough; two are the same request twice.
+ */
+function agentFor(
+  graph: BlockGraph,
+  id: BlockId,
+  registry: typeof kinds,
+): string | undefined {
+  let text: string;
+  try {
+    text = snapshotBlock(graph, id, registry);
+  } catch {
+    return undefined;
+  }
+  return parseReferences(text).find(
+    (reference) => reference.type === AGENTS_LINK_TYPE,
+  )?.value;
+}
+
 /** Connection and resource-loading settings shared by inference and
  *  summarization runs. What pi's `DefaultResourceLoader` loads for the run
  *  maps straight onto `AgentRunRequest`'s wire names; see that type for the
@@ -79,6 +107,11 @@ type RunConnection = {
   endpoint: string;
   apiKey: string;
   model: string;
+  /** The weaver agent this run is invoked as, by directory name. Omitted
+   *  leaves it to the ask: a message that attaches `@agents:<name>` runs as
+   *  that agent (see `agentFor`). An explicit name — the custom inference
+   *  dialog's Agent row — wins over the message's own reference. */
+  agent?: string;
   tools?: string[];
   /** The provider detected from `endpoint`, and its saved settings.
    *  Passed through to the main process untouched; see
@@ -576,6 +609,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       endpoint,
       apiKey,
       model,
+      agent: chosenAgent,
       tools = [],
       providerId,
       providerSettings,
@@ -936,6 +970,12 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           endpoint,
           apiKey,
           model,
+          // A summarization compresses a block and is not invoked as any
+          // agent; an inference run follows the dialog's choice, or else the
+          // agent the ask itself named. See `agentFor`.
+          ...(take
+            ? {}
+            : { agent: chosenAgent ?? agentFor(snapshot.graph, id, kinds) }),
           context,
           prompt,
           ...(promptImages.length > 0 ? { promptImages } : {}),

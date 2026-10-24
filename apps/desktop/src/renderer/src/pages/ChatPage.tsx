@@ -1296,6 +1296,11 @@ function ChatView({
       endpoint: aiEndpoint,
       apiKey: aiApiKey,
       model: custom?.model ?? inferDefaultModel,
+      // The dialog's Agent row, when it picked one. Blank leaves the run to
+      // the ask: a message that attached `@agents:<name>` runs as that
+      // agent, and a message that attached none runs as no agent in
+      // particular.
+      agent: custom?.agent,
       thinkingLevel: (custom?.thinkingLevel ?? inferThinkingLevel) || undefined,
       maxTokens: inferMaxTokens,
       // Where a run that makes files of its own — an image model's
@@ -2746,6 +2751,9 @@ function ChatView({
           id="custom-inference"
           title="Run custom inference"
           meta={row.block.label}
+          // The block's own merged environment, so the Agent row lists the
+          // project shelf a run anchored here would resolve.
+          pwd={pwdForBlock(graph, row.block.id)}
           defaults={{
             model: settings.inferDefaultModel,
             thinkingLevel: settings.inferThinkingLevel,

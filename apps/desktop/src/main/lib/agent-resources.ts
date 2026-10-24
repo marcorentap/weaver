@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import {
   AGENT_DIR,
+  BUNDLED_SKILLS_DIR,
   projectAgentsDir,
   resourceDirs,
   type AgentResourceType,
@@ -193,11 +194,21 @@ export function createAgentResourceLoader(options: {
    *  source over explicitly is also what keeps pi from looking for
    *  `<cwd>/.pi/SYSTEM.md` by itself. */
   systemPrompt: string;
+  /** Directories an agent of this run ships, most specific first. They are
+   *  gated by the same `skills` resource flag as discovery: a run told not
+   *  to load skills does not load the agent's own either. */
+  extraSkillDirs?: string[];
   resources: AgentResources;
   noContextFiles: boolean;
 }): DefaultResourceLoader {
-  const { cwd, settingsManager, systemPrompt, resources, noContextFiles } =
-    options;
+  const {
+    cwd,
+    settingsManager,
+    systemPrompt,
+    extraSkillDirs = [],
+    resources,
+    noContextFiles,
+  } = options;
   // Existing directories only. Naming one that is not there earns a
   // "path does not exist" diagnostic from pi against a directory the user
   // never claimed to have, and nothing is created on the user's behalf.
@@ -216,7 +227,16 @@ export function createAgentResourceLoader(options: {
     noThemes: true,
     noContextFiles,
     additionalExtensionPaths: resources.extensions ? extensionPaths(cwd) : [],
-    additionalSkillPaths: dirs("skills"),
+    // The bundled skills come last: they are the app's own defaults, and a
+    // user's or project's same-named skill should be the one that loads.
+    // Existing directories only, for the same reason as `dirs` above.
+    additionalSkillPaths: [
+      ...(resources.skills ? extraSkillDirs : []),
+      ...dirs("skills"),
+      ...(resources.skills && existsSync(BUNDLED_SKILLS_DIR)
+        ? [BUNDLED_SKILLS_DIR]
+        : []),
+    ],
     additionalPromptTemplatePaths: dirs("prompts"),
     additionalThemePaths: dirs("themes"),
     appendSystemPrompt: appendSystemPromptSources(cwd),

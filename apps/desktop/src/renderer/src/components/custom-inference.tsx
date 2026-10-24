@@ -1,6 +1,7 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ON_OFF_OPTIONS, THINKING_LEVEL_OPTIONS } from "@/lib/settings";
+import type { AgentSummary } from "@shared/ipc-contract.js";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
 import { cn } from "@/lib/utils";
@@ -15,6 +16,11 @@ export type CustomInferenceRun = {
   apiKey: string;
   /** Model this run uses; blank falls back to the saved default. */
   model: string;
+  /** The weaver agent to invoke the run as, by directory name, from the
+   *  dialog's Agent row. Blank means "whatever the ask says": a message that
+   *  attached `@agents:<name>` runs as that agent, and one that attached
+   *  none runs as no agent in particular. */
+  agent?: string;
   /** Reasoning effort for this run; blank falls back to the saved
    *  inference/summarization default, exactly like the other fields. */
   thinkingLevel?: string;
@@ -98,6 +104,7 @@ export function CustomInferenceDialog({
   meta,
   runLabel = "Run inference",
   defaults,
+  pwd,
   onRun,
   onCancel,
   agentic,
@@ -119,6 +126,11 @@ export function CustomInferenceDialog({
     noThemes?: boolean;
     noContextFiles?: boolean;
   };
+  /** The merged `WEAVER_PWD` of the block being run, so the agent list is
+   *  the one a run anchored there resolves: the project's shelf under that
+   *  directory, then the user's. Undefined leaves it at the process's own
+   *  project root. */
+  pwd?: string;
   onRun: (run: Partial<CustomInferenceRun>) => void;
   onCancel: () => void;
   /** The `S` summarization dialog's initial agentic state. Undefined means
@@ -131,6 +143,25 @@ export function CustomInferenceDialog({
   const [thinkingLevel, setThinkingLevel] = useState(
     defaults.thinkingLevel ?? "",
   );
+  /** The agent shelf the Agent row offers. Loaded once, in main, from the
+   *  same `listAgents` the `@agents:` menu uses; a failure leaves the row
+   *  with only "None", which still runs the block exactly as a plain run. */
+  const [agents, setAgents] = useState<AgentSummary[]>([]);
+  const [agent, setAgent] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.agents
+      .list(pwd)
+      .then((list) => {
+        if (!cancelled) setAgents(list);
+      })
+      .catch(() => {
+        // A list that cannot be read is an empty shelf, not a failed dialog.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pwd]);
   /** Whether this run rides the agent harness. Inference is always agentic
    *  (`agentic` prop undefined); the summary dialog starts from the saved
    *  setting and the row flips it. */
@@ -235,6 +266,31 @@ export function CustomInferenceDialog({
       value: thinkingLevel,
       onChange: setThinkingLevel,
     },
+    // Only an inference run can be invoked as an agent: a summarization
+    // compresses the block it is pointed at, and one agent's instructions
+    // are the wrong frame for that whatever the block says. A message that
+    // names an agent with `@agents:` needs no row — the run picks it up —
+    // so "None" here means "leave it to the ask", not "no agent".
+    ...(agentic === undefined
+      ? ([
+          {
+            key: "agent",
+            kind: "option",
+            label: "Agent",
+            description:
+              "Invoke the run as a weaver agent (instructions, tools and skills).",
+            options: [
+              { value: "", label: "None" },
+              ...agents.map((entry) => ({
+                value: entry.name,
+                label: entry.name,
+              })),
+            ],
+            value: agent,
+            onChange: setAgent,
+          },
+        ] satisfies RowDef[])
+      : []),
     // A summary can be a plain call or an agent run; this toggle decides
     // which, and gates the harness rows below. Inference is always an
     // agent run, so only the summary dialog gets the row. It mirrors the
@@ -265,6 +321,9 @@ export function CustomInferenceDialog({
     onRun({
       model: model.trim(),
       thinkingLevel: thinkingLevel || undefined,
+      // Blank is not the same as "no agent": it leaves the choice to the
+      // ask's own `@agents:` reference, so nothing travels for it.
+      ...(agent ? { agent } : {}),
       // The `S` dialog reports its agentic choice; inference always runs
       // the agent, so no flag travels for it.
       ...(agentic === undefined ? {} : { agentic: isAgentic }),
@@ -329,28 +388,34 @@ export function CustomInferenceDialog({
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: [{
-          keys: "← / h",
-          label: row?.kind === "option" ? "Previous value" : "Previous row",
-        }],
+        help: [
+          {
+            keys: "← / h",
+            label: row?.kind === "option" ? "Previous value" : "Previous row",
+          },
+        ],
         run: () =>
           row?.kind === "option" && editing === null ? cycle(-1) : move(-1),
       },
       {
         keys: ["ArrowRight", "l"],
-        help: [{
-          keys: "→ / l",
-          label: row?.kind === "option" ? "Next value" : "Next row",
-        }],
+        help: [
+          {
+            keys: "→ / l",
+            label: row?.kind === "option" ? "Next value" : "Next row",
+          },
+        ],
         run: () =>
           row?.kind === "option" && editing === null ? cycle(1) : move(1),
       },
       {
         keys: ["Enter"],
-        help: [{
-          keys: "enter",
-          label: row?.kind === "action" ? "Run" : "Type a value",
-        }],
+        help: [
+          {
+            keys: "enter",
+            label: row?.kind === "action" ? "Run" : "Type a value",
+          },
+        ],
         run: () => {
           if (!row) return;
           if (row.kind === "action") submit();

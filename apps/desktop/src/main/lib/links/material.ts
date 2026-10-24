@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import type { LinkMaterial } from "../../../shared/ipc-contract.js";
-import { parseReferences, type Reference } from "../../../shared/references.js";
+import {
+  AGENTS_LINK_TYPE,
+  parseReferences,
+  type Reference,
+} from "../../../shared/references.js";
+import { resolveAgent } from "../agents.js";
 import { formatReadResult, readSource } from "../read-source.js";
 import { skillFileFor } from "./skill.js";
 
@@ -20,7 +25,11 @@ import { skillFileFor } from "./skill.js";
  * truncated, tree-sitter-indexed view a whole-file read produces (see
  * `readSource` and `formatReadResult`), not the entire bytes. A skill, by
  * contrast, is meant in full — its `SKILL.md` is a short procedure, not a
- * source file — so it is read whole.
+ * source file — so it is read whole. An agent contributes its description
+ * and nothing more: its instructions, tools and skills are not material for
+ * the model to read, they are what the run itself is configured with (see
+ * `agent` on `AgentRunRequest`), and sending them twice would spend context
+ * saying the same thing in two voices.
  *
  * `root` is the project the message's own merged `WEAVER_PWD` points at, so
  * `@file:` resolves against the same base a run anchored there would read
@@ -69,6 +78,24 @@ async function resolveReference(
     } catch {
       return null;
     }
+  }
+  if (reference.type === AGENTS_LINK_TYPE) {
+    const agent = resolveAgent(reference.value, root);
+    if (!agent) return null;
+    // The block records which agent the ask named, where it came from and
+    // what it is for. It says nothing about the run's own configuration,
+    // because the run applies that itself: this block is the graph's record
+    // of the choice, readable later and by every run after.
+    const lines = [`# ${agent.name}`];
+    if (agent.description) lines.push("", agent.description);
+    lines.push(
+      "",
+      `Weaver agent declared in \`${agent.dir}\` (${agent.source}). A run anchored on this message is invoked as this agent.`,
+    );
+    return {
+      label: `@${AGENTS_LINK_TYPE}:${reference.value}`,
+      text: lines.join("\n"),
+    };
   }
   return null;
 }

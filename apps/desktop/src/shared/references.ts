@@ -1,4 +1,12 @@
 /**
+ * The `@agents:` link type. A message that attaches one is asking for its
+ * run to be invoked as that Weaver agent, and the material the link
+ * resolves to is the agent's own description. Spelled in the plural because
+ * the menu it opens is the shelf of agents, not one particular agent.
+ */
+export const AGENTS_LINK_TYPE = "agents";
+
+/**
  * One `@<type>:<value>` reference written inline in a message, the same
  * token `LinkInput` completes: the type after the `@`, the value after the
  * `:`. It is the renderer's promise that it deliberately pointed the app at

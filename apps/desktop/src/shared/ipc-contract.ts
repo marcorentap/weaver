@@ -65,6 +65,20 @@ export interface LinkMaterial {
 }
 
 /**
+ * One weaver agent the user can pick: a run invoked as it gets that agent's
+ * instructions, tools and skills. Names and descriptions only — the run
+ * engine reads the directory itself, in main, where the files are.
+ */
+export interface AgentSummary {
+  /** The directory name, which is also the `@agents:` value. */
+  name: string;
+  /** `DESCRIPTION.md`, trimmed; empty when the agent has none. */
+  description: string;
+  /** Which shelf it came from; a project agent wins a shared name. */
+  source: "project" | "global";
+}
+
+/**
  * What the clipboard held, as `ctrl+v` turns it into a block. An image has
  * already been written to `~/.weaver/artifacts/<session>/` by the time this
  * comes back — the renderer has no filesystem — so `uri` is the stored
@@ -73,8 +87,7 @@ export interface LinkMaterial {
  * the clipboard held nothing pasteable.
  */
 export type ClipboardPaste =
-  | { kind: "image"; uri: string }
-  | { kind: "text"; text: string };
+  { kind: "image"; uri: string } | { kind: "text"; text: string };
 
 /**
  * What happened to a file dragged in from outside the app. `uri` is the
@@ -324,6 +337,14 @@ export interface WeaverApi {
       key: string,
       value: string,
     ): Promise<string | null>;
+  };
+  agents: {
+    /** Every weaver agent a run at `pwd` can be invoked as: the project's
+     *  shelf and the user's, merged with the project's copy winning a shared
+     *  name. `pwd` is a block's merged `WEAVER_PWD`, so the list follows the
+     *  graph's environment the way a run anchored there does; undefined
+     *  leaves it at the process's own project root. */
+    list(pwd?: string): Promise<AgentSummary[]>;
   };
   links: {
     /** Every `@`-link type the app can complete, in menu order. Linked

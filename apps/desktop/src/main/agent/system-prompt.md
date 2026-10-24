@@ -27,6 +27,10 @@ Known types are already attached for you, each as a turn of its own above the
 one you are answering, labeled with the reference it answers:
 
 - `@skill:<name>` — an agent skill, in full. Follow it.
+- `@agents:<name>` — the weaver agent this run was invoked as, with its
+  description attached above. Its instructions are already part of your
+  system prompt and its tools and skills are already mounted, so do not go
+  looking for them; the attached description says what the run is for.
 - `@file:./path` — a file in the project, as the `read` tool would show it:
   a whole-file read of code is a symbol index, and any other whole-file read
   is the first page, marked truncated when the file continues. A relative

@@ -38,6 +38,19 @@ process.env.PI_CODING_AGENT_DIR ??= AGENT_DIR;
  */
 export const AGENTS_DIR_NAME = ".agents";
 
+/**
+ * Skills that ship with the app rather than with the user or the project.
+ *
+ * A bundled skill teaches a workflow the app itself defines — how to write a
+ * weaver agent, say — so it has to exist on a fresh install, before the user
+ * has an agent directory of their own. It is copied next to the bundled main
+ * process by `vite-plugin-static-copy` (see `electron.vite.config.ts`), the
+ * same way `agent/system-prompt.md` is, and it is the least specific source
+ * of skills: pi keeps the first skill under a name, so a user's or project's
+ * copy of a bundled skill still wins.
+ */
+export const BUNDLED_SKILLS_DIR = join(import.meta.dirname, "skills");
+
 /** `<cwd>/.agents`: the project half of the convention. */
 export function projectAgentsDir(cwd: string): string {
   return join(cwd, AGENTS_DIR_NAME);

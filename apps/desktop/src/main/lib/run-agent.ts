@@ -53,6 +53,7 @@ import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
 import { AGENT_DIR } from "./agent-dir.js";
+import { loadAgentTools, resolveAgent } from "./agents.js";
 import {
   createAgentResourceLoader,
   createAgentSettings,
@@ -673,6 +674,20 @@ export async function runAgent(
         : resolve(ctx.root, weaverPwd)
       : ctx.root;
 
+    // The agent the ask was invoked as, resolved before anything is mounted
+    // because it changes what is mounted: its instructions join the system
+    // prompt, its tools join the tool list and its skills join the loader's
+    // paths. Resolved against the run's own working directory, so a project's
+    // `.weaver/agents` is searched where the run actually lives. A name
+    // nothing holds is a request the run cannot honor — running it as the
+    // default agent instead would silently do something other than what was
+    // asked — so it fails the way an unknown model does.
+    const agent = body.agent ? resolveAgent(body.agent, cwd) : null;
+    if (body.agent && !agent) {
+      emit({ type: "error", message: `unknown agent: ${body.agent}` });
+      return;
+    }
+
     // An image model is not a chat model with a different id: its output is
     // pictures, which no completion returns, so the run goes to the
     // endpoint's image API and every picture comes back as a media block.
@@ -948,10 +963,28 @@ export async function runAgent(
       },
     });
 
-    // Mount every tool the loaded plugins contribute. A plugin tool is a
-    // narrow descriptor (see `@repo/plugins`); this wraps it in the SDK's
-    // shape and hands a read-only settings context through, so a plugin
-    // reads its own config without knowing the app's store.
+    // The tools this run may call: every plugin's, then the chosen agent's
+    // own. An agent's tools are mounted exactly like a plugin's because they
+    // are written in the same shape (`PluginTool`), so an agent is offered to
+    // the model as an ordinary tool among the rest rather than as a second
+    // kind of thing the harness has to know about.
+    //
+    // A name the agent also ships is the agent's: the run was invoked as
+    // that agent, and an agent that brings its own `web_search` means its
+    // own, not the plugin's. Mounting both would hand the SDK two tools with
+    // one name, which is a broken request rather than a preference.
+    const agentTools = agent ? await loadAgentTools(agent) : [];
+    const toolsByName = new Map(
+      ctx.pluginTools.map((tool) => [tool.name, tool]),
+    );
+    for (const tool of agentTools) toolsByName.set(tool.name, tool);
+    const runTools = [...toolsByName.values()];
+
+    // Mount every tool this run contributes — the plugins' and, when one
+    // was chosen, the agent's. A plugin tool is a narrow descriptor (see
+    // `@repo/plugins`); this wraps it in the SDK's shape and hands a
+    // read-only settings context through, so a plugin reads its own config
+    // without knowing the app's store.
     //
     // A caller with nobody to ask omits `wait`, and a tool that wants an
     // answer treats its absence the same way it treats a missing `addBlock`:
@@ -1056,7 +1089,7 @@ export async function runAgent(
       return lastText;
     };
 
-    const mountedPluginTools = ctx.pluginTools.map((tool) =>
+    const mountedPluginTools = runTools.map((tool) =>
       defineTool({
         name: tool.name,
         label: tool.label,
@@ -1145,10 +1178,26 @@ export async function runAgent(
     // they no longer want, and that is a decision made once rather than a
     // prefix thrown away in the middle of a run.
     settingsManager.setCompactionEnabled(false);
+    // An agent's INSTRUCTION.md is appended to weaver's own prompt rather
+    // than replacing it. The harness rules — what a block is, how its
+    // content goes on the wire, what a tool result reads like — stay true
+    // when a run is invoked as an agent, and an agent author writes what is
+    // different about this run, not the whole harness again. The heading
+    // names the agent so the model can tell the two documents apart.
+    const systemPrompt = agent?.instructions
+      ? `${WEAVER_SYSTEM_PROMPT}\n\n# ${agent.name} agent\n\n${agent.instructions}`
+      : WEAVER_SYSTEM_PROMPT;
     const resourceLoader = createAgentResourceLoader({
       cwd,
       settingsManager,
-      systemPrompt: WEAVER_SYSTEM_PROMPT,
+      systemPrompt,
+      // The agent's own `skills/` directory comes before every discovered
+      // one: pi keeps the first skill it loads under a name, so an agent
+      // that ships a skill of its own is never shadowed by a project copy of
+      // the same name. It still obeys the run's skills toggle — turning
+      // skills off turns the agent's off too, since the agent is configured
+      // with them, not above the setting.
+      extraSkillDirs: agent?.skillDirs ?? [],
       resources: {
         extensions: !(body.noExtensions ?? DISCOVERY_DEFAULTS.noExtensions),
         skills: !(body.noSkills ?? DISCOVERY_DEFAULTS.noSkills),
@@ -1368,7 +1417,7 @@ export async function runAgent(
     // makes a drop-in plugin's tool usable instead of inert.
     const allowedTools = [
       ...ALLOWED_TOOLS,
-      ...ctx.pluginTools.map((tool) => tool.name),
+      ...runTools.map((tool) => tool.name),
     ];
     const requested = body.tools.filter((name) => allowedTools.includes(name));
     // Every allowed tool by default: this is a single-operator harness, not

@@ -15,6 +15,7 @@ import { agentSearxng } from "@plugins/agent-seerxng";
 import { agentSubagents } from "@plugins/agent-subagents";
 import { richMedia } from "@plugins/rich-media";
 import { userInput } from "@plugins/user-input";
+import { weaverAgents } from "@plugins/weaver-agents";
 import { getStore } from "./store.js";
 
 /**
@@ -29,6 +30,7 @@ const BUILT_IN: Plugin[] = [
   agentHindsight,
   agentSubagents,
   userInput,
+  weaverAgents,
 ];
 
 /** Store key the configured plugin directory lives under. */

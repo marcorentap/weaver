@@ -1,10 +1,8 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type {
-  AgentEvent,
-  AgentRunRequest,
-} from "../shared/agent-events.js";
+import type { AgentEvent, AgentRunRequest } from "../shared/agent-events.js";
 import type {
   AdoptArtifactResult,
+  AgentSummary,
   CheckResult,
   ClipboardPaste,
   CreateSessionResult,
@@ -55,7 +53,11 @@ const api: WeaverApi = {
     loadGraph: (session) =>
       ipcRenderer.invoke("chat:loadGraph", session) as Promise<LoadGraphResult>,
     deleteChatBlock: (graphId, id) =>
-      ipcRenderer.invoke("chat:deleteChatBlock", graphId, id) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:deleteChatBlock",
+        graphId,
+        id,
+      ) as Promise<MutationResult>,
     updateBlockField: (graphId, blockId, name, value) =>
       ipcRenderer.invoke(
         "chat:updateBlockField",
@@ -72,22 +74,46 @@ const api: WeaverApi = {
         label,
       ) as Promise<MutationResult>,
     createChatBlock: (graphId, input: BlockInput, at: Position) =>
-      ipcRenderer.invoke("chat:createChatBlock", graphId, input, at) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:createChatBlock",
+        graphId,
+        input,
+        at,
+      ) as Promise<MutationResult>,
     moveChatBlock: (graphId, blockId, at: Position) =>
-      ipcRenderer.invoke("chat:moveChatBlock", graphId, blockId, at) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:moveChatBlock",
+        graphId,
+        blockId,
+        at,
+      ) as Promise<MutationResult>,
     createChatSession: (name) =>
-      ipcRenderer.invoke("chat:createChatSession", name) as Promise<CreateSessionResult>,
+      ipcRenderer.invoke(
+        "chat:createChatSession",
+        name,
+      ) as Promise<CreateSessionResult>,
     renameChatSession: (graphId, name) =>
-      ipcRenderer.invoke("chat:renameChatSession", graphId, name) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:renameChatSession",
+        graphId,
+        name,
+      ) as Promise<MutationResult>,
     duplicateChatSession: (graphId) =>
       ipcRenderer.invoke(
         "chat:duplicateChatSession",
         graphId,
       ) as Promise<CreateSessionResult>,
     deleteChatSession: (graphId) =>
-      ipcRenderer.invoke("chat:deleteChatSession", graphId) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:deleteChatSession",
+        graphId,
+      ) as Promise<MutationResult>,
     saveGraph: (graphId, blocks: BlockInput[]) =>
-      ipcRenderer.invoke("chat:saveGraph", graphId, blocks) as Promise<MutationResult>,
+      ipcRenderer.invoke(
+        "chat:saveGraph",
+        graphId,
+        blocks,
+      ) as Promise<MutationResult>,
   },
   settings: {
     get: (key: string) =>
@@ -96,12 +122,15 @@ const api: WeaverApi = {
       ipcRenderer.invoke("settings:set", key, value) as Promise<void>,
   },
   plugins: {
-    list: () =>
-      ipcRenderer.invoke("plugins:list") as Promise<PluginListResult>,
+    list: () => ipcRenderer.invoke("plugins:list") as Promise<PluginListResult>,
     validate: (pluginId, key, value) =>
       ipcRenderer.invoke("plugins:validate", pluginId, key, value) as Promise<
         string | null
       >,
+  },
+  agents: {
+    list: (pwd) =>
+      ipcRenderer.invoke("agents:list", pwd) as Promise<AgentSummary[]>,
   },
   links: {
     types: () =>
@@ -142,7 +171,11 @@ const api: WeaverApi = {
   },
   agent: {
     check: (endpoint, apiKey) =>
-      ipcRenderer.invoke("agent:check", endpoint, apiKey) as Promise<CheckResult>,
+      ipcRenderer.invoke(
+        "agent:check",
+        endpoint,
+        apiKey,
+      ) as Promise<CheckResult>,
     providerUsage: (endpoint, apiKey) =>
       ipcRenderer.invoke(
         "agent:providerUsage",
@@ -158,7 +191,10 @@ const api: WeaverApi = {
         done = true;
         ipcRenderer.removeListener(channel, listener);
       };
-      const listener = (_event: Electron.IpcRendererEvent, event: AgentEvent) => {
+      const listener = (
+        _event: Electron.IpcRendererEvent,
+        event: AgentEvent,
+      ) => {
         onEvent(event);
         if (event.type === "done" || event.type === "error") cleanup();
       };

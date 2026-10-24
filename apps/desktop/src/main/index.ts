@@ -7,11 +7,15 @@ import {
   shell,
   type MenuItemConstructorOptions,
 } from "electron";
-import { registerMediaProtocol, MEDIA_PROTOCOL_PRIVILEGES } from "./ipc/media-protocol.js";
+import {
+  registerMediaProtocol,
+  MEDIA_PROTOCOL_PRIVILEGES,
+} from "./ipc/media-protocol.js";
 import { registerChatHandlers } from "./ipc/chat.js";
 import { registerClipboardHandlers } from "./ipc/clipboard.js";
 import { registerArtifactHandlers } from "./ipc/artifacts.js";
 import { registerAgentHandlers } from "./ipc/agent.js";
+import { registerAgentListHandlers } from "./ipc/agents.js";
 import { registerSettingsHandlers } from "./ipc/settings.js";
 import { registerPluginHandlers } from "./ipc/plugins.js";
 import { registerHindsightHandlers } from "./ipc/hindsight.js";
@@ -95,8 +99,15 @@ function installApplicationMenu(): void {
           ...(isMac ? {} : { registerAccelerator: false }),
         },
         ...(isMac
-          ? ([{ role: "pasteAndMatchStyle" }, { role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])
-          : ([{ role: "delete" }, { role: "selectAll" }] as MenuItemConstructorOptions[])),
+          ? ([
+              { role: "pasteAndMatchStyle" },
+              { role: "delete" },
+              { role: "selectAll" },
+            ] as MenuItemConstructorOptions[])
+          : ([
+              { role: "delete" },
+              { role: "selectAll" },
+            ] as MenuItemConstructorOptions[])),
       ],
     },
     {
@@ -188,6 +199,7 @@ void app.whenReady().then(async () => {
   registerClipboardHandlers();
   registerArtifactHandlers();
   registerAgentHandlers();
+  registerAgentListHandlers();
   registerSettingsHandlers();
   registerPluginHandlers();
   registerHindsightHandlers();
