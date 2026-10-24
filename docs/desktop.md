@@ -212,19 +212,39 @@ the renderer has even been told it.
 
 ## Agent resources
 
-Discovery is defined in `main/lib/agent-dir.ts`. There are three roots, and their
-order is their precedence:
+Discovery is defined in `main/lib/agent-dir.ts`. Two namespaces, with one job
+each:
 
 ```
-<cwd>/.weaver/<type>
+~/.agents/        <cwd>/.agents/     agent resources, shared with other harnesses
+~/.weaver/        <cwd>/.weaver/     weaver's own configuration
+```
+
+Agent resources — `skills/`, `prompts/`, `themes/`, `extensions/`,
+`AGENTS.md`, `APPEND_SYSTEM.md` — live only under the `.agents` roots. Within a
+resource type the project directory wins, because it is listed first and pi keys
+an entry by name:
+
+```
 <cwd>/.agents/<type>
 ~/.agents/<type>
 ```
 
-for the resource types `skills`, `prompts`, `themes` and `extensions`. pi's own
-directories are never consulted, and pi's project-local settings file is never
-opened: weaver hands the loader every directory explicitly, with pi's discovery
-passes turned off (`projectTrusted: false`). Context files are `AGENTS.md`.
+`.weaver` is never scanned for resources. It holds what only weaver reads:
+`~/.weaver/plugins`, `~/.weaver/store.db` and `~/.weaver/artifacts`. A resource
+there would be invisible to every other harness reading the same project, and a
+project-level copy would silently redefine an inherited skill instead of editing
+the directory the project already owns.
+
+pi's own directories are never consulted, and pi's project-local settings file
+is never opened: weaver hands the loader every directory explicitly, with pi's
+discovery passes turned off (`projectTrusted: false`).
+
+Context files are the exception to "a directory named after the kind", because
+`AGENTS.md`'s convention is the repository tree itself: `~/.agents/AGENTS.md`
+plus one file per directory from the repository root down to the working
+directory, where `AGENTS.override.md` shadows `AGENTS.md` in the same directory.
+pi's walk stays in place for that (`noContextFiles` is passed through).
 
 `main/lib/agent-resources.ts` builds the settings manager and the resource
 loader. `main/lib/run-agent.ts` reads `main/agent/system-prompt.md` and passes it

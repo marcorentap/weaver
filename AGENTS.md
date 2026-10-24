@@ -190,10 +190,10 @@ summarization) or creates a full pi session with our custom tools
   as a `media` block. Nothing streams and no tool is mounted: the pictures or
   an error are the whole of the run.
 
-- Resources (skills, extensions, context files) are discovered from `~/.agents`,
-  `<cwd>/.agents` and `<cwd>/.weaver`, never from pi's own directories. The
-  three are one precedence chain — `.weaver` over `.agents` over
-  `~/.agents` — with `AGENT_DIR` honored.
+- Resources (skills, extensions, context files) are discovered from
+  `<cwd>/.agents` and `~/.agents`, never from pi's own directories — the
+  project directory first, with `AGENT_DIR` honored. `.weaver` is weaver's own
+  configuration (`plugins`, `store.db`, `artifacts`), not a resource root.
 - The system prompt is `main/agent/system-prompt.md`, injected via
   `WEAVER_SYSTEM_PROMPT`, replacing pi's default.
 - Events are zod-validated in `shared/agent-events.ts` and streamed to the

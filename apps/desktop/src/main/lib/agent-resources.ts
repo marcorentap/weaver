@@ -7,16 +7,14 @@ import {
 import {
   AGENT_DIR,
   projectAgentsDir,
-  projectWeaverDir,
   resourceDirs,
   type AgentResourceType,
 } from "./agent-dir.js";
 
 /**
  * Which of pi's four discoverable resource kinds a run wants. An enabled
- * kind is supplied from the three agent directories — `~/.agents/<kind>`,
- * `<cwd>/.agents/<kind>` and `<cwd>/.weaver/<kind>`; a disabled one
- * contributes nothing at all.
+ * kind is supplied from the two agent directories — `<cwd>/.agents/<kind>`
+ * and `~/.agents/<kind>`; a disabled one contributes nothing at all.
  */
 export type AgentResources = Record<AgentResourceType, boolean>;
 
@@ -39,13 +37,13 @@ export function createAgentSettings(cwd: string): SettingsManager {
 
 /**
  * Append-prompt files weaver honors: `~/.agents/APPEND_SYSTEM.md`, then the
- * project's append prompt — `<cwd>/.weaver/APPEND_SYSTEM.md` when the project
- * has one, `<cwd>/.agents/APPEND_SYSTEM.md` otherwise. Existing files only.
+ * project's `<cwd>/.agents/APPEND_SYSTEM.md`. Existing files only.
  *
- * The two project directories are one tier, not two sources: an append prompt
- * is a single document, so a project keeping its own under `.weaver` is
- * replacing the one it inherited rather than appending a second. The user's
- * file is a different tier and still applies.
+ * One file per tier and no more, because an append prompt is a single
+ * document: a project that keeps one is adding to the user's, not merging
+ * with a second project-level copy. The location follows from `.agents`
+ * being the only namespace agent resources live in — there is no `.weaver`
+ * alternative to look in.
  *
  * Handing the list over — even when it is empty — is what stops pi from
  * discovering `<cwd>/.pi/APPEND_SYSTEM.md` for itself. An entry that does not
@@ -53,12 +51,10 @@ export function createAgentSettings(cwd: string): SettingsManager {
  * text, so it must be filtered here.
  */
 function appendSystemPromptSources(cwd: string): string[] {
-  const project = [projectWeaverDir(cwd), projectAgentsDir(cwd)]
-    .map((dir) => join(dir, "APPEND_SYSTEM.md"))
-    .find((path) => existsSync(path));
-  return [join(AGENT_DIR, "APPEND_SYSTEM.md"), project].filter(
-    (path): path is string => path !== undefined && existsSync(path),
-  );
+  return [
+    join(AGENT_DIR, "APPEND_SYSTEM.md"),
+    join(projectAgentsDir(cwd), "APPEND_SYSTEM.md"),
+  ].filter((path) => existsSync(path));
 }
 
 /**
@@ -141,7 +137,7 @@ function declaredExtensionEntries(dir: string): string[] | null {
  * registers every file it is handed, so the same extension present in two
  * directories would load twice and register its tools twice. The key used
  * here is therefore the entry's path inside its own `extensions/` directory —
- * `<cwd>/.weaver/extensions/foo.ts` replaces `<cwd>/.agents/extensions/foo.ts`,
+ * `<cwd>/.agents/extensions/foo.ts` replaces `~/.agents/extensions/foo.ts`,
  * and a differently named extension, or one only the user has, still loads.
  */
 function extensionPaths(cwd: string): string[] {
@@ -166,9 +162,9 @@ function extensionPaths(cwd: string): string[] {
  * given *and* a project-local `.pi/`, whose name is compiled into the
  * package and cannot be changed from the outside. So all four built-in
  * discovery passes are switched off and each wanted directory is passed as
- * an explicit path instead. That leaves exactly three sources, all ours:
- * `~/.agents/<kind>`, `<cwd>/.agents/<kind>` and `<cwd>/.weaver/<kind>`,
- * and no path by which `<cwd>/.pi` could be read.
+ * an explicit path instead. That leaves exactly two sources, both ours:
+ * `~/.agents/<kind>` and `<cwd>/.agents/<kind>`, and no path by which
+ * `<cwd>/.pi` could be read.
  *
  * The cost is pi's package manager: resources installed from an npm/git
  * source declared in a settings file are no longer resolved. Weaver has no
@@ -177,9 +173,15 @@ function extensionPaths(cwd: string): string[] {
  * resolve.
  *
  * `noContextFiles` is the caller's, and is the one thing still left to pi's
- * own machinery: project context files are `AGENTS.md`, an Agent Skills
- * convention read from the working directory and its ancestors, not from
- * `.pi`.
+ * own machinery, for a reason that is a location rather than a leftover:
+ * context files are `AGENTS.md`, the one agent resource whose convention is
+ * the repository tree itself — a file per directory from the repository root
+ * down to the working directory, plus `~/.agents/AGENTS.md` — rather than a
+ * directory named after the kind. There is no `<kind>/` to hand over, and
+ * pi's walk already implements the inheritance, the worktree de-duplication
+ * and the `AGENTS.override.md` shadow that make that convention usable. It
+ * reads `.pi` only through the project-local directory pi would otherwise
+ * discover by itself, which the explicit `cwd` and `agentDir` here deny it.
  */
 export function createAgentResourceLoader(options: {
   cwd: string;

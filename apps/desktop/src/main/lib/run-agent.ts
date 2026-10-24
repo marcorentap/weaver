@@ -127,8 +127,11 @@ function namespaceNestedEvent(event: AgentEvent, prefix: string): AgentEvent {
  * these per run / app-wide.
  *
  * Each of the first four is a *weaver* resource kind, discovered from
- * `~/.agents`, `<cwd>/.agents` and `<cwd>/.weaver` — never from pi's own
- * directories. See `createAgentResourceLoader`.
+ * `<cwd>/.agents` and `~/.agents` — never from pi's own directories, and
+ * never from `.weaver`, which holds weaver's configuration rather than
+ * agent resources. Context files are the one kind read from the repository
+ * tree instead of a directory named after it, so they stay pi's walk. See
+ * `createAgentResourceLoader`.
  */
 const DISCOVERY_DEFAULTS = {
   noExtensions: false,
