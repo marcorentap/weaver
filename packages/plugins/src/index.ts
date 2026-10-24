@@ -92,13 +92,21 @@ export type ToolRunContext = {
    * is visible as that call's branch rather than as more of this run's
    * output.
    *
+   * `agent` names the Weaver agent the subagent should be invoked as — the
+   * same name a person attaches with `@agents:` and a run request carries as
+   * its `agent`. Omitted, the subagent runs as the agent this run is
+   * invoked as, so a spawning chain stays within one agent unless a tool
+   * deliberately crosses to another. A name nothing holds fails that
+   * subagent's run rather than quietly falling back, the way an unknown
+   * agent fails a run of its own.
+   *
    * Optional on the same terms as the other two: a harness that cannot run a
    * nested agent omits it, and a tool that needs one must say so in text
    * instead of assuming it exists. The subagent is itself an agent run, so a
    * tool mounted on this run is mounted on that one too — spawning may
    * recurse.
    */
-  spawnAgent?: (messages: ContextMessage[]) => Promise<string>;
+  spawnAgent?: (messages: ContextMessage[], agent?: string) => Promise<string>;
   /**
    * The call this tool is executing, as it came off the wire: `args` is the
    * JSON string the model sent, exactly as the request carried it.
@@ -115,6 +123,21 @@ export type ToolRunContext = {
 };
 
 /**
+ * What a tool can learn about the run it is being mounted on, for a
+ * description that cannot be written until then. `agents` is the shelves as
+ * this run sees them: a tool taking an agent name has to say which names it
+ * could take, and that list is a fact about the run's working directory —
+ * not about the tool — so it arrives here rather than being hard-coded and
+ * going stale.
+ */
+export type ToolScope = {
+  /** The Weaver agents this run could name, merged across the project's
+   *  shelf and the user's, with each one's `DESCRIPTION.md`. Empty on a run
+   *  whose working directory has none. */
+  agents: { name: string; description: string }[];
+};
+
+/**
  * An agent tool a plugin contributes, as a structure the app mounts onto the
  * agent session runner. Kept tool-shaped rather than tied to a particular
  * agent SDK, so a plugin need not import one. `parameters` is a TypeBox
@@ -123,7 +146,14 @@ export type ToolRunContext = {
 export type PluginTool = {
   name: string;
   label: string;
-  description: string | string[];
+  /**
+   * What the tool is for, in the words the model reads. A function is
+   * called at mount time with the run's `ToolScope`, for a tool whose
+   * options are whatever the run can see: the agents a subagent tool could
+   * be asked to name differ per project, and a static description would
+   * either lie about them or leave them out.
+   */
+  description: string | string[] | ((scope: ToolScope) => string | string[]);
   /** TypeBox object schema the agent validates arguments against. */
   parameters: Record<string, unknown>;
   /**

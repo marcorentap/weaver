@@ -7,7 +7,9 @@ import { spawnSubagentTool } from "./tools/spawn-subagent/index.ts";
  * caller supplies and returns its answer, with the subagent's whole
  * transcript nested under the call's own block. The subagent inherits the
  * spawning run's inference configuration and environment, so spawning may
- * recurse.
+ * recurse; its `agent` argument can instead name any Weaver agent the system
+ * prompt lists, letting a run hand a task to an agent whose instructions and
+ * tools suit it better than the caller's own.
  */
 export const agentSubagents = definePlugin({
   id: "agent-subagents",

@@ -253,10 +253,18 @@ summarization) or creates a full pi session with our custom tools
   and the ask itself, which is a `user` turn whatever kind the anchored block
   belongs to (`block.asked`).
 - A tool can start another run inside its own call:
-  `ctx.spawnAgent(messages)` (see `ToolRunContext`) runs a nested agent on
-  the messages it is given, inheriting the spawning run's request (endpoint,
-  model, tools, discovery flags, merged environment), so a tool mounted on
-  one run is mounted on the next and spawning recurses. The nested run's
+  `ctx.spawnAgent(messages, agent?)` (see `ToolRunContext`) runs a nested
+  agent on the messages it is given, inheriting the spawning run's request
+  (endpoint, model, tools, discovery flags, merged environment), so a tool
+  mounted on one run is mounted on the next and spawning recurses. `agent`
+  names a Weaver agent to run the subagent as, resolved by the nested run
+  against its own working directory and failing an unknown name; omitted, the
+  subagent runs as the spawning run's own agent. Every run that mounts
+  `spawn_subagent` is told which agents it could name in the tool's own
+  description, built at mount time from `listAgents(cwd)` with each agent's
+  `DESCRIPTION.md` as its line — a `PluginTool.description` may be a function
+  of the run's `ToolScope`, since the shelves change between runs while the
+  descriptor does not. The nested run's
   events travel the same channel, each carrying a `nest` scope that names
   the spawning call's wire id — its tool and question ids namespaced by that
   same id, so nothing collides — and the renderer appends each event under

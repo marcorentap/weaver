@@ -19,7 +19,7 @@ import {
   type ContextMessage,
   type KindRegistry,
 } from "@repo/core";
-import type { PluginTool } from "@repo/plugins";
+import type { PluginTool, ToolScope } from "@repo/plugins";
 import {
   MEDIA_KIND,
   parseMediaUri,
@@ -53,7 +53,7 @@ import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
 import { AGENT_DIR } from "./agent-dir.js";
-import { loadAgentTools, resolveAgent } from "./agents.js";
+import { listAgents, loadAgentTools, resolveAgent } from "./agents.js";
 import {
   createAgentResourceLoader,
   createAgentSettings,
@@ -980,6 +980,26 @@ export async function runAgent(
     for (const tool of agentTools) toolsByName.set(tool.name, tool);
     const runTools = [...toolsByName.values()];
 
+    // What a tool may read about this run when it describes itself (see
+    // `PluginTool.description`): the agents this run's working directory
+    // holds, scanned once here so the roster a spawn tool offers is the same
+    // list `@agents:` completes against and the one the nested run will
+    // resolve a name against. Only the two fields a description can use are
+    // passed on; which shelf an agent came from is a picker's concern.
+    const toolScope: ToolScope = {
+      agents: listAgents(cwd).map(({ name, description }) => ({
+        name,
+        description,
+      })),
+    };
+    const descriptionOf = (tool: PluginTool): string => {
+      const description =
+        typeof tool.description === "function"
+          ? tool.description(toolScope)
+          : tool.description;
+      return Array.isArray(description) ? description.join("\n") : description;
+    };
+
     // Mount every tool this run contributes — the plugins' and, when one
     // was chosen, the agent's. A plugin tool is a narrow descriptor (see
     // `@repo/plugins`); this wraps it in the SDK's shape and hands a
@@ -1016,11 +1036,18 @@ export async function runAgent(
      */
     const spawnSubagent = async (
       messages: ContextMessage[],
+      agentName: string | undefined,
       parentToolId: string,
       signal: AbortSignal | undefined,
     ): Promise<string> => {
       const subRequest: AgentRunRequest = {
         ...body,
+        // The agent the subagent runs as: the one the tool named, or this
+        // run's own when it named none, so a spawn stays inside the agent it
+        // was made from unless it deliberately crosses shelves. Resolved by
+        // the nested run itself — against the same working directory, and
+        // failing the same way — so one place decides what a name means.
+        agent: agentName ?? body.agent,
         // The note rides last among the material, closest to the task, so the
         // subagent reads what its answer has to do immediately before being
         // asked for it.
@@ -1093,9 +1120,7 @@ export async function runAgent(
       defineTool({
         name: tool.name,
         label: tool.label,
-        description: Array.isArray(tool.description)
-          ? tool.description.join("\n")
-          : tool.description,
+        description: descriptionOf(tool),
         parameters: tool.parameters as Parameters<
           typeof defineTool
         >[0]["parameters"],
@@ -1148,7 +1173,8 @@ export async function runAgent(
             spawnAgent:
               parentToolId === undefined
                 ? undefined
-                : (messages) => spawnSubagent(messages, parentToolId, signal),
+                : (messages, agentName) =>
+                    spawnSubagent(messages, agentName, parentToolId, signal),
             // The call as the wire carried it, for a tool whose block has to
             // replay as this call rather than as a reading of its own state.
             call: {

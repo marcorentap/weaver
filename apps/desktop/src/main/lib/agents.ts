@@ -28,7 +28,11 @@ function isPluginTool(value: unknown): value is PluginTool {
     candidate.name.length > 0 &&
     typeof candidate.label === "string" &&
     (typeof candidate.description === "string" ||
-      Array.isArray(candidate.description)) &&
+      Array.isArray(candidate.description) ||
+      // A description computed at mount time (see `PluginTool.description`)
+      // is the same shape as any other to this loader: the harness calls it
+      // with the run's scope when the tool is mounted.
+      typeof candidate.description === "function") &&
     typeof candidate.execute === "function" &&
     typeof candidate.parameters === "object" &&
     candidate.parameters !== null

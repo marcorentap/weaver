@@ -91,6 +91,13 @@ const tool: PluginTool = {
 export default tool;
 ```
 
+`description` may also be a function of the mount scope —
+`(scope) => string | string[]` — for a tool whose options are whatever the
+run can see. `scope.agents` lists the agents on the shelves with their
+`DESCRIPTION.md`, so a tool that takes an agent name can say which names it
+could take without hard-coding a list that goes stale; the harness calls the
+function when it mounts the tool.
+
 `execute` receives a `ToolRunContext`:
 
 - `addBlock(kind, data, label)` lands a block right after the run's anchor.
@@ -98,8 +105,9 @@ export default tool;
 - `wait(kind, data, label)` raises a block and parks the run until it is
   answered, returning the answer or null. Optional, and only for kinds whose
   own `resume` can answer it.
-- `spawnAgent(messages)` runs a nested agent on the turns it is given and
-  returns its final answer. Optional.
+- `spawnAgent(messages, agent?)` runs a nested agent on the turns it is
+  given and returns its final answer; `agent` names a Weaver agent to run it
+  as, defaulting to the run's own. Optional.
 - `getSetting(pluginId, key)` reads the app's plugin settings.
 - `call` is the wire call's own `args` JSON string, for tools that materialize
   a block replaying their call.
