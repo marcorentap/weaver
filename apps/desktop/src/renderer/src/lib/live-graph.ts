@@ -92,6 +92,11 @@ type RunConnection = {
   /** Cap on how many output tokens the run's model may produce, or 0 for
    *  no cap. Goes to the main process as the request's own `maxTokens`. */
   maxTokens?: number;
+  /** The session this graph belongs to, so a run that produces files of its
+   *  own — the pictures an image model generates — writes them into that
+   *  session's artifacts directory. Goes to the main process as the
+   *  request's own `sessionId`. */
+  sessionId?: string;
   noExtensions?: boolean;
   noSkills?: boolean;
   noPromptTemplates?: boolean;
@@ -576,6 +581,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       providerSettings,
       thinkingLevel,
       maxTokens,
+      sessionId,
       noExtensions,
       noSkills,
       noPromptTemplates,
@@ -939,6 +945,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           // this graph asks the same host for the prefix they share. Falls
           // back on the block itself for a graph with no root yet.
           cacheKey: snapshot.graph.root ?? id,
+          sessionId,
           tools,
           providerId,
           providerSettings,

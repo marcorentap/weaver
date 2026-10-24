@@ -17,7 +17,8 @@ apps/desktop/src/
     ipc/           one file per IPC group: agent, artifacts, chat, clipboard, export, links, media-protocol, plugins, settings, hindsight
     lib/           run-agent.ts (run engine), agent-runtime.ts, agent-dir.ts, agent-resources.ts,
                    read/write/edit-source.ts, project.ts, plugins.ts, store.ts, seed.ts, ssh.ts, symbol-index.ts,
-                   context-wire.ts (graph → provider payload), model-vision.ts (does the model take images)
+                   context-wire.ts (graph → provider payload), model-modalities.ts (does the model
+                   take and/or make images), image-generation.ts (image API client)
   preload/         the only typed bridge exposed to the renderer
   renderer/src/    React UI (no Node access)
     lib/           chat-store, live-graph (client model), inference, keymap, pages, routes, settings, viewport, links
@@ -90,7 +91,7 @@ Everything lives in `packages/core`.
   provider's `onPayload` hook, ahead of pi's own first turn. A kind may also
   put pictures on a turn (`images`), which travel as URIs and are read and
   attached as content parts by `main/lib/context-wire.ts` — only when the
-  model takes image input (`main/lib/model-vision.ts`: the endpoint's own
+  model takes image input (`main/lib/model-modalities.ts`: the endpoint's own
   `/models` listing, falling back on pi's catalog), and never at the cost of
   the text description the snapshot already wrote. The `read` tool answers a
   picture the same way: an image file (see `attachableImage` in rich-media)
@@ -177,6 +178,17 @@ IPC handler. It mounts a `weaver` provider on pi's `ModelRuntime`
 (endpoint/key from the request) and either runs plain (no tools, used for
 summarization) or creates a full pi session with our custom tools
 (read/write/edit/display_media) plus plugin tools and plugin-provided kinds.
+
+- A model whose output is pictures is not a chat model, so such a run takes a
+  different path before anything is mounted: `modelOutputsImages`
+  (`model-modalities.ts`, the endpoint's `/models` output modalities, falling
+  back on pi's image catalog) sends it to the endpoint's image API instead of
+  a completion. `main/lib/image-generation.ts` posts the request's whole ask
+  as one prompt — the graph above the block, then the block — plus the
+  anchoring block's own pictures as reference images, and the run writes each
+  returned base64 picture into the session's artifacts directory and emits it
+  as a `media` block. Nothing streams and no tool is mounted: the pictures or
+  an error are the whole of the run.
 
 - Resources (skills, extensions, context files) are discovered from `~/.agents`,
   `<cwd>/.agents` and `<cwd>/.weaver`, never from pi's own directories. The

@@ -46,7 +46,9 @@ import {
   spliceContext,
   weaveContext,
 } from "./context-wire.js";
-import { modelTakesImages } from "./model-vision.js";
+import { modelOutputsImages, modelTakesImages } from "./model-modalities.js";
+import { generateImages } from "./image-generation.js";
+import { writeSessionArtifact } from "./artifacts.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
@@ -533,6 +535,95 @@ function formatBytes(bytes: number): string {
     : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
 }
 
+/** Where an image run's pictures land when the request names no session — a
+ *  run started from a caller with no graph of its own, such as a bare tool
+ *  host. A folder of its own rather than the project, for the same reason
+ *  every other artifact lives under the app's home: these bytes belong to no
+ *  directory anyone chose. */
+const UNSAVED_ARTIFACTS = "generated";
+
+/**
+ * The whole ask as one string: the material above the block, then the block
+ * itself.
+ *
+ * A chat run sends those turns as turns; an image API takes one prompt, so
+ * the transcript collapses into paragraphs in the order a reader would read
+ * them. Each message's content already says what it is — a block's snapshot
+ * carries its label, a tool result says what it returned — so no role prefix
+ * is added here that the words themselves do not already carry.
+ */
+function imagePrompt(body: AgentRunRequest): string {
+  const material = body.context
+    .map((message) => message.content.trim())
+    .filter((text) => text.length > 0);
+  return [...material, body.prompt].join("\n\n");
+}
+
+/**
+ * One image-generation run: the ask goes to the endpoint's image API, and
+ * every picture that comes back becomes a media block of its own, written
+ * into the session's artifacts directory first so the block points at a file
+ * the app owns and the media protocol can serve.
+ *
+ * There is no stream here and nothing to iterate: an image arrives whole or
+ * the request fails, so the run emits its blocks and then its terminal event.
+ * The blocks land in the graph between them, which is the whole visible
+ * progress a generation has.
+ */
+async function runImageModel(
+  body: AgentRunRequest,
+  ctx: AgentRunContext,
+  emit: (event: AgentEvent) => void,
+  cwd: string,
+): Promise<void> {
+  const controller = new AbortController();
+  ctx.onSession?.(() => controller.abort());
+  try {
+    const images = await generateImages({
+      endpoint: body.endpoint,
+      apiKey: body.apiKey,
+      model: body.model,
+      prompt: imagePrompt(body),
+      // The pictures the run was asked about, and only those: material above
+      // the block stays words, since every reference is a picture the prompt
+      // is about rather than one it was given as background.
+      references: body.promptImages ?? [],
+      cwd,
+      ...(body.providerId === "openrouter"
+        ? { headers: { ...OPENROUTER_ATTRIBUTION } }
+        : {}),
+      signal: controller.signal,
+    });
+    for (const [index, image] of images.entries()) {
+      const uri = await writeSessionArtifact(
+        body.sessionId ?? UNSAVED_ARTIFACTS,
+        image.bytes,
+        image.extension,
+      );
+      // Served before its block persists, exactly as a pasted picture is
+      // (see `pending-media.ts`): the renderer will request this URI as soon
+      // as the block lands, and a `weaver-media://` fetch that arrives
+      // before the next autosave would otherwise 403 and never retry.
+      ctx.registerPendingMedia?.(uri);
+      emit({
+        type: "block",
+        kind: MEDIA_KIND,
+        label:
+          images.length > 1
+            ? `Generated image ${index + 1}`
+            : "Generated image",
+        data: { uri },
+      });
+    }
+    emit({ type: "done" });
+  } catch (error) {
+    emit({
+      type: "error",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 /**
  * One full agent run. Validates the request, mounts the model, tools and
  * plugins, runs the session, and maps every SDK event into the app's
@@ -555,6 +646,41 @@ export async function runAgent(
   }
 
   try {
+    /**
+     * The agent's working directory and environment. The block's own merged
+     * environment (every `environment` block above it, closer overriding
+     * farther) shades the host's own for this run: `WEAVER_PWD` becomes the
+     * directory the agent starts in, and the remaining variables reach its
+     * tools. A relative `WEAVER_PWD` resolves against the project root, the
+     * same base the media protocol falls back to; an unset one leaves the
+     * agent at the project root as before.
+     *
+     * A plain run has no tools and no session, but it is still resolved this
+     * far: the same directory is what a media block's relative path resolves
+     * against when its picture is attached to the request, so the file a run
+     * sends is the file the renderer showed (`imageUrl` / `spliceContext`).
+     * An image run needs it for the run's own reference pictures, which are
+     * read off the disk the same way.
+     */
+    const agentEnv = { ...process.env, ...(body.env ?? {}) };
+    const weaverPwd = agentEnv[WEAVER_PWD];
+    const cwd = weaverPwd
+      ? isAbsolute(weaverPwd)
+        ? weaverPwd
+        : resolve(ctx.root, weaverPwd)
+      : ctx.root;
+
+    // An image model is not a chat model with a different id: its output is
+    // pictures, which no completion returns, so the run goes to the
+    // endpoint's image API and every picture comes back as a media block.
+    // Decided before anything is mounted, because none of the chat machinery
+    // — the model registration, the system prompt, the tools, the context
+    // wire — has a part to play in it.
+    if (await modelOutputsImages(body.endpoint, body.apiKey, body.model)) {
+      await runImageModel(body, ctx, emit, cwd);
+      return;
+    }
+
     const modelRuntime = await ModelRuntime.create({
       // Weaver keeps no model credentials on disk: the endpoint and key
       // arrive with the run, and nothing persists them afterwards. An
@@ -578,7 +704,7 @@ export async function runAgent(
      * run and remembered.
      *
      * The answer comes from a probe of the endpoint's `/models`, falling back
-     * on pi's bundled catalog (`model-vision.ts`), and it is asked lazily
+     * on pi's bundled catalog (`model-modalities.ts`), and it is asked lazily
      * because the two things that need it learn it at different moments: a run
      * whose own context already carries a picture has to know before it starts
      * — the registered model's `input` (below) is what pi reads when it decides
@@ -667,28 +793,6 @@ export async function runAgent(
       emit({ type: "error", message: `unknown model: ${body.model}` });
       return;
     }
-
-    /**
-     * The agent's working directory and environment. The block's own merged
-     * environment (every `environment` block above it, closer overriding
-     * farther) shades the host's own for this run: `WEAVER_PWD` becomes the
-     * directory the agent starts in, and the remaining variables reach its
-     * tools. A relative `WEAVER_PWD` resolves against the project root, the
-     * same base the media protocol falls back to; an unset one leaves the
-     * agent at the project root as before.
-     *
-     * A plain run has no tools and no session, but it is still resolved this
-     * far: the same directory is what a media block's relative path resolves
-     * against when its picture is attached to the request, so the file a run
-     * sends is the file the renderer showed (`imageUrl` / `spliceContext`).
-     */
-    const agentEnv = { ...process.env, ...(body.env ?? {}) };
-    const weaverPwd = agentEnv[WEAVER_PWD];
-    const cwd = weaverPwd
-      ? isAbsolute(weaverPwd)
-        ? weaverPwd
-        : resolve(ctx.root, weaverPwd)
-      : ctx.root;
 
     // A plain call: the run's `context` as material and then the prompt
     // itself as the run's `user` turn. A plain run carries no session, so

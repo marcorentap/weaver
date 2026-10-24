@@ -191,6 +191,13 @@ export const agentRunRequest = z.object({
    *  as the run's own `user` turn, after everything in `context`, so the
    *  block being run is always the thing being answered. */
   prompt: z.string(),
+  /** The session the graph belongs to, so something a run creates for it —
+   *  the pictures an image model generates — can be written into that
+   *  session's own artifacts directory (`~/.weaver/artifacts/<id>/`) and
+   *  become a media block like a pasted screenshot does. Omitted by a caller
+   *  with no session of its own, which then gets a shared folder of its own
+   *  rather than the project directory. */
+  sessionId: z.string().optional(),
   /** Which transcript this run belongs to, named by the renderer (the root
    *  block of the graph it reads). Only ever sent to OpenAI, whose prompt
    *  cache is keyed by content but routed by this: without it a long prefix

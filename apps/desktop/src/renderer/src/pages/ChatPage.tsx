@@ -1298,6 +1298,10 @@ function ChatView({
       model: custom?.model ?? inferDefaultModel,
       thinkingLevel: (custom?.thinkingLevel ?? inferThinkingLevel) || undefined,
       maxTokens: inferMaxTokens,
+      // Where a run that makes files of its own — an image model's
+      // pictures — writes them, so they land with the rest of this
+      // session's artifacts instead of in a folder nobody opens.
+      sessionId: session.id,
       providerId: provider?.id,
       providerSettings: provider ? aiProviderSettings[provider.id] : undefined,
       noExtensions: custom?.noExtensions ?? inferNoExtensions,
@@ -1368,6 +1372,7 @@ function ChatView({
         (custom?.thinkingLevel ?? (summThinkingLevel || inferThinkingLevel)) ||
         undefined,
       maxTokens: summMaxTokens,
+      sessionId: session.id,
       providerId: provider?.id,
       providerSettings: provider
         ? (summProviderSettings[provider.id] ?? aiProviderSettings[provider.id])
@@ -1853,6 +1858,7 @@ function ChatView({
         apiKey: aiApiKey,
         model: inferDefaultModel,
         thinkingLevel: inferThinkingLevel || undefined,
+        sessionId: session.id,
         providerId: provider?.id,
         providerSettings: provider
           ? aiProviderSettings[provider.id]
