@@ -73,6 +73,32 @@ output shape.
 Keep it about conduct, not about the repository, unless the agent is only
 ever used in one repository.
 
+#### The answer it gives
+
+Say how the agent answers, and make it terse. An agent's final message is
+read by a model at least as often as by a person: run through
+`spawn_subagent`, it is the whole of what the caller receives, and once it
+lands as that call's result it is replayed in the caller's graph on every run
+after it — so every sentence around the facts is generated once and paid for
+again on each replay. Write the instructions for the form that costs the
+fewest tokens and survives being read that way: the facts, paths with line
+numbers, numbers, code and error strings verbatim, one item per line,
+fragments where a sentence would only add grammar. No greeting, heading,
+transition, or closing summary, no narration of what was read or ruled out,
+no restating of the question.
+
+A model left to its own habits writes a report with an opening and a recap;
+only `INSTRUCTION.md` overrules that, because it is the only thing a subagent
+reads that knows what it was asked to return. So put the shape in the file
+rather than in the calls that spawn it.
+
+Standing on its own and being terse are not in tension: the answer has to
+carry everything the caller will use, and it can still be written the way a
+commit subject and a diff summary are written. An agent also runs for a
+person, who writes `@agents:<name>` on a message and reads the same reply —
+that form is no worse for them, and the transcript beneath it holds the
+working if they want it.
+
 ### tools/
 
 Each tool is a TypeScript file, or a directory with an `index.ts`. It should
@@ -172,6 +198,36 @@ To check the merge, list the shelves: `ls ~/.weaver/agents` and
 `ls .weaver/agents` from the project root, plus whatever the app ships. If two
 agents share a name, the more specific one is what runs.
 
+## Keeping the files accurate
+
+The directory is the whole of the agent: nothing else records what it does, so
+a file that has drifted is not a stale comment, it is a wrong answer. Treat
+the files as part of whatever change you made rather than as a write-once
+draft — an agent whose tools grew a capability its `INSTRUCTION.md` still
+forbids, or whose description still promises work it no longer does, is worse
+than one that never had the text at all, because both a person and a model
+will pick it on the strength of that line.
+
+- `DESCRIPTION.md` is read by more than the pickers: it is the material block
+  a message writes when it attaches `@agents:<name>`, and the roster line
+  `spawn_subagent` builds on every mount. A model choosing an `agent` argument
+  sees exactly those words, so keep them about the work the agent does and
+  when to hand it some — not about how it is built, which nobody picks an
+  agent by.
+- `INSTRUCTION.md` and `skills/` are the run's actual context, so a procedure
+  that changed in practice and not in the file means every later run repeats
+  the old one. When you learn something about how the agent should behave
+  while debugging it, write it down there in the same edit; the fix that lives
+  only in the conversation that found it is lost with that conversation.
+- A tool the agent no longer needs is a line in the model's tool list it must
+  read and rule out every run: delete the file, and drop the sentence in
+  `INSTRUCTION.md` that tells it to use the tool.
+- Deleting an agent means removing its directory from every shelf it sits on.
+  A copy left on a more specific shelf does not disappear, it shadows the one
+  you meant to keep, and a name still on a shelf keeps resolving — so a run
+  naming an agent you thought you deleted gets the behavior you thought you
+  took away.
+
 ## Common mistakes
 
 - Putting an agent in `.weaver/plugins`. Plugins are code that registers
@@ -181,9 +237,16 @@ agents share a name, the more specific one is what runs.
   show a blank line and the material block has nothing to say about it.
 - Editing a bundled agent in place. Its directory is inside the app; the edit
   is lost on update and the file may be read-only. Copy it first.
+- Leaving `DESCRIPTION.md` as it was before the agent changed. It is the
+  only thing a person picking the agent and a model writing `spawn_subagent`
+  have to go on, and neither reads your instructions first.
 - Repeating the harness prompt in `INSTRUCTION.md`. It is appended, not a
   replacement, so restating it wastes context and dilutes the part that is
   specific.
+- Leaving the answer shape unsaid. An agent with no instruction about its
+  output writes prose, and every word of it is replayed in the caller's graph
+  for the rest of the conversation. One paragraph naming the terse form buys
+  that back on every call.
 - Using `ctx.wait` on a kind that has no `resume`. The tool gets null instead
   of an answer, so say so in text rather than parking a run nothing can
   release.

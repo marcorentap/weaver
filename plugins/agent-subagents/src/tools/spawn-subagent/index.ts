@@ -50,17 +50,27 @@ const ROLES = ["user", "assistant", "developer"] as const;
  * The tool only names the messages; the harness owns running the nested
  * agent, and a harness that cannot run one leaves `ctx.spawnAgent` off, which
  * this tool reports rather than pretending a subagent answered.
+ *
+ * The description pushes the caller toward subtasks and toward pointing
+ * rather than reporting, because only the final message comes back: a
+ * subagent handed the whole task returns the answer the caller was going to
+ * write anyway, so the same text is generated, carried and read twice — once
+ * as this tool's result and again in whatever the caller says. A subagent
+ * asked where something is returns a few hundred bytes the caller acts on,
+ * and the deliverable never leaves the run the person is reading.
  */
 export const spawnSubagentTool: PluginTool = {
   name: SPAWN_SUBAGENT_TOOL,
   label: "Spawn subagent",
   description: (scope) => [
-    "Run a subagent — another agent like you, on the same model and with the same tools — and get back what it finally answers. Use it to hand off a self-contained task you would otherwise do in this conversation: research that would fill your context with material you do not need afterwards, a side investigation, or work that can run on its own wording without the history around you. The subagent's whole transcript — every turn of its working, its tool calls and what they returned included — lands nested under this call's block. That transcript is a record for the person reading the graph, not for you.",
-    'Only its final message reaches you. Its reasoning, the tools it called, and everything it wrote before signing off stay in that nested branch, and no later run of yours reads them either. So your instruction has to say what you need back: tell the subagent its final answer must stand on its own — carrying the facts, the file paths, the numbers, the code, the quotes — and that it must not point at its own working with "as shown above" or "the file I read", because you cannot see any of it. A subagent asked only to "investigate X" can answer "X is fine, I checked" and leave you with nothing to use.',
-    "`messages` is the subagent's entire context, sent as the turns it already holds, so write it as the conversation the subagent should see. Use the `user` role for instructions to the subagent — what you want it to do — and give it everything it needs, because it starts with no memory of this conversation: your instruction has to stand on its own. Use `assistant` for something you want it to read as its own earlier reply (say, a first draft to continue from), and `developer` for reference material it reads but is not continuing (a file's contents, a spec, background facts). The last thing it sees should be a `user` turn telling it what to produce, and its answer is what this call returns.",
-    "Prefer a subagent for any task that breaks into isolated subtasks. Everything a subagent reads, searches, and discards stays in its own branch, and only its final answer enters your context, so parceling a large job out across subagents is how you keep your own context from filling with material you will not need once the answer is in hand. Reach for this when the work is substantial and its parts do not need to see each other or the conversation you are in: reading a whole module, tracing a call through many files, comparing several approaches.",
-    "Several calls in one batch run at the same time, each in its own branch, so when the work is genuinely independent — the same question asked of different files, several modules read at once, a few approaches compared — issue the calls together rather than one after another, and wait for the whole batch.",
-    "`agent` names a Weaver agent to run the subagent as — a different instruction set, tool list and skills, listed at the end of this description. Leave it out and the subagent runs as the agent this run is invoked as. Name one when the work belongs to that agent's specialty rather than to yours: the subagent must still be told everything it needs, since its own instructions are the only thing it inherits besides what you write.",
+    "Run a subagent — another agent like you, same model, same tools — and get back only what it finally answers. Everything else it does, its reasoning and every tool call and result included, stays in a transcript nested under this call's block: a record for the person reading the graph, not context for you.",
+    "Hand off a subtask, never the task itself. The ask is yours to answer, so what leaves this run is a piece of the work — the search, the survey, the ruling out — and the answer is written here, by you. A subagent given the whole job returns text you can only repeat to whoever asked, which charges them twice for the same paragraph and shows it to them twice.",
+    'Aim it at where things are, not at what is there: "where is X handled, which files does it pass through, which of these three places owns the behavior, is this name used anywhere" comes back as paths and line ranges you then open yourself. Asking it to read everything and explain is asking for your answer. A pointer costs a handful of tokens and leaves the reading — and the writing — where the ask lives.',
+    "The orienting work is what pays to hand off: locating a symbol, settling which candidate owns a behavior, checking whether something is used at all, mapping how a call gets from entry point to effect, naming the files a change will touch. The material behind the map stays in its branch; the map is a few lines.",
+    "Write `messages` as the subagent's whole context and write it terse: no greeting, no restating of the task you are about to give it, no explaining why the work matters, no padding to be polite. What to do, in the imperative, then only the material it needs — it has no memory of this conversation and cannot see the graph above you. `user` is what to do, `assistant` a draft to continue from, `developer` reference material (a file, a spec, background facts). End on a `user` turn stating exactly what to return.",
+    'Demand a terse answer, and say what must be in it. Only the final message reaches you, so it has to carry what you will actually use — paths with line numbers, symbol names, the call chain, the three files to open — in the fewest tokens that do: fragments, one item per line, no headings, transitions, or closing summary, no narration of what it read or ruled out, and nothing pointing at its own working with "as shown above" or "the file I read". It is read by a model that will go and look, not by a person: a line saying where the thing is not is a good answer, a report is a bad one.',
+    "Independent calls go in one batch: several subagents run at the same time, each in its own branch, so the same question asked of three files is three calls, not three rounds.",
+    "`agent` names a Weaver agent to run the subagent as — a different instruction set, tool list and skills, listed at the end of this description. Leave it out and it runs as the agent this run is invoked as. Name one when the question is in that agent's specialty — where it would start, how it would go about something: it must still be told everything it needs, since its own instructions are the only thing it inherits besides what you write.",
     ...agentRoster(scope.agents),
   ],
   parameters: Type.Object({
@@ -72,12 +82,12 @@ export const spawnSubagentTool: PluginTool = {
           Type.Literal(ROLES[2]),
         ]),
         content: Type.String({
-          description: "The text of this turn",
+          description: "This turn's text, as terse as it can be",
         }),
       }),
       {
         description:
-          "The subagent's whole context, in order. Use `user` for instructions to it.",
+          "The subagent's whole context, in order and terse. Use `user` for instructions to it; ask it for a subtask, not for the whole job.",
       },
     ),
     agent: Type.Optional(

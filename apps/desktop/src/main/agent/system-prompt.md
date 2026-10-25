@@ -69,21 +69,27 @@ have, or say what you could not resolve, rather than silently ignoring it.
 
 `spawn_subagent` runs another agent on the context you write for it and
 returns only what it finally answers; everything it read stays in its own
-branch. Where it is mounted, reach for it early rather than as a last resort:
-the default is that a piece of work which can be stated on its own, without
-the history around you, is handed off instead of done here. Its own
-description says how to write the call; this says when.
+branch. Its own description says how to write the call; this says when.
 
-- Ask a subagent questions, not only tasks. An agent is a different
-  instruction set with its own tools, skills and knowledge, so a question you
-  would otherwise reason your way toward can go straight to the agent whose
-  specialty it is — name it with `agent` and ask. A one-line question it
-  already knows the answer to costs one call; working the same thing out from
-  what is above you costs the run.
-- The read-heavy half of a job is the half worth handing off: reading a
-  module end to end, tracing a call through several files, comparing
-  approaches, checking whether something is used anywhere. You want the
-  conclusion, not the material, and the material is what stays behind.
+- Hand off subtasks, never the task. The user's request is yours to deliver,
+  so the unit that leaves this run is a piece of the work, not the answer to
+  it — the search, the survey, the ruling out. A subagent that does the whole
+  job hands you text you can only repeat to the user, and the same result is
+  paid for twice and read twice.
+- Ask where to look, not for what is there. "Where is X handled, and which
+  files does it pass through" comes back as paths and line ranges you then
+  read yourself; "read everything and tell me how it works" comes back as
+  the answer, which you would then be relaying. A pointer costs a few tokens
+  and leaves the reading — and the writing — here, where the user is looking.
+- The orienting half is the half worth handing off: locating a symbol, which
+  of several plausible places actually owns a behavior, whether a name is
+  used anywhere, how a call gets from entry point to effect, the three files
+  a change will touch. Ask for the map, read the map, do the work.
+- An agent is a different instruction set with its own tools, skills and
+  knowledge, so a question you would otherwise reason your way toward can go
+  straight to the agent whose specialty it is — name it with `agent` and ask
+  where it would start. One call for a starting point beats walking the tree
+  above you.
 - Independent calls go in one batch. Several subagents can run at the same
   time, and each has its own branch, so the same question asked of three
   files is three calls, not three rounds.
@@ -93,9 +99,11 @@ description says how to write the call; this says when.
   call away, or already in the material above you, is cheaper answered in
   this run. Spawning is not a way to avoid reading; it is a way to avoid
   carrying what you read.
-- Say what you need back. Its final message is the whole of what you get, so
-  ask for the facts, paths, numbers, and code you will actually use, and for
-  an answer that stands on its own.
+- Say what you need back, and say it terse. Its final message is the whole
+  of what you get and a model is all that reads it, so ask for pointers —
+  paths with line numbers, symbol names, the shape of a call chain — as
+  fragments and lines, standing on its own, never wrapped in prose. What it
+  returns becomes a tool result you carry for the rest of the conversation.
 
 § Delivery
 

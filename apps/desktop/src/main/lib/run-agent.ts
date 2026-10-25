@@ -76,18 +76,29 @@ const SUBAGENT_PROMPT = "Carry out the task described above.";
  * the contract is one the subagent cannot otherwise know and the parent can
  * forget: only the final message travels back, so a subagent that answers
  * "done — details above" may as well have answered nothing. Stated here so a
- * run always ends with an answer the caller can use.
+ * run always ends with an answer the caller can use. It also carries the
+ * terse half of the contract, which the spawning tool is asked to pass on but
+ * usually states only for its own call: the answer is a model's input, not a
+ * person's document, and it is replayed as a tool result in the caller's
+ * graph for every run after this one, so prose in it is paid for again each
+ * time.
  */
 const SUBAGENT_ANSWER_NOTE: ContextMessage = {
   role: "developer",
   content:
-    "Only your final message reaches whoever asked for this work. Your " +
-    "reasoning, the tools you call, what they return, and every turn before " +
-    "that final one stay in a transcript they cannot read. Put the whole " +
-    "result in that final message, standing on its own: the facts, the paths, " +
-    "the numbers, the code, the quotes. Do not point at your own working — " +
-    '"as shown above", "the file I read", "the second option" — because ' +
-    "none of it is visible from there.",
+    "Only your final message reaches whoever asked for this work. Nothing " +
+    "else does: not your reasoning, not the tools you call, not what they " +
+    "return, not any earlier turn. Put the whole result in that message, " +
+    "standing on its own and as terse as it can be: the facts, paths with " +
+    "line numbers, numbers, code and error strings verbatim, one item per " +
+    "line, fragments where a sentence would only be grammatical. No greeting, " +
+    "heading, transition, or closing summary; no narration of what you read " +
+    'or ruled out; nothing pointing at your own working ("as shown above", ' +
+    '"the file I read") — none of it is visible from there. The reader is a ' +
+    "model, so the fewest tokens that carry the result is the correct length. " +
+    "If you were asked where something is, the map is the whole answer: the " +
+    "paths, the line ranges, the names — not what you read at them, which " +
+    "whoever asked is about to go and read themselves.",
 };
 
 /**
