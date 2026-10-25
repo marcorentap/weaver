@@ -942,6 +942,7 @@ export async function runAgent(
         'The file type comes from the extension in the path, so only pass a URI that ends in one of the supported extensions (png, jpg, mp4, mp3, pdf, txt, and so on). A URI with no extension, or one the viewer doesn\'t recognize, renders as a plain "no preview" placeholder instead of the actual file.',
         "If the only copy you have is extensionless (a download, a temp file, an attachment), write or copy it to a path that ends in the right extension first, then point this tool at that copy.",
         "A local file needs an absolute file:// URI, such as file:///home/me/diagram.png.",
+        "This tool shows the file to the person and to nobody else: what it displays is not sent back to you as an image, so you will not see a picture by displaying it. To look at a picture yourself, call `read` on its path — that attaches the image itself when your model takes image input, and a line naming the file when it does not.",
       ].join("\n"),
       parameters: Type.Object({
         uri: Type.String({

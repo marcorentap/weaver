@@ -249,7 +249,17 @@ export const mediaKind = defineKind({
   // pictures still reads what the block says. The URI travels unresolved —
   // it is the request builder, not this, that has the run's merged
   // `WEAVER_PWD` to resolve a scheme-less path against.
+  //
+  // A block `display_media` produced is exempt: that call exists so the tool
+  // can show a person something, and a picture shown to a person is not a
+  // picture handed to the model. Sending it back would bill a run for an
+  // image it never asked to look at, and would make the model's own view of
+  // a file it chose to display part of every later replay. A model that does
+  // want to look at a picture reads its path with the `read` tool, which
+  // attaches the bytes on purpose. A file someone attached themselves is
+  // unaffected: there the picture is what the person said.
   images: (state) => {
+    if (state.attached) return [];
     const image = attachableImage(state.uri);
     return image ? [image] : [];
   },

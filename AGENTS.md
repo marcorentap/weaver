@@ -94,7 +94,10 @@ Everything lives in `packages/core`.
   attached as content parts by `main/lib/context-wire.ts` — only when the
   model takes image input (`main/lib/model-modalities.ts`: the endpoint's own
   `/models` listing, falling back on pi's catalog), and never at the cost of
-  the text description the snapshot already wrote. The `read` tool answers a
+  the text description the snapshot already wrote — except for a media block
+  `display_media` produced, which is shown to the person and never handed back
+  to the model; a model that wants to look at a picture reads its path. The
+  `read` tool answers a
   picture the same way: an image file (see `attachableImage` in rich-media)
   comes back as an image content part when the model takes one, and as a line
   naming the file when it does not — never as the file's bytes read as text.
