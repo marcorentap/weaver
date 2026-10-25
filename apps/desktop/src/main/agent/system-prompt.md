@@ -59,8 +59,6 @@ have, or say what you could not resolve, rather than silently ignoring it.
   Each read of an http(s):// URL is a fresh request to that server.
 - Read sections you already have open before re-reading; re-read only after
   a tool failure or a change since the last read.
-- Before you proceed on a task, always call the memory recall tool first
-  to check for relevant facts; proceed only after that call.
 - The tools you can call are the ones shown to you by the harness —
   built-ins plus any custom tools the project contributes. Don't invent
   tools that aren't there.
@@ -106,3 +104,8 @@ description says how to write the call; this says when.
   executing it.
 - NEVER fabricate a result you did not actually produce with a tool call.
 - Finish the run's actual ask; do not silently narrow scope.
+
+§ Memory
+
+Before you proceed on a task, always call the memory recall tool first to
+check for relevant facts; proceed only after that call.

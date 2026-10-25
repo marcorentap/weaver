@@ -234,6 +234,32 @@ const WEAVER_SYSTEM_PROMPT = readFileSync(
 );
 
 /**
+ * The one section of those instructions a spawned subagent does not get. A
+ * subagent is handed the whole of what it needs to know by the tool that
+ * spawned it and answers in a single message, so a `§ Memory` lookup before
+ * it starts — a bank search for facts the parent already had to supply its
+ * own material without — is a call spent ahead of the work it was spawned
+ * for. A main run keeps it: there, the graph above is only what a person
+ * wrote, and what a person did not is exactly what the bank holds.
+ *
+ * It is the last section of the document for that reason, so the split is a
+ * prefix of the prose and a section added later cannot be dropped by
+ * accident. A document that has lost the heading is a broken build rather
+ * than a subagent quietly getting the instruction back.
+ */
+const SUBAGENT_OMITTED_HEADING = "\n§ Memory\n";
+
+const SUBAGENT_SYSTEM_PROMPT = (() => {
+  const at = WEAVER_SYSTEM_PROMPT.indexOf(SUBAGENT_OMITTED_HEADING);
+  if (at < 0) {
+    throw new Error(
+      "agent/system-prompt.md no longer has its trailing § Memory section",
+    );
+  }
+  return WEAVER_SYSTEM_PROMPT.slice(0, at).trimEnd();
+})();
+
+/**
  * The agent SDK types its event payloads as `any`, so everything crossing
  * that boundary is parsed rather than asserted. A shape change upstream
  * should degrade to an empty string, not to a wrong read of a wrong field.
@@ -1055,6 +1081,9 @@ export async function runAgent(
         prompt: SUBAGENT_PROMPT,
         promptImages: undefined,
         plain: false,
+        // A subagent runs as a subagent however the request it inherited
+        // was made, and everything it spawns in turn inherits the flag.
+        subagent: true,
       };
       // Every id the nested run names is prefixed with the spawning tool's,
       // so its own `tool_start`/`wait` counters cannot be read as the outer
@@ -1209,10 +1238,14 @@ export async function runAgent(
     // content goes on the wire, what a tool result reads like — stay true
     // when a run is invoked as an agent, and an agent author writes what is
     // different about this run, not the whole harness again. The heading
-    // names the agent so the model can tell the two documents apart.
-    const systemPrompt = agent?.instructions
-      ? `${WEAVER_SYSTEM_PROMPT}\n\n# ${agent.name} agent\n\n${agent.instructions}`
+    // names the agent so the model can tell the two documents apart. A
+    // subagent gets the same document minus the section it has no use for.
+    const runInstructions = body.subagent
+      ? SUBAGENT_SYSTEM_PROMPT
       : WEAVER_SYSTEM_PROMPT;
+    const systemPrompt = agent?.instructions
+      ? `${runInstructions}\n\n# ${agent.name} agent\n\n${agent.instructions}`
+      : runInstructions;
     const resourceLoader = createAgentResourceLoader({
       cwd,
       settingsManager,

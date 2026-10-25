@@ -190,6 +190,14 @@ export const agentRunRequest = z.object({
    *  rather than quietly falling back to the default agent. Omitted for a
    *  run invoked as no particular agent. */
   agent: z.string().optional(),
+  /** This run is a subagent, spawned by another run's tool rather than
+   *  started by a person on a block: it is handed the task it must do and
+   *  answers it in one message, so the run instructions a main run gets
+   *  about its own habits are not all worth their tokens here (see
+   *  `SUBAGENT_SYSTEM_PROMPT` in `main/lib/run-agent.ts`). Set by the
+   *  spawning run and inherited by anything it spawns in turn; a run started
+   *  from a block never sets it. */
+  subagent: z.boolean().optional(),
   /** The graph above the agent block, already serialized by the renderer,
    *  turn by turn. The main process has no view of the live graph, which
    *  lives in the renderer. Each message carries the role its block's kind
