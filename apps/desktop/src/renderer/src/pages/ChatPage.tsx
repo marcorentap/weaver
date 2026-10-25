@@ -25,6 +25,7 @@ import {
   messagesOfBlocks,
   messagesOfGraph,
   newBlock,
+  positionOf,
   TEXT_KIND,
   topLevelBlockIds,
 } from "@repo/core";
@@ -59,6 +60,7 @@ import type { ChatNode } from "@/lib/graph-view";
 import { chatNodes } from "@/lib/graph-view";
 import { lockedBlockIds, scheduledHooks } from "@/lib/live-graph";
 import { pwdForBlock, pwdForPosition } from "@/lib/env";
+import { instantiate, loadYank, pasteYanked, yankBlocks } from "@/lib/yank";
 import { getLiveGraph } from "@/lib/live-graph-registry";
 import { kinds } from "@shared/blocks/kinds.js";
 import { MEDIA_KIND, TOOL_KIND, USER_KIND } from "@plugins/rich-media";
@@ -1109,6 +1111,78 @@ function ChatView({
   };
 
   /**
+   * `y`: the block under the cursor, or the whole visual selection, into the
+   * yank register — each block with everything nested inside it, since a
+   * subtree is what a block is in this graph. The register outlives this
+   * session and this window (`lib/yank` keeps it in a settings row), so `y`
+   * here and `p` in another session is how context moves between
+   * conversations.
+   *
+   * A selection is a range of rendered rows, so an expanded container can
+   * put both it and its children in the same yank; `yankBlocks` drops the
+   * nested ones, which are already coming along inside their ancestor.
+   * Yanking ends the selection the way the other selection actions do.
+   */
+  const yank = () => {
+    const ids =
+      visualAnchor !== null
+        ? selectedRows.map((entry) => entry.block.id)
+        : row
+          ? [row.block.id]
+          : [];
+    if (ids.length === 0) return;
+    setVisualAnchor(null);
+    void yankBlocks(graph, ids);
+  };
+
+  /**
+   * `p` / `P`: the yank register as blocks — `p` after the cursor (before the
+   * first block when nothing is selected), `P` before it, so a paste can
+   * land on either side of the block being read.
+   *
+   * The whole paste is one undo step: `engine.group` folds every block the
+   * walk adds into a single history entry, the same way the selection menu's
+   * delete does. Nothing goes through the block IPC on the way in — the
+   * engine's own commit is the write, and autosave flushes the graph from
+   * there exactly as it does for an edit typed into a block.
+   */
+  const pasteRegister = async (before: boolean) => {
+    if (!session) return;
+    setError(null);
+    // The gap is read before the await, like `ctrl+v`: the cursor's place is
+    // where the paste lands, whatever the graph does while the register
+    // loads.
+    const at = !row
+      ? computeInsertion(rows, 0)
+      : before
+        ? positionOf(graph, row.block.id)
+        : insertionGap();
+    if (!at) return;
+    if (at.afterId && engine.isLocked(at.afterId)) {
+      setError("can't insert here while a reply is still streaming in");
+      return;
+    }
+    const register = await loadYank();
+    if (!register || register.blocks.length === 0) {
+      setError("nothing yanked to paste");
+      return;
+    }
+    const added = instantiate(register);
+    const first = engine.group(() =>
+      pasteYanked(added, at, (block, position) =>
+        engine.addBlock(block, position),
+      ),
+    );
+    if (first === null) return;
+    // The cursor follows the first pasted block, so a selection would now
+    // span rows it never meant to: it is anchored at a row index, and the
+    // paste just shifted every row below the gap.
+    setVisualAnchor(null);
+    if (at.parentId) setOpen(at.parentId, true);
+    setPendingFocus({ id: first, openActions: false });
+  };
+
+  /**
    * Files dropped in from a file manager. Each is taken into the session's
    * artifacts directory (`~/.weaver/artifacts/<session>/<uuid>.<ext>`) by
    * main and becomes one `media` block pointing at that copy, in the order
@@ -1504,6 +1578,26 @@ function ChatView({
         keys: ["ctrl+v"],
         help: [{ keys: "ctrl+v", label: "Paste the clipboard as a block" }],
         run: () => void pasteBlock(),
+      },
+      {
+        keys: ["y"],
+        help: [
+          {
+            keys: "y",
+            label: "Yank block, or the selection, with its nested blocks",
+          },
+        ],
+        run: yank,
+      },
+      {
+        keys: ["p"],
+        help: [{ keys: "p", label: "Paste yanked blocks after" }],
+        run: () => void pasteRegister(false),
+      },
+      {
+        keys: ["P"],
+        help: [{ keys: "P", label: "Paste yanked blocks before" }],
+        run: () => void pasteRegister(true),
       },
       {
         keys: ["s"],
