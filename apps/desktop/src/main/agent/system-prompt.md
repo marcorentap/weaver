@@ -82,5 +82,7 @@ branch. Its description says how to write the call; this says when.
 
 § Memory
 
-Before you proceed on a task, always call the memory recall tool first to
-check for relevant facts; proceed only after that call.
+Recall first when the task turns on something remembered: a preference, an
+earlier decision, this project's history. Skip it for trivial or general
+questions — the bank holds facts about this user and this work, not general
+knowledge.
