@@ -533,8 +533,9 @@ function canonicalToolCallIds(payload: WirePayload): WirePayload {
 }
 
 /**
- * The cache key a run should be routed by, for the one provider that takes
- * one on this API, or null when the endpoint would only reject it.
+ * The cache key a run should be routed by, for the providers that take one
+ * on this API, each under the name it gives the field; empty when the
+ * endpoint documents neither and would only reject the request.
  *
  * OpenAI's prompt cache is keyed by content, so the key changes nothing
  * about what is cached; it decides which machine holds it. Without one, a
@@ -546,16 +547,28 @@ function canonicalToolCallIds(payload: WirePayload): WirePayload {
  * from the renderer instead, named after the graph the runs belong to, so
  * every run over one transcript asks the same host.
  *
- * `prompt_cache_key` is an OpenAI field. A strict OpenAI-*compatible* server
- * (llama.cpp, vLLM, a proxy) may reject a request that carries it, so it is
- * only added for the endpoint that documents it.
+ * The field that carries it differs by host, and neither is something an
+ * OpenAI-*compatible* server has to accept: a strict one (llama.cpp, vLLM, a
+ * proxy) may reject a request carrying a field it does not know, so a key is
+ * only added for an endpoint that documents one. OpenAI names it
+ * `prompt_cache_key`. OpenRouter names it `session_id`, which is the same
+ * decision — it routes every request of one session to the same provider so
+ * the prompt cache behind it keeps hitting — and the renderer's key is the
+ * same graph id for exactly that reason (its 256-character limit is no worry
+ * for a block id). OpenRouter is keyed by the provider route rather than by
+ * the endpoint, so the field has to be named in the body; there is no header
+ * that does it as well.
  */
 function cacheKeyFor(cache: { key?: string; baseUrl: string } | null): {
   prompt_cache_key?: string;
+  session_id?: string;
 } {
   if (!cache?.key) return {};
-  if (!cache.baseUrl.includes("api.openai.com")) return {};
-  return { prompt_cache_key: cache.key };
+  if (cache.baseUrl.includes("openrouter.ai")) return { session_id: cache.key };
+  if (cache.baseUrl.includes("api.openai.com")) {
+    return { prompt_cache_key: cache.key };
+  }
+  return {};
 }
 
 /**

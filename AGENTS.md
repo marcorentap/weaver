@@ -257,10 +257,13 @@ summarization) or creates a full pi session with our custom tools
   `cache_control` breakpoints only when it can tell the provider is OpenRouter
   from the registered id, and ours is always `weaver`, so `run-agent.ts` names
   `compat.cacheControlFormat` itself for an OpenRouter Anthropic route;
-  OpenAI's `prompt_cache_key` is routed from the renderer's `cacheKey` (the
-  graph's root block) because a pi session id is new every run and would
-  scatter one conversation across hosts by design. `context-wire.ts` sends
-  that key only to the endpoint that documents the field. Two turns exist on
+  the routing key is the renderer's `cacheKey` (the graph's root block)
+  because a pi session id is new every run and would scatter one
+  conversation across hosts by design. `context-wire.ts` sends it as
+  `prompt_cache_key` to OpenAI and as `session_id` to OpenRouter — the same
+  decision under each API's own name, sticky routing so one session's prompt
+  cache keeps hitting — and to neither on an endpoint that documents neither
+  field. Two turns exist on
   the wire that no block is, and both are rebuilt by `context-wire.ts`: the
   pictures a tool result carried, which the wire puts in a `user` turn after
   the `tool` message (one per run of consecutive results, as pi builds it),
