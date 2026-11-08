@@ -1,3 +1,18 @@
+import { arch, platform, release } from "node:os";
+
+/**
+ * What weaver calls itself on the wire. Every provider request carries one,
+ * and by default the transport supplies its own instead: pi-ai sends
+ * `pi (<platform> <release>; <arch>)` on every completion it builds (see
+ * `createClient` in its `openai-completions` API), and our own `fetch` calls
+ * send node's. Neither is the app a provider's usage panel should see, so
+ * the run engine overrides the header on the model it registers and
+ * `image-generation.ts` names it on the image request; the shape stays pi's
+ * because it is the same information, platform and architecture, from the
+ * same process — only the name changes.
+ */
+export const WEAVER_USER_AGENT = `weaver (${platform()} ${release()}; ${arch()})`;
+
 /**
  * An absolute provider URL for `path` under `endpoint`, or null when
  * `endpoint` is not a usable base URL. Shared by everything that talks to a

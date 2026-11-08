@@ -52,6 +52,7 @@ import { writeSessionArtifact } from "./artifacts.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
 import { schemaMessage } from "./schema-error.js";
+import { WEAVER_USER_AGENT } from "./provider.js";
 import { AGENT_DIR } from "./agent-dir.js";
 import { listAgents, loadAgentTools, resolveAgent } from "./agents.js";
 import {
@@ -473,7 +474,9 @@ const SAIL_COMPLETION_WINDOWS = ["balanced", "flex"] as const;
  *  adds its own defaults (HTTP-Referer https://pi.dev, X-OpenRouter-Title pi,
  *  X-OpenRouter-Categories cli-agent) that our request headers override via
  *  the merge. Sent on every request to OpenRouter so usage lands under
- *  weaver's app page. */
+ *  weaver's app page. The `User-Agent` is not part of it: that one goes on
+ *  the model (see `WEAVER_USER_AGENT` in `provider.ts`) so it names weaver on
+ *  every endpoint, not only this one. */
 const OPENROUTER_ATTRIBUTION = {
   "HTTP-Referer": "https://weaver.marcorentap.com",
   "X-OpenRouter-Title": "Weaver",
@@ -815,6 +818,13 @@ export async function runAgent(
           // unprobed run keeps the permissive default it has always had, and
           // a later `read` of a picture asks on its own if it needs to.
           input: modelVision === false ? ["text"] : ["text", "image"],
+          // pi names itself in the `User-Agent` of every request it builds
+          // and lets a model's own headers replace it, so this is where weaver
+          // stops looking like the SDK underneath it. It rides on the model
+          // rather than on the registration above so that it holds for every
+          // endpoint, since the registration's headers are OpenRouter's
+          // alone (see `WEAVER_USER_AGENT`).
+          headers: { "User-Agent": WEAVER_USER_AGENT },
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 200000,
           // The `maxTokens` caps output: the SDK treats a model's

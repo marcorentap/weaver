@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { ContextImage } from "@repo/core";
-import { providerUrl } from "./provider.js";
+import { providerUrl, WEAVER_USER_AGENT } from "./provider.js";
 import { readImage } from "./read-source.js";
 
 /**
@@ -136,6 +136,10 @@ export async function generateImages(
     headers: {
       authorization: `Bearer ${request.apiKey}`,
       "content-type": "application/json",
+      // This request is ours, not the SDK's, so nothing names the app for
+      // it but us: without this a picture generation reaches the provider as
+      // node's own `undici` and lands under no app page at all.
+      "user-agent": WEAVER_USER_AGENT,
       ...request.headers,
     },
     body: JSON.stringify({
