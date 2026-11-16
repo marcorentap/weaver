@@ -28,6 +28,7 @@ import {
 // Type-only: `@repo/store` reaches for node:sqlite, so a value import here
 // would drag the whole persistence layer into the renderer bundle.
 import type { BlockInput } from "@repo/store";
+import type { McpServer } from "@shared/mcp.js";
 import { kinds } from "@shared/blocks/kinds.js";
 import { ASSISTANT_KIND, TOOL_KIND } from "@plugins/rich-media";
 import { AGENTS_LINK_TYPE, parseReferences } from "@shared/references.js";
@@ -135,6 +136,11 @@ type RunConnection = {
   noPromptTemplates?: boolean;
   noThemes?: boolean;
   noContextFiles?: boolean;
+  /** The MCP servers this run mounts, already narrowed to the ones that
+   *  should run with it (see `mcpServersForRun`). Each one's tools join the
+   *  harness's for the length of the run and its connection is closed when
+   *  the run ends. Omitted for a run that mounts none. */
+  mcpServers?: McpServer[];
   /** Treat the run as a plain LLM call instead of an agent run: no session,
    *  tools, system prompt, or resource loading in the main process. The
    *  summarization run sets this; inference never does. */
@@ -621,6 +627,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
       noPromptTemplates,
       noThemes,
       noContextFiles,
+      mcpServers,
       plain,
       take,
       answerKind,
@@ -997,6 +1004,7 @@ export function createLiveGraph(initial: BlockGraph): LiveGraph {
           noPromptTemplates,
           noThemes,
           noContextFiles,
+          mcpServers,
           plain,
         },
         (event) => {

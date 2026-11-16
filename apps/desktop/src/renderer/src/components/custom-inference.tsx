@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ON_OFF_OPTIONS, THINKING_LEVEL_OPTIONS } from "@/lib/settings";
+import type { McpServerSettings } from "@/lib/settings";
 import type { AgentSummary } from "@shared/ipc-contract.js";
 import { ModalFrame } from "@/components/modal-frame";
 import { useKeyLayer } from "@/lib/keymap";
@@ -38,6 +39,11 @@ export type CustomInferenceRun = {
   noPromptTemplates?: boolean;
   noThemes?: boolean;
   noContextFiles?: boolean;
+  /** Whether each configured MCP server runs with this run, keyed by the
+   *  server's name. A server the run does not name keeps its saved flag, so
+   *  this is a narrowing of the settings page's list rather than a second
+   *  place servers are configured. */
+  mcpServers?: Record<string, boolean>;
 };
 
 /**
@@ -90,7 +96,10 @@ const INDENT_REM = 1;
  * dialog doesn't have: summaries are plain LLM calls unless the toggle
  * rides the agent, and the agent's harness rows only appear when it does.
  * For the inference run the dialog is always agentic, so no toggle row and
- * the discovery rows always show.
+ * the discovery rows always show. The MCP rows at the end are the same
+ * narrowing: the servers are configured on the settings page, and a run
+ * decides which of them it mounts, so a run can try one server without
+ * editing the setting or leaving the others behind.
  * The layout is the settings page's own: rows with a label column and a
  * value column, `j`/`k` to move, `h`/`l` or the chevrons to cycle an
  * option, `enter` to type a string value or run, `esc` to cancel the edit
@@ -125,6 +134,9 @@ export function CustomInferenceDialog({
     noPromptTemplates?: boolean;
     noThemes?: boolean;
     noContextFiles?: boolean;
+    /** The MCP servers the settings page holds, so the dialog's rows can
+     *  name each one and start from its saved `enabled` flag. */
+    mcpServers?: Record<string, McpServerSettings>;
   };
   /** The merged `WEAVER_PWD` of the block being run, so the agent list is
    *  the one a run anchored there resolves: the project's shelf under that
@@ -181,6 +193,61 @@ export function CustomInferenceDialog({
   const [noContextFiles, setNoContextFiles] = useState(
     defaults.noContextFiles ?? false,
   );
+  /** Which MCP servers this run mounts, keyed by name, starting from each
+   *  one's saved `enabled` flag. Kept as a whole map rather than as one
+   *  boolean because the rows below are per server and the value travels
+   *  that way, back to `mcpServersForRun`. */
+  const [mcpServers, setMcpServers] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      Object.entries(defaults.mcpServers ?? {}).map(([name, server]) => [
+        name,
+        server.enabled,
+      ]),
+    ),
+  );
+  const mcpEntries = Object.entries(defaults.mcpServers ?? {}).sort(
+    ([a], [b]) => a.localeCompare(b),
+  );
+  /** A run mounts servers when any of them is on for it; the master row
+   *  reads that as one on/off, so the list below is always reachable. */
+  const mcpOn = mcpEntries.some(([name]) => mcpServers[name]);
+  /** What a server *is* — its command, its URL, its headers — is a setting,
+   *  not something to retype per run, so these rows only decide whether one
+   *  is mounted. The master row is all-or-nothing, and the per-server rows
+   *  stay visible whatever it says: a list whose rows vanished when the
+   *  master was off would be a dead end for someone whose saved servers are
+   *  all off, who would have no row left to turn one on with. */
+  const mcpRows: RowDef[] =
+    !showAgentic || mcpEntries.length === 0
+      ? []
+      : [
+          {
+            key: "mcp",
+            kind: "option",
+            label: "MCP servers",
+            description:
+              "Mount the configured MCP servers' tools on this run. Each server has its own row below.",
+            options: ON_OFF_OPTIONS,
+            value: mcpOn ? "on" : "off",
+            onChange: (value) =>
+              setMcpServers(
+                Object.fromEntries(
+                  mcpEntries.map(([name]) => [name, value === "on"]),
+                ),
+              ),
+          },
+          ...mcpEntries.map(([name]): RowDef => ({
+            key: `mcp.${name}`,
+            kind: "option",
+            label: name,
+            description: `Tools from the "${name}" MCP server.`,
+            options: ON_OFF_OPTIONS,
+            value: mcpServers[name] ? "on" : "off",
+            onChange: (value) =>
+              setMcpServers({ ...mcpServers, [name]: value === "on" }),
+          })),
+        ];
+
   /** The harness-discovery rows (pi extensions, skills, prompt templates,
    *  themes, context files) of the settings page's "Inference settings"
    *  section, shown only for agent runs; a plain run has no loader, so
@@ -315,6 +382,7 @@ export function CustomInferenceDialog({
     // plain run, which has no loader. On/off here reads as the feature it
     // enables (`no…` is the saved/inverted value).
     ...discoveryRows,
+    ...mcpRows,
   ];
 
   const submit = () =>
@@ -339,6 +407,10 @@ export function CustomInferenceDialog({
             noContextFiles,
           }
         : {}),
+      // Every server's choice travels, including the off ones: an all-off
+      // map says "not this run", which is not the same as saying nothing and
+      // letting the saved defaults mount them.
+      ...(showAgentic && mcpEntries.length > 0 ? { mcpServers } : {}),
     });
 
   const [cursor, setCursor] = useState(0);

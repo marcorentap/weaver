@@ -37,6 +37,7 @@ import type {
 } from "@shared/ipc-contract.js";
 import { newSessionTitle } from "@shared/session-title.js";
 import { conversationJsonl } from "@shared/conversation-jsonl.js";
+import { mcpServersForRun } from "@/lib/mcp";
 import { detectProvider } from "@shared/provider-routing.js";
 import type { BlockField, BlockView } from "@/blocks/views";
 import { ShellHeader } from "@/components/app-shell";
@@ -1388,6 +1389,10 @@ function ChatView({
       noPromptTemplates: custom?.noPromptTemplates ?? inferNoPromptTemplates,
       noThemes: custom?.noThemes ?? inferNoThemes,
       noContextFiles: custom?.noContextFiles ?? inferNoContextFiles,
+      // The servers this run mounts: the saved ones a person left enabled,
+      // narrowed by the dialog's own rows when the run came from there. The
+      // main process connects to each for the length of the run.
+      mcpServers: mcpServersForRun(settings.mcpServers, custom?.mcpServers),
     });
   }
 
@@ -1465,6 +1470,12 @@ function ChatView({
               custom?.noPromptTemplates ?? summNoPromptTemplates,
             noThemes: custom?.noThemes ?? summNoThemes,
             noContextFiles: custom?.noContextFiles ?? summNoContextFiles,
+            // A summary that rides the agent gets the same servers an
+            // inference run does; a plain one has no tools to give them to.
+            mcpServers: mcpServersForRun(
+              settings.mcpServers,
+              custom?.mcpServers,
+            ),
           }
         : {}),
     });
@@ -2856,6 +2867,7 @@ function ChatView({
             noPromptTemplates: settings.inferNoPromptTemplates,
             noThemes: settings.inferNoThemes,
             noContextFiles: settings.inferNoContextFiles,
+            mcpServers: settings.mcpServers,
           }}
           onRun={(run) => {
             setPopup(null);
@@ -2888,6 +2900,7 @@ function ChatView({
             noPromptTemplates: settings.summNoPromptTemplates,
             noThemes: settings.summNoThemes,
             noContextFiles: settings.summNoContextFiles,
+            mcpServers: settings.mcpServers,
           }}
           onRun={(run) => {
             setPopup(null);

@@ -51,6 +51,7 @@ import { generateImages } from "./image-generation.js";
 import { writeSessionArtifact } from "./artifacts.js";
 import { writeSource } from "./write-source.js";
 import { editSource } from "./edit-source.js";
+import { mountMcpTools } from "./mcp.js";
 import { schemaMessage } from "./schema-error.js";
 import { WEAVER_USER_AGENT } from "./provider.js";
 import { AGENT_DIR } from "./agent-dir.js";
@@ -681,6 +682,11 @@ export async function runAgent(
   ctx: AgentRunContext,
   emit: (event: AgentEvent) => void,
 ): Promise<void> {
+  /** Every MCP connection this run opened, closed when the run ends —
+   *  whatever ended it, including a failure this function raises on the way
+   *  out. Declared out here rather than inside the try so the `finally`
+   *  below can reach it; a run that mounts none leaves it null. */
+  let mcpMount: Awaited<ReturnType<typeof mountMcpTools>> | null = null;
   let body: AgentRunRequest;
   try {
     body = agentRunRequest.parse(request);
@@ -1027,6 +1033,19 @@ export async function runAgent(
     );
     for (const tool of agentTools) toolsByName.set(tool.name, tool);
     const runTools = [...toolsByName.values()];
+
+    // The MCP servers this run was configured with, connected here and
+    // closed at the end of the run: their tools live exactly as long as the
+    // session that can call them. The run's own environment shades the
+    // server processes the same way it shades the harness's `bash`, and the
+    // run's working directory is where a relative command path resolves. A
+    // server that cannot be reached fails the mount — and so the run, with
+    // its name in the message — rather than letting a request that named it
+    // be answered without it.
+    mcpMount =
+      body.mcpServers && body.mcpServers.length > 0
+        ? await mountMcpTools(body.mcpServers, { cwd, env: agentEnv })
+        : null;
 
     // What a tool may read about this run when it describes itself (see
     // `PluginTool.description`): the agents this run's working directory
@@ -1499,6 +1518,11 @@ export async function runAgent(
     const allowedTools = [
       ...ALLOWED_TOOLS,
       ...runTools.map((tool) => tool.name),
+      // A server's tools are named `${server}__${tool}`, so a person's tool
+      // list naming one is a name nothing else can collide with; they are
+      // allowed as a matter of course because the renderer cannot know what
+      // a server will export until this run has asked it.
+      ...(mcpMount?.tools.map((tool) => tool.name) ?? []),
     ];
     const requested = body.tools.filter((name) => allowedTools.includes(name));
     // Every allowed tool by default: this is a single-operator harness, not
@@ -1523,7 +1547,14 @@ export async function runAgent(
       settingsManager,
       sessionManager: SessionManager.inMemory(cwd),
       tools: [...tools, displayMedia.name],
-      customTools: [displayMedia, ...mountedPluginTools, read, write, edit],
+      customTools: [
+        displayMedia,
+        ...mountedPluginTools,
+        ...(mcpMount?.tools ?? []),
+        read,
+        write,
+        edit,
+      ],
     });
 
     ctx.onSession?.(() => void session.abort());
@@ -1757,5 +1788,11 @@ export async function runAgent(
       type: "error",
       message: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    // Everything that could still call a server's tool has finished by now:
+    // the terminal event went out above, and a run that failed on its way
+    // here never reached the session at all. A server process left running
+    // past its run is a child the app would never reap.
+    await mcpMount?.close();
   }
 }

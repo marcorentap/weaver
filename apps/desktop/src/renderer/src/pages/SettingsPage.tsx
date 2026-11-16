@@ -296,6 +296,9 @@ export default function SettingsPage() {
     setWordWrap,
     setFontSize,
     setAiEndpoint,
+    addMcpServer,
+    setMcpServer,
+    removeMcpServer,
     setAiApiKey,
     setInferDefaultModel,
     setInferThinkingLevel,
@@ -445,6 +448,120 @@ export default function SettingsPage() {
     ? [...probe.models].sort((a, b) => a.localeCompare(b))
     : [];
 
+  /**
+   * The "MCP servers" section: one row to name a new server, then one
+   * nested section per saved server holding its own fields.
+   *
+   * A server is a form of scalar rows rather than a modal of its own, so
+   * everything on this page keeps working — `j`/`k` to walk it, `enter` to
+   * type, `h`/`l` to cycle, folding the group shut. The transport row does
+   * the work a pair of fields would otherwise do: it decides which of
+   * `command`/`url` is the one that matters, so a row that tunes nothing
+   * (a stdio server's headers) is never shown to be filled in for nothing.
+   */
+  function mcpServerDefs(): SettingDef[] {
+    const servers = Object.entries(settings.mcpServers).sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    return [
+      {
+        kind: "string",
+        key: "mcp.add",
+        label: "Add server",
+        description: "Name a new MCP server. Its rows appear below.",
+        section: "MCP servers",
+        // The row is a field, not a value: committing a name adds a server
+        // and leaves the field empty for the next one.
+        value: "",
+        placeholder: "github",
+        onChange: (value) => addMcpServer(value),
+        validate: (value) =>
+          settings.mcpServers[value.trim()]
+            ? "a server with that name already exists"
+            : null,
+      },
+      ...servers.flatMap(([name, server]): SettingDef[] => {
+        const fields: SettingDef[] = [
+          {
+            kind: "option",
+            key: `mcp.${name}.transport`,
+            label: "Transport",
+            description:
+              "stdio spawns a local command; HTTP talks to a remote endpoint.",
+            options: [
+              { value: "stdio", label: "stdio" },
+              { value: "http", label: "http" },
+            ],
+            value: server.transport,
+            onChange: (value) =>
+              setMcpServer(name, {
+                transport: value === "http" ? "http" : "stdio",
+              }),
+          },
+          ...(server.transport === "http"
+            ? ([
+                {
+                  kind: "string",
+                  key: `mcp.${name}.url`,
+                  label: "URL",
+                  description: "The server's streamable HTTP endpoint.",
+                  value: server.url,
+                  onChange: (value) => setMcpServer(name, { url: value }),
+                  placeholder: "https://example.com/mcp",
+                },
+                {
+                  kind: "string",
+                  key: `mcp.${name}.headers`,
+                  label: "Headers",
+                  description:
+                    "One `Name: value` per line, sent with every request.",
+                  value: server.headers,
+                  onChange: (value) => setMcpServer(name, { headers: value }),
+                  placeholder: "Authorization: Bearer ...",
+                },
+              ] satisfies SettingDef[])
+            : ([
+                {
+                  kind: "string",
+                  key: `mcp.${name}.command`,
+                  label: "Command",
+                  description:
+                    "Run directly, not through a shell. Quotes group arguments.",
+                  value: server.command,
+                  onChange: (value) => setMcpServer(name, { command: value }),
+                  placeholder: "npx -y some-mcp-server",
+                },
+              ] satisfies SettingDef[])),
+          {
+            kind: "option",
+            key: `mcp.${name}.enabled`,
+            label: "Enabled",
+            description: "Mount this server on every agent run.",
+            options: ON_OFF_OPTIONS,
+            value: server.enabled ? "on" : "off",
+            onChange: (value) =>
+              setMcpServer(name, { enabled: value === "on" }),
+          },
+          {
+            kind: "action",
+            key: `mcp.${name}.remove`,
+            label: "Remove server",
+            description: "Delete this server's settings.",
+            actionLabel: "Remove",
+            onRun: () => removeMcpServer(name),
+          },
+        ];
+        // Only the first row opens the group named after the server; the
+        // rest join it, or every row would render its own heading.
+        return fields.map((field, i) =>
+          i === 0
+            ? { ...field, section: `MCP: ${name}`, parent: "MCP servers" }
+            : field,
+        );
+      }),
+    ];
+  }
+
   const defs: SettingDef[] = [
     {
       kind: "option",
@@ -531,10 +648,12 @@ export default function SettingsPage() {
         label: field.label,
         description: field.description,
         ...(i === 0
-          ? { section: "Provider settings" as const, parent: "AI provider" as const }
+          ? {
+              section: "Provider settings" as const,
+              parent: "AI provider" as const,
+            }
           : {}),
-        value:
-          settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
+        value: settings.aiProviderSettings[provider!.id]?.[field.key] ?? "",
         onChange: (next: string) =>
           setProviderField(provider!.id, field.key, next),
       };
@@ -655,6 +774,13 @@ export default function SettingsPage() {
       value: settings.inferNoContextFiles ? "off" : "on",
       onChange: (value) => setInferNoContextFiles(value === "off"),
     },
+
+    // The MCP servers every agent run may mount. Placed with the inference
+    // settings because that is what they are: part of what a run is given,
+    // beside the loader flags above, and read by the custom run dialog the
+    // same way. A summarization that rides the agent mounts them too; a
+    // plain one has no tools at all.
+    ...mcpServerDefs(),
 
     // The same defaults for a summarization run (`s` on a block, `S`
     // for the custom dialog): its fallback model, its reasoning effort,
@@ -995,18 +1121,22 @@ export default function SettingsPage() {
       },
       {
         keys: ["ArrowUp", "k"],
-        help: [{
-          keys: "↑ / k / <n>k",
-          label: "Previous setting, <n> at a time",
-        }],
+        help: [
+          {
+            keys: "↑ / k / <n>k",
+            label: "Previous setting, <n> at a time",
+          },
+        ],
         run: (count = 1) => move(-count),
       },
       {
         keys: ["ArrowLeft", "h"],
-        help: [{
-          keys: "← / h",
-          label: row?.kind === "group" ? "Close section" : "Previous value",
-        }],
+        help: [
+          {
+            keys: "← / h",
+            label: row?.kind === "group" ? "Close section" : "Previous value",
+          },
+        ],
         run: () => {
           if (row?.kind === "group") {
             // Only closing shuts a section; `h` on an already folded group
@@ -1019,10 +1149,12 @@ export default function SettingsPage() {
       },
       {
         keys: ["ArrowRight", "l"],
-        help: [{
-          keys: "→ / l",
-          label: row?.kind === "group" ? "Open section" : "Next value",
-        }],
+        help: [
+          {
+            keys: "→ / l",
+            label: row?.kind === "group" ? "Open section" : "Next value",
+          },
+        ],
         run: () => {
           if (row?.kind === "group") {
             // Unfold, or step into the first row once it is already open,
@@ -1036,15 +1168,17 @@ export default function SettingsPage() {
       },
       {
         keys: ["Enter"],
-        help: [{
-          keys: "enter",
-          label:
-            row?.kind === "group"
-              ? "Fold / unfold section"
-              : def?.kind === "action"
-                ? "Run"
-                : "Type a value",
-        }],
+        help: [
+          {
+            keys: "enter",
+            label:
+              row?.kind === "group"
+                ? "Fold / unfold section"
+                : def?.kind === "action"
+                  ? "Run"
+                  : "Type a value",
+          },
+        ],
         run: () =>
           row?.kind === "group"
             ? toggleGroup(row.key)

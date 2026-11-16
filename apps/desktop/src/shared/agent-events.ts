@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { mcpServer } from "./mcp.js";
 
 /**
  * Reasoning-effort levels a run may ask for, mirroring pi-ai's own
@@ -250,6 +251,14 @@ export const agentRunRequest = z.object({
   noContextFiles: z.boolean().optional(),
   /** That provider's saved field values, keyed by field key. */
   providerSettings: z.record(z.string(), z.string()).optional(),
+  /** The MCP servers this run mounts, already narrowed to the ones it
+   *  should talk to: the settings page's saved servers a person left on,
+   *  possibly narrowed further by the custom run dialog's own rows. Each
+   *  one's tools join the harness's (`${server}__${tool}`) for the length
+   *  of the run, and its connection is closed when the run ends. Omitted or
+   *  empty for a run that mounts none — a plain run never mounts any, since
+   *  it has no tools at all. */
+  mcpServers: z.array(mcpServer).optional(),
   /** Reasoning effort the run asks the model for, pi-ai's levels. A level
    *  the endpoint's provider routes into its own reasoning format (see
    *  `providerTuning` in `main/lib/run-agent.ts`); omitted for a run that

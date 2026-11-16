@@ -80,6 +80,32 @@ function field<T extends z.ZodTypeAny>(
 }
 
 /**
+ * One MCP server as the settings page keeps it: a form, not a connection.
+ *
+ * The page's rows are one value each, so a server is a flat record of text —
+ * a command line rather than an executable and an argv, headers as the lines
+ * a person writes rather than a map — and `renderer/lib/mcp.ts` turns it into
+ * the shape a run mounts. Each field carries its own fallback, so a server
+ * added before a field existed still reads as a complete server.
+ */
+export const mcpServerSettings = z.object({
+  /** A local process, spawned by the app, or a remote endpoint. */
+  transport: z.enum(["stdio", "http"]).catch("stdio"),
+  /** stdio: the whole command line, e.g. `npx -y some-mcp-server /tmp`.
+   *  Never run through a shell; see `splitCommandLine` in `shared/mcp.ts`. */
+  command: z.string().catch(""),
+  /** http: the endpoint's URL. */
+  url: z.string().catch(""),
+  /** http: extra request headers, one `Name: value` per line. */
+  headers: z.string().catch(""),
+  /** Whether a run mounts this server by default. A custom run can turn an
+   *  enabled one off for itself without editing the setting. */
+  enabled: z.boolean().catch(true),
+});
+
+export type McpServerSettings = z.infer<typeof mcpServerSettings>;
+
+/**
  * The persisted settings, as a schema. The `Settings` type and the defaults
  * are both derived from it, and hydration parses through it, so adding a
  * field is one edit here rather than five — and a stored value is validated
@@ -88,10 +114,7 @@ function field<T extends z.ZodTypeAny>(
  */
 const settingsSchema = z.object({
   /** Left-hand gutter beside each chat block. */
-  lineNumber: field(
-    z.enum(["off", "absolute", "relative"]),
-    "absolute",
-  ),
+  lineNumber: field(z.enum(["off", "absolute", "relative"]), "absolute"),
   /** Whether preformatted content, code and a tool's output, wraps instead
    *  of scrolling sideways. */
   wordWrap: field(z.enum(["off", "on"]), "off"),
@@ -158,6 +181,14 @@ const settingsSchema = z.object({
   summNoPromptTemplates: field(z.boolean(), true),
   summNoThemes: field(z.boolean(), true),
   summNoContextFiles: field(z.boolean(), false),
+  /** The MCP servers the app may mount, keyed by the name a server's tools
+   *  are namespaced under. Every run reads this list: an enabled server is
+   *  mounted on each agent run (inference, or a summary that rides the
+   *  agent), and each connection lives only as long as its run. Keyed rather
+   *  than listed so that a server keeps its name and its settings while a
+   *  person edits one field, and so the settings page can give each one its
+   *  own section. */
+  mcpServers: field(z.record(z.string(), mcpServerSettings), {}),
   /** Whether a summarization run (`s` / `S`) goes through the pi agent
    *  instead of a plain LLM call. Off keeps the read-only compress-and-
    *  reply behavior; on mounts the whole harness, so the `summNo…` rows
@@ -228,6 +259,12 @@ type SettingsContextValue = {
   setWordWrap: (mode: WordWrapMode) => void;
   setFontSize: (size: number) => void;
   setAiEndpoint: (value: string) => void;
+  /** Names a new MCP server. It appears as an empty `stdio` one, which no
+   *  run mounts until it has a command. */
+  addMcpServer: (name: string) => void;
+  /** Merges one field into one server's settings, leaving the rest alone. */
+  setMcpServer: (name: string, patch: Partial<McpServerSettings>) => void;
+  removeMcpServer: (name: string) => void;
   setAiApiKey: (value: string) => void;
   setInferDefaultModel: (value: string) => void;
   setInferNoExtensions: (value: boolean) => void;
@@ -319,6 +356,43 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   );
   const setAiEndpoint = useCallback(
     (value: string) => set("aiEndpoint", value),
+    [set],
+  );
+  /** Adds one MCP server under `name`, complete and empty, so the settings
+   *  page can render its rows the moment it is typed. A name already in use
+   *  is left as it is: renaming is deleting and adding, not overwriting a
+   *  server that may already be configured. */
+  const addMcpServer = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      if (current.settings.mcpServers[trimmed]) return;
+      set("mcpServers", {
+        ...current.settings.mcpServers,
+        [trimmed]: mcpServerSettings.parse({}),
+      });
+    },
+    [set],
+  );
+  const setMcpServer = useCallback(
+    (name: string, patch: Partial<McpServerSettings>) => {
+      set("mcpServers", {
+        ...current.settings.mcpServers,
+        [name]: {
+          ...mcpServerSettings.parse({}),
+          ...current.settings.mcpServers[name],
+          ...patch,
+        },
+      });
+    },
+    [set],
+  );
+  const removeMcpServer = useCallback(
+    (name: string) => {
+      const next = { ...current.settings.mcpServers };
+      delete next[name];
+      set("mcpServers", next);
+    },
     [set],
   );
   const setAiApiKey = useCallback(
@@ -430,6 +504,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setWordWrap,
       setFontSize,
       setAiEndpoint,
+      addMcpServer,
+      setMcpServer,
+      removeMcpServer,
       setAiApiKey,
       setInferDefaultModel,
       setProviderField,
@@ -458,6 +535,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       setWordWrap,
       setFontSize,
       setAiEndpoint,
+      addMcpServer,
+      setMcpServer,
+      removeMcpServer,
       setAiApiKey,
       setInferDefaultModel,
       setProviderField,

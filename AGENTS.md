@@ -303,6 +303,23 @@ summarization) or creates a full pi session with our custom tools
   spawner to require a final answer that stands on its own, and
   `SUBAGENT_ANSWER_NOTE` says the same to the subagent in its own context, so
   the contract holds even when the instruction forgets it.
+- MCP servers are mounted beside the other tools, and only for the length of
+  the run. `main/lib/mcp.ts` connects to each server the request names
+  (`shared/mcp.ts` is the wire shape; the settings page keeps the same
+  servers as flat text rows, and `renderer/lib/mcp.ts` turns them into
+  connections), lists what each offers, and wraps every tool as
+  `<server>__<tool>` with the server's own JSON Schema passed through — the
+  harness validates a plain JSON Schema exactly as it does a TypeBox one, so
+  a server's parameters need no translation. A call is forwarded and its
+  result read for the two parts a tool result can carry, text and a picture;
+  anything else is described by its kind rather than dropped. A server that
+  cannot be reached fails the run and names itself, because a run configured
+  to have a server's tools and quietly running without them would answer as
+  though the work had been done with less than it had. Every connection is
+  closed in `runAgent`'s `finally`, so a cancelled or failed run leaves no
+  child process behind. The servers live in the inference settings (one
+  on/off per server), and the `X`/`S` dialog narrows that list for one run
+  without editing it.
 - A run can stop partway. A tool that calls `ctx.wait(kind, data, label)`
   materializes that block and leaves the agent loop parked inside its own call;
   `runAgent` emits a `wait` event (not `block`), and the caller resolves it
